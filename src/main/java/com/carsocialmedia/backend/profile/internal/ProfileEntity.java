@@ -1,6 +1,8 @@
 package com.carsocialmedia.backend.profile.internal;
 
 import com.carsocialmedia.backend.profile.ProfileDto;
+import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
+import com.carsocialmedia.backend.profile.PublicProfileDto;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -35,6 +37,18 @@ class ProfileEntity {
                 id, role, name, username, avatarUrl, bio,
                 externalLink, followersCount, followingCount,
                 isVerified, isBusiness, requiresOnboarding
+        );
+    }
+
+    ProfileSearchResultDto toSearchResultDto() {
+        return new ProfileSearchResultDto(id, username, avatarUrl);
+    }
+
+    PublicProfileDto toPublicDto() {
+        return new PublicProfileDto(
+                id, name, username, avatarUrl, bio,
+                externalLink, followersCount, followingCount,
+                isVerified, isBusiness
         );
     }
 }
