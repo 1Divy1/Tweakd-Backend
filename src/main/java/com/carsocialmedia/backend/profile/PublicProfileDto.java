@@ -2,9 +2,8 @@ package com.carsocialmedia.backend.profile;
 
 import java.util.UUID;
 
-public record ProfileDto(
+public record PublicProfileDto(
         UUID id,
-        String role,
         String name,
         String username,
         String avatarUrl,
@@ -14,6 +13,5 @@ public record ProfileDto(
         int followingCount,
         boolean isVerified,
         boolean isBusiness,
-        boolean isPrivate,
-        boolean requiresOnboarding
+        boolean isPrivate
 ) {}
