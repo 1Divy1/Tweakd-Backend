@@ -14,5 +14,6 @@ public record ProfileDto(
         int followingCount,
         boolean isVerified,
         boolean isBusiness,
+        boolean isPrivate,
         boolean requiresOnboarding
 ) {}

@@ -30,13 +30,14 @@ class ProfileEntity {
     private int followingCount;
     private boolean isVerified;
     private boolean isBusiness;
+    private boolean isPrivate;
     private boolean requiresOnboarding;
 
     ProfileDto toDto() {
         return new ProfileDto(
                 id, role, name, username, avatarUrl, bio,
                 externalLink, followersCount, followingCount,
-                isVerified, isBusiness, requiresOnboarding
+                isVerified, isBusiness, isPrivate, requiresOnboarding
         );
     }
 
@@ -48,7 +49,7 @@ class ProfileEntity {
         return new PublicProfileDto(
                 id, name, username, avatarUrl, bio,
                 externalLink, followersCount, followingCount,
-                isVerified, isBusiness
+                isVerified, isBusiness, isPrivate
         );
     }
 }
