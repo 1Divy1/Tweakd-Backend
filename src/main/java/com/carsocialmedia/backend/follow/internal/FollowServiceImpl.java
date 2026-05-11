@@ -10,6 +10,8 @@ import com.carsocialmedia.backend.follow.exception.PrivateProfileException;
 import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,9 @@ class FollowServiceImpl implements FollowService {
 
     private final FollowRepository followRepository;
     private final ProfileService profileService;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     FollowServiceImpl(FollowRepository followRepository,
                       ProfileService profileService) {
@@ -55,13 +60,14 @@ class FollowServiceImpl implements FollowService {
         entity.setId(id);
         // status is set by the BEFORE INSERT trigger in Supabase based on the
         // target's is_private flag; we deliberately leave it null here.
-        followRepository.saveAndFlush(entity);
+        FollowEntity saved = followRepository.saveAndFlush(entity);
 
-        // Re-read to learn what the trigger decided.
-        FollowEntity persisted = followRepository.findById(id)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Follow row vanished immediately after insert: " + id));
-        return new FollowStatusDto(toStatus(persisted.getStatus()));
+        // The INSERT is flushed but the managed entity still holds the null status
+        // we wrote — the trigger's value never round-tripped back. refresh() forces
+        // a SELECT so the trigger-set value becomes visible. We refresh the entity
+        // returned by saveAndFlush (the managed one), not the original reference.
+        entityManager.refresh(saved);
+        return new FollowStatusDto(toStatus(saved.getStatus()));
     }
 
     @Override

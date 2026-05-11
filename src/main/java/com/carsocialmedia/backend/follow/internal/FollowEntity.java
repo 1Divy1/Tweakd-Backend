@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.follow.internal;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
@@ -25,5 +26,7 @@ class FollowEntity {
      */
     private String status;
 
+    // DB-managed: DEFAULT now() in Supabase. Omitting from INSERT lets the default fire.
+    @Column(insertable = false, updatable = false)
     private Instant createdAt;
 }
