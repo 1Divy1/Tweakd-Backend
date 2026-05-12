@@ -1,6 +1,6 @@
 package com.carsocialmedia.backend.follow.internal;
 
-import com.carsocialmedia.backend.profile.ProfileBecamePublicEvent;
+import com.carsocialmedia.backend.profile.event.ProfileBecamePublicEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 

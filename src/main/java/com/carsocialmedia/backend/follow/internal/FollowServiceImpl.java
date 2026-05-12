@@ -1,14 +1,14 @@
 package com.carsocialmedia.backend.follow.internal;
 
-import com.carsocialmedia.backend.follow.FollowRequestDto;
 import com.carsocialmedia.backend.follow.FollowService;
-import com.carsocialmedia.backend.follow.FollowStatus;
-import com.carsocialmedia.backend.follow.FollowStatusDto;
+import com.carsocialmedia.backend.follow.dto.FollowRequestDto;
+import com.carsocialmedia.backend.follow.dto.FollowStatus;
+import com.carsocialmedia.backend.follow.dto.FollowStatusDto;
 import com.carsocialmedia.backend.follow.exception.CannotFollowSelfException;
 import com.carsocialmedia.backend.follow.exception.FollowRequestNotFoundException;
 import com.carsocialmedia.backend.follow.exception.PrivateProfileException;
-import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.ProfileService;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;

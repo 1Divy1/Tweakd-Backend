@@ -1,6 +1,8 @@
 package com.carsocialmedia.backend.follow;
 
-import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
+import com.carsocialmedia.backend.follow.dto.FollowRequestDto;
+import com.carsocialmedia.backend.follow.dto.FollowStatusDto;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 
 import java.util.List;
 
