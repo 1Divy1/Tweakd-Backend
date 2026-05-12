@@ -1,0 +1,54 @@
+package com.carsocialmedia.backend.garage.internal.controllers;
+
+import com.carsocialmedia.backend.garage.GarageService;
+import com.carsocialmedia.backend.garage.dto.CarModificationDto;
+import com.carsocialmedia.backend.garage.dto.CarModificationRequest;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/v1/garage/cars/{carId}/modifications")
+public class CarModificationController {
+
+    private final GarageService garageService;
+
+    public CarModificationController(GarageService garageService) {
+        this.garageService = garageService;
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public CarModificationDto addModification(@AuthenticationPrincipal Jwt jwt,
+                                              @PathVariable UUID carId,
+                                              @Valid @RequestBody CarModificationRequest request) {
+        return garageService.addModification(jwt.getSubject(), carId, request);
+    }
+
+    @PutMapping("/{modificationId}")
+    public CarModificationDto updateModification(@AuthenticationPrincipal Jwt jwt,
+                                                 @PathVariable UUID carId,
+                                                 @PathVariable UUID modificationId,
+                                                 @Valid @RequestBody CarModificationRequest request) {
+        return garageService.updateModification(jwt.getSubject(), carId, modificationId, request);
+    }
+
+    @DeleteMapping("/{modificationId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteModification(@AuthenticationPrincipal Jwt jwt,
+                                   @PathVariable UUID carId,
+                                   @PathVariable UUID modificationId) {
+        garageService.deleteModification(jwt.getSubject(), carId, modificationId);
+    }
+}

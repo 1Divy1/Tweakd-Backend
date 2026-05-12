@@ -16,6 +16,7 @@ Manages follow relationships between users. Owns the `follows` table. Depends on
 | `rejectRequest(currentUserId, requesterUsername)` | Reject (delete) a pending request |
 | `getFollowers(currentUserId, targetUsername)` | Accepted followers of target (privacy-gated) |
 | `getFollowing(currentUserId, targetUsername)` | Users that target follows (privacy-gated) |
+| `isAcceptedFollower(viewerId, targetId)` | Whether the viewer is an accepted follower of the target. Sibling-module hook (used by `garage` to gate private garages) |
 
 ### DTOs / records
 
