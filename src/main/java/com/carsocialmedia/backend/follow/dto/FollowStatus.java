@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.follow;
+package com.carsocialmedia.backend.follow.dto;
 
 /**
  * Relationship status from the perspective of the current user toward a target user.
