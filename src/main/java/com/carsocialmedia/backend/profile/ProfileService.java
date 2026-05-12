@@ -1,5 +1,10 @@
 package com.carsocialmedia.backend.profile;
 
+import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
+import com.carsocialmedia.backend.profile.dto.ProfileDto;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
+import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
+
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;

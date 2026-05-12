@@ -17,36 +17,16 @@ The app reads secrets from `.env` at the project root (loaded via `spring.config
 
 ## Architecture
 
-Spring Boot 4 + **Spring Modulith** project. Module boundaries are enforced by `ModularityTests` — adding cross-module references that violate the rules will fail that test, not the compiler.
+See [`CONTEXT.md`](CONTEXT.md) for the full architecture overview and module READMEs for module-specific details.
 
-### Module layout convention
+### Rules to enforce
 
-Each top-level package under `com.carsocialmedia.backend` is a Spring Modulith `@ApplicationModule` declared in its `package-info.java`. The convention used by the `profile` module is the standard one to follow for new modules:
-
-- **Module root package** (e.g. `profile/`) — the **public API** of the module: service interfaces (`ProfileService`), DTOs/records (`ProfileDto`). Other modules may depend on these.
-- **`internal/` subpackage** (e.g. `profile/internal/`) — implementation details: `@RestController`, `@Service` impl, JPA `@Entity`, `JpaRepository`. These are package-private and **not visible to other modules** under Modulith rules. Do not make them `public` to work around access errors — that defeats the boundary.
-
-The `shared` module is declared `type = ApplicationModule.Type.OPEN`, meaning any module may depend on anything inside it (used for cross-cutting concerns like security config). Keep it small.
-
-### Security
-
-`shared/security/SecurityConfig.java` configures stateless JWT auth via Supabase as an OAuth2 resource server. Key points:
-
-- All requests require auth except `/public/**`; `/admin/**` requires `ROLE_ADMIN`.
-- Roles are extracted from the JWT's `app_metadata.role` claim and prefixed with `ROLE_`. Missing claim → `ROLE_USER`.
-- In controllers, get the Supabase user ID with `@AuthenticationPrincipal Jwt jwt` then `jwt.getSubject()` — that subject is the UUID primary key of `profiles.id`.
-- `@EnableMethodSecurity` is on, so `@PreAuthorize` works on service/controller methods.
-
-### Persistence
-
-- Postgres (Supabase-hosted), JPA/Hibernate.
-- `hibernate.ddl-auto: validate` — **the schema is owned by Supabase, not the app**. Do not add `@GeneratedValue` strategies that assume Hibernate creates tables, and do not change entity columns without a corresponding Supabase migration. JPA will fail at startup if the entity and DB diverge.
-- `open-in-view: false` — lazy associations must be resolved inside `@Transactional` boundaries (typically the service layer), not in controllers/serializers.
-
-### REST conventions
-
-- Base path: `/api/v1/<module>/...` (see `ProfileController`).
-- Controllers stay thin: pull `userId` from the JWT, delegate to a service interface from the module's public API, return DTO records.
+- **Module boundaries** — do not make types in `internal/` subpackages `public` to work around a cross-module access error. That defeats the Modulith boundary. Fix the design instead.
+- **Schema ownership** — the DB schema is owned by Supabase, not Hibernate (`ddl-auto: validate`). Do not add `@GeneratedValue` strategies that assume Hibernate creates tables. Do not change entity columns without a corresponding Supabase migration — a divergence crashes startup.
+- **Lazy loading** — `open-in-view: false`. Resolve lazy associations inside `@Transactional` boundaries (service layer), never in controllers or serializers.
+- **JWT user ID** — in controllers, get the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the UUID primary key of `profiles.id`.
+- **Controllers stay thin** — extract `userId` from the JWT, delegate to the module's service interface, return DTO records. No business logic in controllers.
+- **REST base path** — `/api/v1/<module>/...`
 
 ## Lombok
 

@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.profile;
+package com.carsocialmedia.backend.profile.event;
 
 import java.util.UUID;
 

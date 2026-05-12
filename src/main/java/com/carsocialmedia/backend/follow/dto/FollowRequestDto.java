@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.follow;
+package com.carsocialmedia.backend.follow.dto;
 
 import java.time.Instant;
 import java.util.UUID;

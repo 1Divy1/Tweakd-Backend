@@ -1,8 +1,8 @@
 package com.carsocialmedia.backend.profile.internal;
 
-import com.carsocialmedia.backend.profile.ProfileDto;
-import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
-import com.carsocialmedia.backend.profile.PublicProfileDto;
+import com.carsocialmedia.backend.profile.dto.ProfileDto;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
+import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;

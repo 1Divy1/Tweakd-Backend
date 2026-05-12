@@ -1,11 +1,11 @@
 package com.carsocialmedia.backend.profile.internal;
 
-import com.carsocialmedia.backend.profile.OnboardingRequest;
-import com.carsocialmedia.backend.profile.PrivacyRequest;
-import com.carsocialmedia.backend.profile.ProfileDto;
-import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.ProfileService;
-import com.carsocialmedia.backend.profile.PublicProfileDto;
+import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
+import com.carsocialmedia.backend.profile.dto.PrivacyRequest;
+import com.carsocialmedia.backend.profile.dto.ProfileDto;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
+import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;

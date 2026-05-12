@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.profile;
+package com.carsocialmedia.backend.profile.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;

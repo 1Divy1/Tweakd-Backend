@@ -1,11 +1,11 @@
 package com.carsocialmedia.backend.profile.internal;
 
-import com.carsocialmedia.backend.profile.OnboardingRequest;
-import com.carsocialmedia.backend.profile.ProfileBecamePublicEvent;
-import com.carsocialmedia.backend.profile.ProfileDto;
-import com.carsocialmedia.backend.profile.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.ProfileService;
-import com.carsocialmedia.backend.profile.PublicProfileDto;
+import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
+import com.carsocialmedia.backend.profile.dto.ProfileDto;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
+import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
+import com.carsocialmedia.backend.profile.event.ProfileBecamePublicEvent;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.profile.exception.UsernameAlreadyTakenException;
 import org.springframework.context.ApplicationEventPublisher;
