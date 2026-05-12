@@ -193,6 +193,13 @@ class FollowServiceImpl implements FollowService {
         return hydrateInOrder(followingIds);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isAcceptedFollower(UUID viewerId, UUID targetId) {
+        return followRepository
+                .existsByIdFollowerIdAndIdFollowingIdAndStatus(viewerId, targetId, STATUS_ACCEPTED);
+    }
+
     // ---------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------

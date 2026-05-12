@@ -5,6 +5,7 @@ import com.carsocialmedia.backend.follow.dto.FollowStatusDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface FollowService {
 
@@ -50,4 +51,10 @@ public interface FollowService {
      * {@link #getFollowers(String, String)}.
      */
     List<ProfileSearchResultDto> getFollowing(String currentUserId, String targetUsername);
+
+    /**
+     * Whether {@code viewerId} is an accepted follower of {@code targetId}. Sibling modules
+     * use this to gate access to private content (e.g. another user's garage).
+     */
+    boolean isAcceptedFollower(UUID viewerId, UUID targetId);
 }
