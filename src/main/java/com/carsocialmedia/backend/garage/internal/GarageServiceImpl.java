@@ -443,7 +443,6 @@ class GarageServiceImpl implements GarageService {
         return new GarageDto(
                 garage.getId(),
                 garage.getOwnerId(),
-                garage.getName(),
                 garage.getCreatedAt(),
                 cars);
     }

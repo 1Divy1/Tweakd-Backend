@@ -9,14 +9,12 @@ import java.util.UUID;
  *
  * @param id the garage ID
  * @param ownerId the UUID of the garage owner (profile.id)
- * @param name the garage name
  * @param createdAt when the garage was created (managed by Supabase)
  * @param cars list of car summaries in the garage (compact projection for list view)
  */
 public record GarageDto(
         UUID id,
         UUID ownerId,
-        String name,
         Instant createdAt,
         List<CarSummaryDto> cars
 ) {}

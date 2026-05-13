@@ -30,9 +30,6 @@ public class GarageEntity {
     @Column(name = "owner_id")
     private UUID ownerId;
 
-    /** The garage name (display label for the user's car collection). */
-    private String name;
-
     /** When the garage was created (managed by Supabase, read-only). */
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
