@@ -27,6 +27,7 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
               from CarEntity c
               join fetch c.brand
               join fetch c.model
+              join fetch c.status
              where c.garage.id = :garageId
              order by c.createdAt desc
             """)
@@ -45,6 +46,7 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
               join fetch c.drivetrain
               join fetch c.color
               join fetch c.mileageUnit
+              join fetch c.status
              where c.id = :id
             """)
     Optional<CarEntity> findDetailById(@Param("id") UUID id);

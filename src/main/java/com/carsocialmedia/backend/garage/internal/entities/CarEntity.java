@@ -62,6 +62,11 @@ public class CarEntity {
     @JoinColumn(name = "mileage_unit_id")
     private CarDistanceUnitEntity mileageUnit;
 
+    /** The car's status/role (required, FK to car_status_options.id, e.g., daily driver). */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "status_id")
+    private CarStatusOptionEntity status;
+
     /** The year the car was manufactured (1900-2100). */
     private int year;
 

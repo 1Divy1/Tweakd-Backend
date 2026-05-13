@@ -321,12 +321,15 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new InvalidReferenceException("Unknown color id: " + req.colorId()));
         CarDistanceUnitEntity unit = distanceUnitRepository.findById(req.mileageUnitId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown mileage unit id: " + req.mileageUnitId()));
+        CarStatusOptionEntity status = statusOptionRepository.findById(req.statusId())
+                .orElseThrow(() -> new InvalidReferenceException("Unknown status id: " + req.statusId()));
 
         car.setBrand(brand);
         car.setModel(model);
         car.setDrivetrain(drivetrain);
         car.setColor(color);
         car.setMileageUnit(unit);
+        car.setStatus(status);
         car.setYear(req.year());
         car.setHorsepower(req.horsepower());
         car.setTorque(req.torque());
@@ -438,7 +441,8 @@ class GarageServiceImpl implements GarageService {
                         c.getId(),
                         c.getBrand().getName(),
                         c.getModel().getModel(),
-                        c.getCoverImageUrl()))
+                        c.getCoverImageUrl(),
+                        toStatusOptionDto(c.getStatus())))
                 .toList();
         return new GarageDto(
                 garage.getId(),
@@ -487,7 +491,12 @@ class GarageServiceImpl implements GarageService {
                 car.getEngineCode(),
                 car.getCoverImageUrl(),
                 car.getCreatedAt(),
+                toStatusOptionDto(car.getStatus()),
                 modDtos);
+    }
+
+    private CarStatusOptionDto toStatusOptionDto(CarStatusOptionEntity s) {
+        return new CarStatusOptionDto(s.getId(), s.getType());
     }
 
     /**

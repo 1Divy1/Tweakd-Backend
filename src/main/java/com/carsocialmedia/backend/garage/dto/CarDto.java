@@ -34,6 +34,7 @@ import java.util.UUID;
  * @param engineCode internal engine code
  * @param coverImageUrl URL to the car's cover/hero image
  * @param createdAt when the car was added to the garage
+ * @param status the car's status option (e.g., daily driver, weekend cruiser); nullable
  * @param modifications list of modifications (upgrades) made to this car
  */
 public record CarDto(
@@ -60,5 +61,6 @@ public record CarDto(
         String engineCode,
         String coverImageUrl,
         Instant createdAt,
+        CarStatusOptionDto status,
         List<CarModificationDto> modifications
 ) {}
