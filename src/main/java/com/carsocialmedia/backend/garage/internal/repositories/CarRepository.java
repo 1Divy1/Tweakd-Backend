@@ -9,6 +9,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * Repository for {@link CarEntity} persistence operations.
+ *
+ * Provides CRUD operations and custom queries optimized for garage and car views.
+ * Custom queries use join fetch to eagerly load references within the transaction,
+ * avoiding lazy-loading issues when mapping to DTOs.
+ */
 public interface CarRepository extends JpaRepository<CarEntity, UUID> {
 
     /**

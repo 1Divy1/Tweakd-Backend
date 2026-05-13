@@ -18,6 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+/**
+ * REST endpoints for car modifications (upgrades, parts, customizations).
+ *
+ * Modifications record changes or upgrades made to a car, including before/after
+ * images, installation date, cost, and category. Price visibility respects the
+ * owner's privacy setting (isPricePublic flag).
+ */
 @RestController
 @RequestMapping("/api/v1/garage/cars/{carId}/modifications")
 public class CarModificationController {
@@ -28,6 +35,16 @@ public class CarModificationController {
         this.garageService = garageService;
     }
 
+    /**
+     * Adds a new modification to a car owned by the current user.
+     *
+     * @param carId the car ID
+     * @param request the modification details (category, title, images, date, price, etc.)
+     * @return the newly created modification
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     * @throws InvalidReferenceException if the modification category does not exist
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public CarModificationDto addModification(@AuthenticationPrincipal Jwt jwt,
@@ -36,6 +53,19 @@ public class CarModificationController {
         return garageService.addModification(jwt.getSubject(), carId, request);
     }
 
+    /**
+     * Updates a modification on a car owned by the current user (full replacement).
+     *
+     * @param carId the car ID
+     * @param modificationId the modification ID
+     * @param request the updated modification details
+     * @return the updated modification
+     * @throws CarNotFoundException if the car does not exist
+     * @throws CarModificationNotFoundException if the modification does not exist or
+     *         does not belong to the specified car
+     * @throws NotCarOwnerException if the current user is not the car owner
+     * @throws InvalidReferenceException if the category ID is invalid
+     */
     @PutMapping("/{modificationId}")
     public CarModificationDto updateModification(@AuthenticationPrincipal Jwt jwt,
                                                  @PathVariable UUID carId,
@@ -44,6 +74,16 @@ public class CarModificationController {
         return garageService.updateModification(jwt.getSubject(), carId, modificationId, request);
     }
 
+    /**
+     * Deletes a modification from a car owned by the current user.
+     *
+     * @param carId the car ID
+     * @param modificationId the modification ID
+     * @throws CarNotFoundException if the car does not exist
+     * @throws CarModificationNotFoundException if the modification does not exist or
+     *         does not belong to the specified car
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
     @DeleteMapping("/{modificationId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteModification(@AuthenticationPrincipal Jwt jwt,

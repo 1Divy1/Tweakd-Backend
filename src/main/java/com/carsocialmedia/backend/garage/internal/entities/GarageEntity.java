@@ -10,21 +10,30 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * A user's garage (collection of cars and modifications).
+ *
+ * One garage per user. The createdAt is DB-managed (DEFAULT now() in Supabase);
+ * it is read-only from the ORM side (@Column insertable/updatable = false).
+ */
 @Entity
 @Table(name = "garages")
 @Getter
 @Setter
 public class GarageEntity {
 
+    /** The garage ID (UUID, PK). */
     @Id
     private UUID id;
 
+    /** The UUID of the user who owns this garage (references profiles.id). */
     @Column(name = "owner_id")
     private UUID ownerId;
 
+    /** The garage name (display label for the user's car collection). */
     private String name;
 
-    // DB-managed: DEFAULT now() in Supabase. Omitting from INSERT/UPDATE lets the default fire.
+    /** When the garage was created (managed by Supabase, read-only). */
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
 }

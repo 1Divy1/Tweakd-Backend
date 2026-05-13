@@ -290,6 +290,21 @@ class GarageServiceImpl implements GarageService {
     // helpers
     // -------------------------------------------------------------------
 
+    /**
+     * Applies a car request (create or update) to a car entity, resolving all reference
+     * IDs and validating consistency constraints.
+     *
+     * Validates that:
+     * <ul>
+     *   <li>Brand exists</li>
+     *   <li>Model exists and belongs to the selected brand</li>
+     *   <li>Drivetrain, color, and mileage unit exist</li>
+     * </ul>
+     *
+     * @param car the entity to populate (mutated in-place)
+     * @param req the request payload with validated specs and reference IDs
+     * @throws InvalidReferenceException if any lookup table row doesn't exist or is inconsistent
+     */
     private void applyCarRequest(CarEntity car, CarRequest req) {
         CarBrandEntity brand = brandRepository.findById(req.brandId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown brand id: " + req.brandId()));
@@ -323,6 +338,14 @@ class GarageServiceImpl implements GarageService {
         car.setCoverImageUrl(req.coverImageUrl());
     }
 
+    /**
+     * Applies a modification request (create or update) to a modification entity,
+     * resolving the category reference and copying all fields.
+     *
+     * @param mod the entity to populate (mutated in-place)
+     * @param req the request payload with validated details
+     * @throws InvalidReferenceException if the modification category doesn't exist
+     */
     private void applyModificationRequest(CarModificationEntity mod, CarModificationRequest req) {
         CarModCategoryEntity category = modCategoryRepository.findById(req.categoryId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown modification category id: " + req.categoryId()));
@@ -338,12 +361,38 @@ class GarageServiceImpl implements GarageService {
         mod.setMileageAtInstall(req.mileageAtInstall());
     }
 
+    /**
+     * Verifies that the given user is the owner of the car.
+     *
+     * Used for all car mutations (update, delete, add/update/delete modifications).
+     * Only the car owner can modify a car.
+     *
+     * @param car the car entity
+     * @param userId the user ID to check
+     * @throws NotCarOwnerException if the user is not the car owner
+     */
     private void ensureOwnership(CarEntity car, UUID userId) {
         if (!car.getGarage().getOwnerId().equals(userId)) {
             throw new NotCarOwnerException();
         }
     }
 
+    /**
+     * Verifies that the viewer has permission to access the garage based on the owner's
+     * privacy settings and follow relationship.
+     *
+     * Rules:
+     * <ul>
+     *   <li>If viewer == owner: always allowed</li>
+     *   <li>If owner's profile is public: always allowed</li>
+     *   <li>If owner's profile is private: only allowed if viewer is an accepted follower</li>
+     * </ul>
+     *
+     * @param viewerId the user ID requesting access
+     * @param ownerId the garage owner's user ID
+     * @param username the garage owner's username (for error message)
+     * @throws PrivateGarageException if access is denied
+     */
     private void ensureCanViewGarage(UUID viewerId, UUID ownerId, String username) {
         if (viewerId.equals(ownerId)) {
             return;
@@ -356,7 +405,15 @@ class GarageServiceImpl implements GarageService {
         }
     }
 
-    /** Same gate as {@link #ensureCanViewGarage} but used when the username isn't on hand. */
+    /**
+     * Verifies that the viewer has permission to access the garage based on the owner's
+     * privacy settings and follow relationship. Same gate as {@link #ensureCanViewGarage}
+     * but used when the username is not available.
+     *
+     * @param viewerId the user ID requesting access
+     * @param ownerId the garage owner's user ID
+     * @throws PrivateGarageException if access is denied
+     */
     private void ensureCanViewGarageById(UUID viewerId, UUID ownerId) {
         if (!profileService.isPrivate(ownerId)) {
             return;
@@ -366,15 +423,22 @@ class GarageServiceImpl implements GarageService {
         }
     }
 
+    /**
+     * Converts a garage entity to a DTO with a list of car summaries.
+     *
+     * The car list is fetched with a specialized query ({@link CarRepository#findGarageSummary})
+     * that eagerly loads brand and model to avoid N+1 queries when building summaries.
+     *
+     * @param garage the garage entity
+     * @return the garage DTO with car summaries
+     */
     private GarageDto toGarageDto(GarageEntity garage) {
         List<CarSummaryDto> cars = carRepository.findGarageSummary(garage.getId()).stream()
                 .map(c -> new CarSummaryDto(
                         c.getId(),
                         c.getBrand().getName(),
                         c.getModel().getModel(),
-                        c.getYear(),
-                        c.getCoverImageUrl(),
-                        c.getCreatedAt()))
+                        c.getCoverImageUrl()))
                 .toList();
         return new GarageDto(
                 garage.getId(),
@@ -384,6 +448,18 @@ class GarageServiceImpl implements GarageService {
                 cars);
     }
 
+    /**
+     * Converts a car entity to a DTO with all specifications and modifications.
+     *
+     * Denormalizes reference values (e.g., brandId + brandName) so the client has both
+     * the ID (for form state) and display label (for rendering) without needing separate
+     * lookups. Converts modification prices based on ownership and privacy settings.
+     *
+     * @param car the car entity (with all references eagerly loaded)
+     * @param mods the list of modifications for this car
+     * @param isOwner whether the current user is the car owner (used for price privacy)
+     * @return the car DTO with all specifications and modifications
+     */
     private CarDto toCarDto(CarEntity car, List<CarModificationEntity> mods, boolean isOwner) {
         List<CarModificationDto> modDtos = mods.stream()
                 .map(m -> toModificationDto(m, isOwner))
@@ -415,6 +491,20 @@ class GarageServiceImpl implements GarageService {
                 modDtos);
     }
 
+    /**
+     * Converts a modification entity to a DTO, respecting price visibility.
+     *
+     * Price visibility rules:
+     * <ul>
+     *   <li>If current user is the car owner: price is always visible</li>
+     *   <li>If modification is marked public: price is visible to everyone</li>
+     *   <li>Otherwise: price is null (hidden from non-owners)</li>
+     * </ul>
+     *
+     * @param mod the modification entity
+     * @param isOwner whether the current user is the car owner
+     * @return the modification DTO with privacy-controlled price visibility
+     */
     private CarModificationDto toModificationDto(CarModificationEntity mod, boolean isOwner) {
         // Hide the price from non-owners when the owner marked it private.
         Float price = (isOwner || mod.isPricePublic()) ? mod.getPrice() : null;
