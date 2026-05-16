@@ -8,8 +8,25 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Repository for {@link CarModificationEntity} persistence operations.
+ *
+ * Provides CRUD operations and custom queries for modifications.
+ * Custom queries use join fetch to eagerly load the category reference,
+ * preventing lazy-loading issues during DTO mapping.
+ */
 public interface CarModificationRepository extends JpaRepository<CarModificationEntity, UUID> {
 
+    /**
+     * Finds all modifications for a car, ordered by installation date (newest first),
+     * then by creation date.
+     *
+     * Uses join fetch to eagerly load the category to prevent lazy-loading exceptions
+     * during serialization.
+     *
+     * @param carId the car ID
+     * @return list of modifications for the car, ordered by installation date desc
+     */
     @Query("""
             select m
               from CarModificationEntity m
