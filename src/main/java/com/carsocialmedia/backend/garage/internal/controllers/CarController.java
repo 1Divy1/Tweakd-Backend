@@ -3,6 +3,9 @@ package com.carsocialmedia.backend.garage.internal.controllers;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.CarRequest;
+import com.carsocialmedia.backend.garage.dto.CreateCarRequest;
+import com.carsocialmedia.backend.garage.dto.CreateCarResponse;
+import com.carsocialmedia.backend.garage.dto.UploadSlot;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,17 +40,19 @@ public class CarController {
     }
 
     /**
-     * Adds a new car to the current user's garage.
+     * Creates a car, its modifications, and gallery slots in one submission, returning
+     * presigned upload URLs for every photo. The client uploads bytes directly afterwards
+     * and rolls back via DELETE on any failure.
      *
-     * @param request the car details (brand, model, drivetrain, color, specs, etc.)
-     * @return the newly created car with all resolved references and an empty modifications list
+     * @param request the car, its modifications, and the gallery slot count
+     * @return the created car plus cover / before-after / gallery upload slots
      * @throws InvalidReferenceException if any referenced ID (brand, model, drivetrain, etc.)
      *         does not exist or is inconsistent (e.g., model doesn't belong to brand)
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CarDto addCar(@AuthenticationPrincipal Jwt jwt,
-                         @Valid @RequestBody CarRequest request) {
+    public CreateCarResponse addCar(@AuthenticationPrincipal Jwt jwt,
+                                    @Valid @RequestBody CreateCarRequest request) {
         return garageService.addCar(jwt.getSubject(), request);
     }
 
@@ -95,5 +100,20 @@ public class CarController {
     public CarDto getCar(@AuthenticationPrincipal Jwt jwt,
                          @PathVariable UUID carId) {
         return garageService.getCar(jwt.getSubject(), carId);
+    }
+
+    /**
+     * Returns a fresh presigned upload URL for the car's cover image. Use this when the
+     * original URL from car creation has expired or the cover needs to be replaced.
+     *
+     * @param carId the car ID
+     * @return an upload slot with the existing path and a new presigned URL
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    @PostMapping("/{carId}/cover-upload-url")
+    public UploadSlot refreshCoverUploadUrl(@AuthenticationPrincipal Jwt jwt,
+                                            @PathVariable UUID carId) {
+        return garageService.refreshCoverUploadUrl(jwt.getSubject(), carId);
     }
 }

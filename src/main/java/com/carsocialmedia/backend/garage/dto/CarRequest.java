@@ -30,7 +30,6 @@ import java.util.UUID;
  * @param zeroToOneHundred 0-100 km/h acceleration time in seconds (nullable)
  * @param chassisCode internal chassis/body code (e.g., F80, F82), max 50 chars
  * @param engineCode internal engine code (e.g., S65B40, M340i), max 50 chars
- * @param coverImageUrl URL to the car's cover/hero image (must be non-blank)
  * @param statusId the car status option ID (optional, e.g., daily driver, weekend cruiser)
  */
 public record CarRequest(
@@ -50,8 +49,6 @@ public record CarRequest(
 
         @Size(max = 50) String chassisCode,
         @Size(max = 50) String engineCode,
-
-        @NotBlank String coverImageUrl,
 
         @NotBlank String statusId
 ) {}

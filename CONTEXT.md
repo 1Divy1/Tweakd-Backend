@@ -37,7 +37,9 @@ com.carsocialmedia.backend/
 ├── follow/           ← public API: service interface, DTOs, enums, exceptions
 │   └── internal/     ← private: controller, service impl, entity, repository, event listener
 ├── garage/           ← public API: service interface, DTOs, exceptions
-│   └── internal/     ← private: controllers, service impl, entities (garage / car / mod / reference), repositories
+│   └── internal/     ← private: controllers, service impl, entities (garage / car / mod / images / reference), repositories
+├── storage/          ← public API: StorageService (presigned URL generation)
+│   └── internal/     ← private: StorageServiceImpl, SupabaseStorageClient, StorageProperties
 └── shared/           ← OPEN module: security config, exception hierarchy, global handler
 ```
 
@@ -82,4 +84,5 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`profile` module](src/main/java/com/carsocialmedia/backend/profile/README.md)
 - [`follow` module](src/main/java/com/carsocialmedia/backend/follow/README.md)
 - [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
+- [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
 - [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)

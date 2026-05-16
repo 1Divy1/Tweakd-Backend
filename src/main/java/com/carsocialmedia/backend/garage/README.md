@@ -17,13 +17,18 @@ users' garages.
 |---|---|
 | `getMyGarage(currentUserId)` | The caller's own garage with car summaries |
 | `getGarageByUsername(currentUserId, username)` | Another user's garage; private profiles gated by follow status |
-| `addCar(currentUserId, CarRequest)` | Creates a car in the caller's garage |
+| `addCar(currentUserId, CreateCarRequest)` | Creates car + mods in one transaction and returns presigned upload URLs for all photos |
 | `updateCar(currentUserId, carId, CarRequest)` | Full replacement of an owned car |
-| `deleteCar(currentUserId, carId)` | Deletes an owned car; mods cascade |
+| `deleteCar(currentUserId, carId)` | Deletes an owned car; mods and gallery images cascade |
 | `getCar(currentUserId, carId)` | Car detail including modifications; privacy-gated |
-| `addModification(currentUserId, carId, CarModificationRequest)` | Adds a mod to an owned car |
+| `addModification(currentUserId, carId, CarModificationRequest)` | Adds a mod to an owned car and returns presigned before/after upload URLs |
 | `updateModification(currentUserId, carId, modificationId, CarModificationRequest)` | Full replacement of an owned mod |
 | `deleteModification(currentUserId, carId, modificationId)` | Deletes an owned mod |
+| `refreshCoverUploadUrl(currentUserId, carId)` | Refreshes the presigned upload URL for a car's cover image |
+| `refreshModificationUploadUrls(currentUserId, carId, modificationId)` | Refreshes presigned upload URLs for a modification's before/after images |
+| `listCarImages(currentUserId, carId)` | Gallery images for a car ordered by display order; privacy-gated |
+| `deleteCarImage(currentUserId, carId, imageId)` | Deletes a gallery image record; only the car owner may delete |
+| `generateCarImageDownloadUrl(currentUserId, storagePath)` | Returns a short-lived presigned download URL after verifying view permission |
 | `listBrands()` / `listModelsByBrand(brandId)` / `listDrivetrains()` / `listColors()` / `listDistanceUnits()` / `listStatusOptions()` / `listModCategories()` | Reference data for client dropdowns |
 
 ### DTOs / records
@@ -34,6 +39,14 @@ users' garages.
 | `CarSummaryDto` | Compact list item (brand, model, year, cover image) |
 | `CarDto` | Full car detail with embedded `CarModificationDto` list |
 | `CarModificationDto` | A single modification |
+| `CreateCarRequest` | Single-shot "add car" payload: car specs + modifications + `galleryCount` (0–50); no file bytes |
+| `CreateCarResponse` | Result of car creation: `CarDto` + `cover` upload slot + per-modification before/after slots + gallery slots |
+| `UploadSlot` | A presigned upload destination: `path` + `uploadUrl` |
+| `ModificationUploadSlots` | Before/after `UploadSlot` pair for one modification, keyed by `modificationId` |
+| `GallerySlot` | `imageId` + `path` + `uploadUrl` for one pre-allocated gallery image |
+| `CarImageDto` | A gallery image record: `id`, `storagePath`, `displayOrder`, `createdAt` |
+| `CarImageDownloadRequest` | Request body for the download-URL endpoint: `storagePath` |
+| `SignedUrlResponse` | Wraps a single short-lived `signedUrl` |
 | `CarRequest` | Create / replace payload for a car (validated) |
 | `CarModificationRequest` | Create / replace payload for a modification (validated; enforces `isPricePublic ⇒ price != null` via `@AssertTrue`) |
 | `CarBrandDto`, `CarModelDto`, `CarDrivetrainDto`, `CarColorDto`, `CarDistanceUnitDto`, `CarStatusOptionDto`, `CarModCategoryDto` | Reference data |
@@ -45,9 +58,11 @@ users' garages.
 | `GarageNotFoundException` | 404 | A user's garage row is missing (should not happen if the `on_profile_created_create_garage` trigger is active) |
 | `CarNotFoundException` | 404 | Car id doesn't exist |
 | `CarModificationNotFoundException` | 404 | Modification id doesn't exist (or doesn't belong to the path's car id) |
+| `CarImageNotFoundException` | 404 | Gallery image id doesn't exist or doesn't belong to the path's car id |
 | `NotCarOwnerException` | 403 | Caller is not the owner of the car they're trying to mutate |
 | `PrivateGarageException` | 403 | Caller is viewing a private user's garage without being an accepted follower |
 | `InvalidReferenceException` | 400 | Request references an unknown brand / model / drivetrain / color / unit / category, or a model that doesn't belong to the brand id provided |
+| `InvalidStoragePathException` | 400 | `storagePath` in a download-url request doesn't match the canonical `car-photos/{ownerId}/{carId}/...` format |
 
 ## REST endpoints
 
@@ -64,10 +79,11 @@ Base path: `/api/v1/garage`
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/cars` | Add a car to your garage (201) |
+| POST | `/cars` | Single-shot car creation: persists car + mods, returns presigned upload URLs (201) |
 | PUT | `/cars/{carId}` | Replace your car |
 | DELETE | `/cars/{carId}` | Delete your car (204) |
 | GET | `/cars/{carId}` | Get car detail with modifications (privacy-gated) |
+| POST | `/cars/{carId}/cover-upload-url` | Get a fresh presigned upload URL for the cover image (e.g., when URL expires) |
 
 ### Modifications
 
@@ -76,6 +92,19 @@ Base path: `/api/v1/garage`
 | POST | `/cars/{carId}/modifications` | Add a mod to your car (201) |
 | PUT | `/cars/{carId}/modifications/{modificationId}` | Replace one of your mods |
 | DELETE | `/cars/{carId}/modifications/{modificationId}` | Delete one of your mods (204) |
+| POST | `/cars/{carId}/modifications/{modificationId}/upload-urls` | Get fresh presigned URLs for before/after images (e.g., when URLs expire) |
+
+### Gallery images
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/cars/{carId}/images` | List gallery images ordered by display order (privacy-gated) |
+| DELETE | `/cars/{carId}/images/{imageId}` | Delete a gallery image record (204; owner only) |
+| POST | `/storage/download-url` | Exchange a `storagePath` for a short-lived presigned download URL |
+
+> Upload URLs for cover, modification before/after, and gallery slots are issued by
+> `POST /cars` as part of car creation. Clients PUT file bytes directly to the returned
+> Supabase URLs — no bytes travel through the backend.
 
 ### Reference data (for dropdowns)
 
@@ -97,7 +126,6 @@ Base path: `/api/v1/garage`
 |---|---|---|
 | id | UUID | PK; app-generated on insert via `UUID.randomUUID()` |
 | ownerId | UUID | UNIQUE, FK → `profiles.id` |
-| name | String | Nullable |
 | createdAt | Instant | DB default `now()`; `insertable=false, updatable=false` |
 
 ### `CarEntity` → `cars`
@@ -116,6 +144,20 @@ with `UUID.randomUUID()`. `@DynamicUpdate` keeps PATCH-style updates lean.
 schema. Application enforces `isPricePublic ⇒ price != null` at validation time;
 the DB enforces the same via `car_modifications_price_visibility_check`.
 
+### `CarImageEntity` → `car_images`
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID | PK; app-generated |
+| carId | UUID | FK → `cars.id` |
+| userId | UUID | FK → `profiles.id` (denormalized for fast ownership checks) |
+| storagePath | String | UNIQUE; canonical `car-photos/{ownerId}/{carId}/gallery/{imageId}` path |
+| displayOrder | int | Ascending sort position within the car's gallery |
+| createdAt | Instant | DB default `now()`; `insertable=false, updatable=false` |
+
+Cover image and modification before/after image paths are stored as plain `String` columns
+on `CarEntity` and `CarModificationEntity` respectively — they are not rows in `car_images`.
+
 ### Reference entities
 
 `CarBrandEntity`, `CarModelEntity` (with LAZY `@ManyToOne` to brand),
@@ -130,6 +172,7 @@ in Supabase.
 | `on_profile_created_create_garage` | AFTER INSERT on `profiles` | Inserts the user's empty garage row, so the Java layer never has to create one |
 | `cars_garage_id_fkey ON DELETE CASCADE` | FK on `cars` | Deleting a garage drops its cars |
 | `car_modifications_car_id_fkey ON DELETE CASCADE` | FK on `car_modifications` | Deleting a car drops its mods — `deleteCar` relies on this; the application does not explicitly clear them |
+| `car_images_car_id_fkey ON DELETE CASCADE` | FK on `car_images` | Deleting a car drops its gallery rows |
 | `car_modifications_price_visibility_check` | CHECK | `is_price_public = true` requires `price IS NOT NULL` |
 
 ## Privacy rules
@@ -154,3 +197,6 @@ stored value.
   cannot be resolved.
 - **`follow.FollowService.isAcceptedFollower(viewerId, targetId)`** — used to grant
   access to private users' garages.
+- **`storage.StorageService`** — `createUploadUrl(path)` and `createDownloadUrl(path)` to
+  generate presigned Supabase Storage URLs. The garage module owns path construction and
+  ownership validation; the storage module only handles the HTTP calls.

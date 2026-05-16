@@ -1,8 +1,10 @@
 package com.carsocialmedia.backend.garage.internal.controllers;
 
 import com.carsocialmedia.backend.garage.GarageService;
+import com.carsocialmedia.backend.garage.dto.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.CarModificationRequest;
+import com.carsocialmedia.backend.garage.dto.ModificationUploadSlots;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -47,9 +49,9 @@ public class CarModificationController {
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CarModificationDto addModification(@AuthenticationPrincipal Jwt jwt,
-                                              @PathVariable UUID carId,
-                                              @Valid @RequestBody CarModificationRequest request) {
+    public AddModificationResponse addModification(@AuthenticationPrincipal Jwt jwt,
+                                                   @PathVariable UUID carId,
+                                                   @Valid @RequestBody CarModificationRequest request) {
         return garageService.addModification(jwt.getSubject(), carId, request);
     }
 
@@ -90,5 +92,24 @@ public class CarModificationController {
                                    @PathVariable UUID carId,
                                    @PathVariable UUID modificationId) {
         garageService.deleteModification(jwt.getSubject(), carId, modificationId);
+    }
+
+    /**
+     * Returns fresh presigned upload URLs for a modification's before/after images.
+     * Use this when the original URLs from creation have expired or the images need
+     * to be replaced.
+     *
+     * @param carId the car ID
+     * @param modificationId the modification ID
+     * @return before and after upload slots with new presigned URLs
+     * @throws CarModificationNotFoundException if the modification does not exist or
+     *         does not belong to the specified car
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    @PostMapping("/{modificationId}/upload-urls")
+    public ModificationUploadSlots refreshModificationUploadUrls(@AuthenticationPrincipal Jwt jwt,
+                                                                  @PathVariable UUID carId,
+                                                                  @PathVariable UUID modificationId) {
+        return garageService.refreshModificationUploadUrls(jwt.getSubject(), carId, modificationId);
     }
 }

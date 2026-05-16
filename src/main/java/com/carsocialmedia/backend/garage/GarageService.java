@@ -5,13 +5,20 @@ import com.carsocialmedia.backend.garage.dto.CarColorDto;
 import com.carsocialmedia.backend.garage.dto.CarDistanceUnitDto;
 import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarDto;
+import com.carsocialmedia.backend.garage.dto.CarImageDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
+import com.carsocialmedia.backend.garage.dto.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.CarModificationRequest;
 import com.carsocialmedia.backend.garage.dto.CarRequest;
 import com.carsocialmedia.backend.garage.dto.CarStatusOptionDto;
+import com.carsocialmedia.backend.garage.dto.CreateCarRequest;
+import com.carsocialmedia.backend.garage.dto.CreateCarResponse;
 import com.carsocialmedia.backend.garage.dto.GarageDto;
+import com.carsocialmedia.backend.garage.dto.ModificationUploadSlots;
+import com.carsocialmedia.backend.garage.dto.UploadSlot;
+import com.carsocialmedia.backend.garage.internal.entities.CarEntity;
 
 import java.util.List;
 import java.util.UUID;
@@ -53,16 +60,19 @@ public interface GarageService {
     // ---- cars --------------------------------------------------------------
 
     /**
-     * Adds a new car to the current user's garage.
+     * Creates a car together with its modifications and gallery slots in one transaction,
+     * then returns presigned upload URLs for every photo. The client uploads the bytes
+     * directly to storage afterwards; on any upload failure it rolls back via
+     * {@link #deleteCar(String, UUID)}.
      *
      * @param currentUserId the current user's UUID from the JWT subject
-     * @param request car details (brand ID, model ID, drivetrain ID, color ID, specs, etc.)
-     * @return the newly created car with all references resolved and an empty modifications list
+     * @param request the car, its modifications, and how many gallery slots to allocate
+     * @return the created car plus cover / before-after / gallery upload slots
      * @throws GarageNotFoundException if the user's garage does not exist
      * @throws InvalidReferenceException if any referenced ID (brand, model, drivetrain, etc.)
      *         does not exist or is inconsistent (e.g., model doesn't belong to brand)
      */
-    CarDto addCar(String currentUserId, CarRequest request);
+    CreateCarResponse addCar(String currentUserId, CreateCarRequest request);
 
     /**
      * Updates a car owned by the current user (full replacement).
@@ -103,17 +113,19 @@ public interface GarageService {
     // ---- modifications -----------------------------------------------------
 
     /**
-     * Adds a new modification to a car owned by the current user.
+     * Adds a new modification to a car owned by the current user. Storage paths for the
+     * before/after images are generated and persisted; the response includes presigned upload
+     * URLs the client should PUT the photo bytes to directly.
      *
      * @param currentUserId the current user's UUID from the JWT subject
      * @param carId the car ID
      * @param request modification details (category ID, title, images, date, price, etc.)
-     * @return the newly created modification
+     * @return the created modification plus before/after presigned upload URLs
      * @throws CarNotFoundException if the car does not exist
      * @throws NotCarOwnerException if the current user is not the car owner
      * @throws InvalidReferenceException if the modification category does not exist
      */
-    CarModificationDto addModification(String currentUserId, UUID carId, CarModificationRequest request);
+    AddModificationResponse addModification(String currentUserId, UUID carId, CarModificationRequest request);
 
     /**
      * Updates a modification on a car owned by the current user (full replacement).
@@ -197,4 +209,72 @@ public interface GarageService {
      * @return list of modification categories with IDs and names
      */
     List<CarModCategoryDto> listModCategories();
+
+    // ---- upload URL refresh ------------------------------------------------
+
+    /**
+     * Returns a fresh presigned upload URL for the car's cover image. The storage path
+     * is unchanged — the client PUTs the new bytes to overwrite the existing object.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car whose cover to re-upload
+     * @return an upload slot with the existing path and a new presigned URL
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    UploadSlot refreshCoverUploadUrl(String currentUserId, UUID carId);
+
+    /**
+     * Returns fresh presigned upload URLs for a modification's before/after images.
+     * The storage paths are unchanged — the client PUTs to overwrite the existing objects.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car the modification belongs to
+     * @param modificationId the modification whose images to re-upload
+     * @return upload slots for the before and after images
+     * @throws CarNotFoundException if the car does not exist
+     * @throws CarModificationNotFoundException if the modification does not exist or
+     *         does not belong to the specified car
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    ModificationUploadSlots refreshModificationUploadUrls(String currentUserId, UUID carId, UUID modificationId);
+
+    // ---- gallery images ----------------------------------------------------
+
+    /**
+     * Lists a car's gallery images ordered by display order. Subject to the same privacy
+     * gate as {@link #getCar(String, UUID)}.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car whose gallery to list
+     * @return the gallery image records (id, storage path, order, createdAt)
+     * @throws CarNotFoundException if the car does not exist
+     * @throws PrivateGarageException if the garage is private and the viewer is not allowed
+     */
+    List<CarImageDto> listCarImages(String currentUserId, UUID carId);
+
+    /**
+     * Deletes one gallery image record. Only the car owner may delete.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car the image belongs to
+     * @param imageId the gallery image to delete
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     * @throws CarImageNotFoundException if the image does not exist or belongs to another car
+     */
+    void deleteCarImage(String currentUserId, UUID carId, UUID imageId);
+
+    /**
+     * Returns a short-lived presigned download URL for a car photo, after verifying the
+     * caller is allowed to view that car (owner, or permitted by the privacy gate).
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param storagePath the canonical {@code car-photos/{ownerId}/{carId}/...} object path
+     * @return a presigned download URL
+     * @throws InvalidStoragePathException if the path is malformed
+     * @throws CarNotFoundException if the path's car does not exist
+     * @throws PrivateGarageException if the garage is private and the viewer is not allowed
+     */
+    String generateCarImageDownloadUrl(String currentUserId, String storagePath);
 }

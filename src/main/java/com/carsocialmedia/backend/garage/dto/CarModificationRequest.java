@@ -18,8 +18,6 @@ import java.time.Instant;
  * @param categoryId the modification category ID (e.g., suspension, engine, wheels)
  * @param title short title describing the modification (max 100 chars)
  * @param description detailed description of the modification (max 1000 chars)
- * @param beforeImageUrl URL to the before/original state image
- * @param afterImageUrl URL to the after/modified state image
  * @param installationDate when the modification was installed on the car
  * @param price the cost of the modification in the car owner's currency (required if
  *        {@code isPricePublic} is true, otherwise optional)
@@ -32,9 +30,6 @@ public record CarModificationRequest(
         @NotBlank @Size(max = 100) String title,
 
         @Size(max = 1000) String description,
-
-        @NotBlank String beforeImageUrl,
-        @NotBlank String afterImageUrl,
 
         @NotNull Instant installationDate,
 
