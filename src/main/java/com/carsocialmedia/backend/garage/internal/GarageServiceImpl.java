@@ -13,35 +13,25 @@ import com.carsocialmedia.backend.garage.dto.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.CarModificationRequest;
 import com.carsocialmedia.backend.garage.dto.CarRequest;
-import com.carsocialmedia.backend.garage.dto.CarImageDto;
 import com.carsocialmedia.backend.garage.dto.CarStatusOptionDto;
 import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.garage.dto.CreateCarRequest;
 import com.carsocialmedia.backend.garage.dto.CreateCarResponse;
-import com.carsocialmedia.backend.garage.dto.GallerySlot;
 import com.carsocialmedia.backend.garage.dto.GarageDto;
-import com.carsocialmedia.backend.garage.dto.ModificationUploadSlots;
-import com.carsocialmedia.backend.garage.dto.UploadSlot;
-import com.carsocialmedia.backend.garage.exception.CarImageNotFoundException;
 import com.carsocialmedia.backend.garage.exception.CarModificationNotFoundException;
 import com.carsocialmedia.backend.garage.exception.CarNotFoundException;
 import com.carsocialmedia.backend.garage.exception.GarageNotFoundException;
 import com.carsocialmedia.backend.garage.exception.InvalidReferenceException;
-import com.carsocialmedia.backend.garage.exception.InvalidStoragePathException;
 import com.carsocialmedia.backend.garage.exception.NotCarOwnerException;
 import com.carsocialmedia.backend.garage.exception.PrivateGarageException;
 import com.carsocialmedia.backend.garage.internal.entities.*;
 import com.carsocialmedia.backend.garage.internal.repositories.*;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
-import com.carsocialmedia.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,10 +50,8 @@ class GarageServiceImpl implements GarageService {
     private final CarDistanceUnitRepository distanceUnitRepository;
     private final CarStatusOptionRepository statusOptionRepository;
     private final CarModCategoryRepository modCategoryRepository;
-    private final CarImageRepository carImageRepository;
     private final ProfileService profileService;
     private final FollowService followService;
-    private final StorageService storageService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -78,10 +66,8 @@ class GarageServiceImpl implements GarageService {
                       CarDistanceUnitRepository distanceUnitRepository,
                       CarStatusOptionRepository statusOptionRepository,
                       CarModCategoryRepository modCategoryRepository,
-                      CarImageRepository carImageRepository,
                       ProfileService profileService,
-                      FollowService followService,
-                      StorageService storageService) {
+                      FollowService followService) {
         this.garageRepository = garageRepository;
         this.carRepository = carRepository;
         this.modificationRepository = modificationRepository;
@@ -92,10 +78,8 @@ class GarageServiceImpl implements GarageService {
         this.distanceUnitRepository = distanceUnitRepository;
         this.statusOptionRepository = statusOptionRepository;
         this.modCategoryRepository = modCategoryRepository;
-        this.carImageRepository = carImageRepository;
         this.profileService = profileService;
         this.followService = followService;
-        this.storageService = storageService;
     }
 
     // -------------------------------------------------------------------
@@ -141,39 +125,15 @@ class GarageServiceImpl implements GarageService {
         car.setId(carId);
         car.setGarage(garage);
         applyCarRequest(car, request.car());
-        String coverPath = coverPath(userId, carId);
-        car.setCoverImageUrl(coverPath);
         carRepository.save(car);
 
-        List<ModificationUploadSlots> modSlots = new ArrayList<>();
         for (CarModificationRequest modReq : request.modifications()) {
             UUID modId = UUID.randomUUID();
             CarModificationEntity mod = new CarModificationEntity();
             mod.setId(modId);
             mod.setCar(car);
             applyModificationRequest(mod, modReq);
-            String beforePath = modBeforePath(userId, carId, modId);
-            String afterPath = modAfterPath(userId, carId, modId);
-            mod.setBeforeImageUrl(beforePath);
-            mod.setAfterImageUrl(afterPath);
             modificationRepository.save(mod);
-            modSlots.add(new ModificationUploadSlots(modId,
-                    new UploadSlot(beforePath, storageService.createUploadUrl(beforePath)),
-                    new UploadSlot(afterPath, storageService.createUploadUrl(afterPath))));
-        }
-
-        List<GallerySlot> gallerySlots = new ArrayList<>();
-        for (int order = 0; order < request.galleryCount(); order++) {
-            UUID imageId = UUID.randomUUID();
-            String path = galleryPath(userId, carId, imageId);
-            CarImageEntity image = new CarImageEntity();
-            image.setId(imageId);
-            image.setCarId(carId);
-            image.setUserId(userId);
-            image.setStoragePath(path);
-            image.setDisplayOrder(order);
-            carImageRepository.save(image);
-            gallerySlots.add(new GallerySlot(imageId, path, storageService.createUploadUrl(path)));
         }
 
         // Flush the INSERTs and clear the persistence context so the detail
@@ -189,8 +149,7 @@ class GarageServiceImpl implements GarageService {
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
         CarDto carDto = toCarDto(hydrated, mods, true);
 
-        UploadSlot coverSlot = new UploadSlot(coverPath, storageService.createUploadUrl(coverPath));
-        return new CreateCarResponse(carDto, coverSlot, modSlots, gallerySlots);
+        return new CreateCarResponse(carDto);
     }
 
     @Override
@@ -218,19 +177,8 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new CarNotFoundException(carId));
         ensureOwnership(car, userId);
 
-        // Collect paths before the delete so the cascade doesn't beat us to the rows.
-        List<String> paths = new ArrayList<>();
-        if (car.getCoverImageUrl() != null) paths.add(car.getCoverImageUrl());
-        modificationRepository.findByCarIdWithCategory(carId).forEach(mod -> {
-            if (mod.getBeforeImageUrl() != null) paths.add(mod.getBeforeImageUrl());
-            if (mod.getAfterImageUrl() != null) paths.add(mod.getAfterImageUrl());
-        });
-        carImageRepository.findByCarIdOrderByDisplayOrderAsc(carId)
-                .forEach(img -> paths.add(img.getStoragePath()));
-
-        // car_modifications.car_id and car_images.car_id are ON DELETE CASCADE in Supabase.
+        // car_modifications.car_id is ON DELETE CASCADE in Supabase.
         carRepository.delete(car);
-        scheduleStorageCleanup(paths);
     }
 
     @Override
@@ -270,11 +218,6 @@ class GarageServiceImpl implements GarageService {
         mod.setCar(car);
         applyModificationRequest(mod, request);
 
-        String beforePath = modBeforePath(userId, carId, modId);
-        String afterPath = modAfterPath(userId, carId, modId);
-        mod.setBeforeImageUrl(beforePath);
-        mod.setAfterImageUrl(afterPath);
-
         modificationRepository.save(mod);
         // Flush the INSERT and reload from the DB so the DB-managed createdAt
         // is populated. findById alone returns the cached instance without a
@@ -282,10 +225,7 @@ class GarageServiceImpl implements GarageService {
         entityManager.flush();
         entityManager.refresh(mod);
 
-        return new AddModificationResponse(
-                toModificationDto(mod, true),
-                new UploadSlot(beforePath, storageService.createUploadUrl(beforePath)),
-                new UploadSlot(afterPath, storageService.createUploadUrl(afterPath)));
+        return new AddModificationResponse(toModificationDto(mod, true));
     }
 
     @Override
@@ -319,12 +259,7 @@ class GarageServiceImpl implements GarageService {
         }
         ensureOwnership(mod.getCar(), userId);
 
-        List<String> paths = new ArrayList<>();
-        if (mod.getBeforeImageUrl() != null) paths.add(mod.getBeforeImageUrl());
-        if (mod.getAfterImageUrl() != null) paths.add(mod.getAfterImageUrl());
-
         modificationRepository.delete(mod);
-        scheduleStorageCleanup(paths);
     }
 
     // -------------------------------------------------------------------
@@ -385,119 +320,6 @@ class GarageServiceImpl implements GarageService {
         return modCategoryRepository.findAllByOrderByModNameAsc().stream()
                 .map(c -> new CarModCategoryDto(c.getId(), c.getModName()))
                 .toList();
-    }
-
-    // -------------------------------------------------------------------
-    // gallery images
-    // -------------------------------------------------------------------
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<CarImageDto> listCarImages(String currentUserId, UUID carId) {
-        // getCar applies the ownership / privacy gate; ignore the returned DTO.
-        getCar(currentUserId, carId);
-        return carImageRepository.findByCarIdOrderByDisplayOrderAsc(carId).stream()
-                .map(img -> new CarImageDto(img.getId(), img.getStoragePath(),
-                        img.getDisplayOrder(), img.getCreatedAt()))
-                .toList();
-    }
-
-    @Override
-    @Transactional
-    public void deleteCarImage(String currentUserId, UUID carId, UUID imageId) {
-        UUID userId = UUID.fromString(currentUserId);
-        CarEntity car = carRepository.findById(carId)
-                .orElseThrow(() -> new CarNotFoundException(carId));
-        ensureOwnership(car, userId);
-
-        CarImageEntity image = carImageRepository.findById(imageId)
-                .orElseThrow(() -> new CarImageNotFoundException(imageId));
-        if (!image.getCarId().equals(carId)) {
-            throw new CarImageNotFoundException(imageId);
-        }
-        String path = image.getStoragePath();
-        carImageRepository.delete(image);
-        scheduleStorageCleanup(List.of(path));
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public String generateCarImageDownloadUrl(String currentUserId, String storagePath) {
-        UUID carId = parseCarIdFromPath(storagePath);
-        // Reuse the car privacy gate. Owner short-circuits; others get checked.
-        getCar(currentUserId, carId);
-        return storageService.createDownloadUrl(storagePath);
-    }
-
-    // -------------------------------------------------------------------
-    // upload URL refresh
-    // -------------------------------------------------------------------
-
-    @Override
-    @Transactional(readOnly = true)
-    public UploadSlot refreshCoverUploadUrl(String currentUserId, UUID carId) {
-        UUID userId = UUID.fromString(currentUserId);
-        CarEntity car = carRepository.findById(carId)
-                .orElseThrow(() -> new CarNotFoundException(carId));
-        ensureOwnership(car, userId);
-        String path = car.getCoverImageUrl();
-        return new UploadSlot(path, storageService.createUploadUrl(path));
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public ModificationUploadSlots refreshModificationUploadUrls(String currentUserId, UUID carId, UUID modificationId) {
-        UUID userId = UUID.fromString(currentUserId);
-        CarModificationEntity mod = modificationRepository.findById(modificationId)
-                .orElseThrow(() -> new CarModificationNotFoundException(modificationId));
-        if (!mod.getCar().getId().equals(carId)) {
-            throw new CarModificationNotFoundException(modificationId);
-        }
-        ensureOwnership(mod.getCar(), userId);
-        String beforePath = mod.getBeforeImageUrl();
-        String afterPath = mod.getAfterImageUrl();
-        return new ModificationUploadSlots(
-                modificationId,
-                new UploadSlot(beforePath, storageService.createUploadUrl(beforePath)),
-                new UploadSlot(afterPath, storageService.createUploadUrl(afterPath)));
-    }
-
-    // -------------------------------------------------------------------
-    // storage path helpers
-    // -------------------------------------------------------------------
-
-    private String coverPath(UUID userId, UUID carId) {
-        return userId + "/" + carId + "/cover.webp";
-    }
-
-    private String modBeforePath(UUID userId, UUID carId, UUID modId) {
-        return userId + "/" + carId + "/modifications/" + modId + "/before.webp";
-    }
-
-    private String modAfterPath(UUID userId, UUID carId, UUID modId) {
-        return userId + "/" + carId + "/modifications/" + modId + "/after.webp";
-    }
-
-    private String galleryPath(UUID userId, UUID carId, UUID imageId) {
-        return userId + "/" + carId + "/gallery/" + imageId + ".webp";
-    }
-
-    /**
-     * Extracts and validates the car id from a canonical photo path
-     * ({@code {ownerId}/{carId}/...}). Ownership/privacy is enforced by the
-     * caller via {@link #getCar(String, UUID)}.
-     */
-    private UUID parseCarIdFromPath(String storagePath) {
-        String[] seg = storagePath.split("/");
-        if (seg.length < 3) {
-            throw new InvalidStoragePathException("Invalid storage path: " + storagePath);
-        }
-        try {
-            UUID.fromString(seg[0]);
-            return UUID.fromString(seg[1]);
-        } catch (IllegalArgumentException e) {
-            throw new InvalidStoragePathException("Invalid storage path: " + storagePath);
-        }
     }
 
     // -------------------------------------------------------------------
@@ -741,25 +563,5 @@ class GarageServiceImpl implements GarageService {
                 mod.isPricePublic(),
                 mod.getMileageAtInstall(),
                 mod.getCreatedAt());
-    }
-
-    /**
-     * Registers a best-effort storage cleanup to run after the current transaction commits.
-     * If the Supabase delete fails the DB rows are already gone — orphaned files are
-     * acceptable over rolling back a successful delete.
-     */
-    private void scheduleStorageCleanup(List<String> paths) {
-        if (paths.isEmpty()) return;
-        List<String> snapshot = List.copyOf(paths);
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    storageService.deleteObjects(snapshot);
-                } catch (Exception ignored) {
-                    // best-effort; orphaned files are preferable to failing the response
-                }
-            }
-        });
     }
 }

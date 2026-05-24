@@ -1,5 +1,6 @@
 @ApplicationModule(
-        displayName = "Storage"
+        displayName = "Storage",
+        allowedDependencies = {}
 )
 package com.carsocialmedia.backend.storage;
 

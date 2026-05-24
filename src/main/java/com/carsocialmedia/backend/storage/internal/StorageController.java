@@ -1,0 +1,38 @@
+package com.carsocialmedia.backend.storage.internal;
+
+import com.carsocialmedia.backend.storage.StorageService;
+import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
+import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
+import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/storage")
+@RequiredArgsConstructor
+public class StorageController {
+
+    private final StorageService storageService;
+
+    @GetMapping("/cars/{carId}/cover")
+    public UploadUrlResponse cover(@PathVariable UUID carId) {
+        return storageService.coverUploadUrlRequest(carId);
+    }
+
+    @GetMapping("/cars/{carId}/gallery")
+    public UploadUrlResponse gallery(@PathVariable UUID carId) {
+        return storageService.galleryUploadUrlRequest(carId);
+    }
+
+    @GetMapping("/cars/{carId}/modifications/{modId}")
+    public UploadUrlResponse modification(
+            @PathVariable UUID carId,
+            @PathVariable UUID modId,
+            @RequestParam ModificationPhase phase,
+            @RequestParam FileFormat format
+    ) {
+        return storageService.modificationUploadUrlRequest(carId, modId, phase, format);
+    }
+}
