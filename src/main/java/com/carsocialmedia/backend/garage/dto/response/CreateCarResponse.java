@@ -1,4 +1,6 @@
-package com.carsocialmedia.backend.garage.dto;
+package com.carsocialmedia.backend.garage.dto.response;
+
+import com.carsocialmedia.backend.garage.dto.CarDto;
 
 /**
  * Result of the single-shot "add car" submission.

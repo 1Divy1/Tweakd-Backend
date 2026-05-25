@@ -1,9 +1,9 @@
 package com.carsocialmedia.backend.garage.internal.controllers;
 
 import com.carsocialmedia.backend.garage.GarageService;
-import com.carsocialmedia.backend.garage.dto.AddModificationResponse;
+import com.carsocialmedia.backend.garage.dto.response.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
-import com.carsocialmedia.backend.garage.dto.CarModificationRequest;
+import com.carsocialmedia.backend.garage.dto.request.CarModificationRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;

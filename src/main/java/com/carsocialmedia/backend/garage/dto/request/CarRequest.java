@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.garage.dto;
+package com.carsocialmedia.backend.garage.dto.request;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;

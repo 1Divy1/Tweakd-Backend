@@ -9,14 +9,15 @@ import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
-import com.carsocialmedia.backend.garage.dto.AddModificationResponse;
+import com.carsocialmedia.backend.garage.dto.response.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
-import com.carsocialmedia.backend.garage.dto.CarModificationRequest;
-import com.carsocialmedia.backend.garage.dto.CarRequest;
+import com.carsocialmedia.backend.garage.dto.CarModificationMediaDto;
+import com.carsocialmedia.backend.garage.dto.request.CarModificationRequest;
+import com.carsocialmedia.backend.garage.dto.request.CarRequest;
 import com.carsocialmedia.backend.garage.dto.CarStatusOptionDto;
 import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
-import com.carsocialmedia.backend.garage.dto.CreateCarRequest;
-import com.carsocialmedia.backend.garage.dto.CreateCarResponse;
+import com.carsocialmedia.backend.garage.dto.request.CreateCarRequest;
+import com.carsocialmedia.backend.garage.dto.response.CreateCarResponse;
 import com.carsocialmedia.backend.garage.dto.GarageDto;
 import com.carsocialmedia.backend.garage.exception.CarModificationNotFoundException;
 import com.carsocialmedia.backend.garage.exception.CarNotFoundException;
@@ -28,21 +29,34 @@ import com.carsocialmedia.backend.garage.internal.entities.*;
 import com.carsocialmedia.backend.garage.internal.repositories.*;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
+import com.carsocialmedia.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 class GarageServiceImpl implements GarageService {
 
+    private static final Logger log = LoggerFactory.getLogger(GarageServiceImpl.class);
+
     private final GarageRepository garageRepository;
     private final CarRepository carRepository;
     private final CarModificationRepository modificationRepository;
+    private final CarModificationGalleryRepository modificationGalleryRepository;
+    private final CarGalleryRepository carGalleryRepository;
     private final CarBrandRepository brandRepository;
     private final CarModelRepository modelRepository;
     private final CarDrivetrainRepository drivetrainRepository;
@@ -52,13 +66,17 @@ class GarageServiceImpl implements GarageService {
     private final CarModCategoryRepository modCategoryRepository;
     private final ProfileService profileService;
     private final FollowService followService;
+    private final StorageService storageService;
 
+    // Question: what does it do and why do we need it ?
     @PersistenceContext
     private EntityManager entityManager;
 
     GarageServiceImpl(GarageRepository garageRepository,
                       CarRepository carRepository,
                       CarModificationRepository modificationRepository,
+                      CarModificationGalleryRepository modificationGalleryRepository,
+                      CarGalleryRepository carGalleryRepository,
                       CarBrandRepository brandRepository,
                       CarModelRepository modelRepository,
                       CarDrivetrainRepository drivetrainRepository,
@@ -67,10 +85,13 @@ class GarageServiceImpl implements GarageService {
                       CarStatusOptionRepository statusOptionRepository,
                       CarModCategoryRepository modCategoryRepository,
                       ProfileService profileService,
-                      FollowService followService) {
+                      FollowService followService,
+                      StorageService storageService) {
         this.garageRepository = garageRepository;
         this.carRepository = carRepository;
         this.modificationRepository = modificationRepository;
+        this.modificationGalleryRepository = modificationGalleryRepository;
+        this.carGalleryRepository = carGalleryRepository;
         this.brandRepository = brandRepository;
         this.modelRepository = modelRepository;
         this.drivetrainRepository = drivetrainRepository;
@@ -80,10 +101,11 @@ class GarageServiceImpl implements GarageService {
         this.modCategoryRepository = modCategoryRepository;
         this.profileService = profileService;
         this.followService = followService;
+        this.storageService = storageService;
     }
 
     // -------------------------------------------------------------------
-    // garage views
+    // GARAGE VIEWS
     // -------------------------------------------------------------------
 
     @Override
@@ -110,7 +132,7 @@ class GarageServiceImpl implements GarageService {
     }
 
     // -------------------------------------------------------------------
-    // cars
+    // BASIC CAR CRUD
     // -------------------------------------------------------------------
 
     @Override
@@ -200,7 +222,120 @@ class GarageServiceImpl implements GarageService {
     }
 
     // -------------------------------------------------------------------
-    // modifications
+    // CAR MEDIA
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public void saveCarCoverImageUrl(String currentUserId, UUID carId, String url) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        // Find the car in DB by its ID
+        CarEntity car = carRepository
+                .findById(carId)
+                .orElseThrow(() -> new CarNotFoundException(carId));
+
+        // Verify that the current user is the owner of the car
+        ensureOwnership(car, userId);
+
+        // Update the cover image URL and save the changes in the DB
+        car.setCoverImageUrl(url);
+        carRepository.save(car);
+    }
+
+    @Override
+    @Transactional
+    public void saveModificationBeforeImageUrl(String currentUserId, UUID carId, UUID modId, String url) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        // Find the car modification in DB by its ID
+        CarModificationEntity mod = modificationRepository
+                .findById(modId)
+                .orElseThrow(() -> new CarModificationNotFoundException(modId));
+
+        // Verify that the modification belongs to the specified car
+        if (!mod.getCar().getId().equals(carId)) {
+            throw new CarModificationNotFoundException(modId);
+        }
+
+        // Verify that the current user is the owner of the car
+        ensureOwnership(mod.getCar(), userId);
+
+        insertModificationMedia(mod, url, "before");
+    }
+
+    @Override
+    @Transactional
+    public void saveModificationAfterImageUrl(String currentUserId, UUID carId, UUID modId, String url) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        // Find the car modification in DB by its ID
+        CarModificationEntity mod = modificationRepository
+                .findById(modId)
+                .orElseThrow(() -> new CarModificationNotFoundException(modId));
+
+        // Verify that the modification belongs to the specified car
+        if (!mod.getCar().getId().equals(carId)) {
+            throw new CarModificationNotFoundException(modId);
+        }
+
+        // Verify that the current user is the owner of the car
+        ensureOwnership(mod.getCar(), userId);
+
+        insertModificationMedia(mod, url, "after");
+    }
+
+    @Override
+    @Transactional
+    public void saveGalleryImageUrls(String currentUserId, UUID carId, List<String> imageUrls) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        CarEntity car = carRepository.findById(carId)
+                .orElseThrow(() -> new CarNotFoundException(carId));
+        ensureOwnership(car, userId);
+
+        // Diff: find URLs that are in the DB but not in the incoming list — those are removed.
+        Set<String> incomingSet = new HashSet<>(imageUrls);
+        List<String> removedUrls = carGalleryRepository.findAllByCarIdOrderByPositionAsc(carId)
+                .stream()
+                .map(CarGalleryEntity::getUrl)
+                .filter(url -> !incomingSet.contains(url))
+                .toList();
+
+        // DB: replace-all to persist the final ordered state.
+        carGalleryRepository.deleteAllByCarId(carId);
+        List<CarGalleryEntity> entries = new ArrayList<>();
+        for (int i = 0; i < imageUrls.size(); i++) {
+            CarGalleryEntity entry = new CarGalleryEntity();
+            entry.setId(UUID.randomUUID());
+            entry.setCar(car);
+            entry.setUrl(imageUrls.get(i));
+            entry.setPosition(i);
+            entries.add(entry);
+        }
+        carGalleryRepository.saveAll(entries);
+
+        // R2: delete removed objects only after the DB transaction commits.
+        // If the DB rolls back, this callback never fires, so R2 is untouched.
+        // If R2 deletion fails after commit, the DB is correct and we just log —
+        // those files become orphans but no references point to them.
+        if (!removedUrls.isEmpty()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        storageService.deleteObjects(removedUrls);
+                    } catch (Exception e) {
+                        log.warn("DB committed but failed to delete {} orphaned R2 objects for car {}",
+                                removedUrls.size(), carId, e);
+                    }
+                }
+            });
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // MODIFICATIONS
     // -------------------------------------------------------------------
 
     @Override
@@ -225,7 +360,8 @@ class GarageServiceImpl implements GarageService {
         entityManager.flush();
         entityManager.refresh(mod);
 
-        return new AddModificationResponse(toModificationDto(mod, true));
+        // New mod has no media yet — images are uploaded separately after creation.
+        return new AddModificationResponse(toModificationDto(mod, List.of(), true));
     }
 
     @Override
@@ -243,7 +379,8 @@ class GarageServiceImpl implements GarageService {
 
         applyModificationRequest(mod, request);
         modificationRepository.save(mod);
-        return toModificationDto(mod, true);
+        List<CarModificationGalleryEntity> media = modificationGalleryRepository.findAllByModification_Id(mod.getId());
+        return toModificationDto(mod, media, true);
     }
 
     @Override
@@ -263,7 +400,7 @@ class GarageServiceImpl implements GarageService {
     }
 
     // -------------------------------------------------------------------
-    // reference data
+    // REFERENCE DATA
     // -------------------------------------------------------------------
 
     @Override
@@ -323,7 +460,7 @@ class GarageServiceImpl implements GarageService {
     }
 
     // -------------------------------------------------------------------
-    // helpers
+    // HELPERS
     // -------------------------------------------------------------------
 
     /**
@@ -342,10 +479,12 @@ class GarageServiceImpl implements GarageService {
      * @throws InvalidReferenceException if any lookup table row doesn't exist or is inconsistent
      */
     private void applyCarRequest(CarEntity car, CarRequest req) {
+
         CarBrandEntity brand = brandRepository.findById(req.brandId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown brand id: " + req.brandId()));
         CarModelEntity model = modelRepository.findById(req.modelId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown model id: " + req.modelId()));
+
         // Reject inconsistent brand/model pairs — the DB lets this through but it'd produce
         // a nonsensical "BMW M3 with Honda brand" if the client mis-wired the dropdown.
         if (!model.getBrand().getId().equals(brand.getId())) {
@@ -385,6 +524,7 @@ class GarageServiceImpl implements GarageService {
      * @throws InvalidReferenceException if the modification category doesn't exist
      */
     private void applyModificationRequest(CarModificationEntity mod, CarModificationRequest req) {
+
         CarModCategoryEntity category = modCategoryRepository.findById(req.categoryId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown modification category id: " + req.categoryId()));
 
@@ -497,8 +637,13 @@ class GarageServiceImpl implements GarageService {
      * @return the car DTO with all specifications and modifications
      */
     private CarDto toCarDto(CarEntity car, List<CarModificationEntity> mods, boolean isOwner) {
+        // Load all media for this car's modifications in one query, then group by mod ID.
+        Map<UUID, List<CarModificationGalleryEntity>> mediaByModId =
+                modificationGalleryRepository.findAllByCarId(car.getId()).stream()
+                        .collect(Collectors.groupingBy(g -> g.getModification().getId()));
+
         List<CarModificationDto> modDtos = mods.stream()
-                .map(m -> toModificationDto(m, isOwner))
+                .map(m -> toModificationDto(m, mediaByModId.getOrDefault(m.getId(), List.of()), isOwner))
                 .toList();
         return new CarDto(
                 car.getId(),
@@ -546,7 +691,12 @@ class GarageServiceImpl implements GarageService {
      * @param isOwner whether the current user is the car owner
      * @return the modification DTO with privacy-controlled price visibility
      */
-    private CarModificationDto toModificationDto(CarModificationEntity mod, boolean isOwner) {
+    private CarModificationDto toModificationDto(CarModificationEntity mod,
+                                                   List<CarModificationGalleryEntity> media,
+                                                   boolean isOwner) {
+        List<CarModificationMediaDto> mediaDtos = media.stream()
+                .map(g -> new CarModificationMediaDto(g.getUrl(), g.getType(), g.getPhase()))
+                .toList();
         // Hide the price from non-owners when the owner marked it private.
         Float price = (isOwner || mod.isPricePublic()) ? mod.getPrice() : null;
         return new CarModificationDto(
@@ -556,12 +706,21 @@ class GarageServiceImpl implements GarageService {
                 mod.getCategory().getModName(),
                 mod.getTitle(),
                 mod.getDescription(),
-                mod.getBeforeImageUrl(),
-                mod.getAfterImageUrl(),
+                mediaDtos,
                 mod.getInstallationDate(),
                 price,
                 mod.isPricePublic(),
                 mod.getMileageAtInstall(),
                 mod.getCreatedAt());
+    }
+
+    private void insertModificationMedia(CarModificationEntity mod, String url, String phase) {
+        CarModificationGalleryEntity media = new CarModificationGalleryEntity();
+        media.setId(UUID.randomUUID());
+        media.setModification(mod);
+        media.setUrl(url);
+        media.setPhase(phase);
+        media.setType(url.endsWith(".mp4") ? "video" : "image");
+        modificationGalleryRepository.save(media);
     }
 }

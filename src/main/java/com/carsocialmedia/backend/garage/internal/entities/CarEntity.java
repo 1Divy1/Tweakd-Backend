@@ -22,8 +22,8 @@ import java.util.UUID;
  * timestamp is DB-managed and read-only from the ORM side.
  */
 @Entity
-@DynamicUpdate
 @Table(name = "cars")
+@DynamicUpdate
 @Getter
 @Setter
 public class CarEntity {

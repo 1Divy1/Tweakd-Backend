@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.garage.dto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -16,8 +17,7 @@ import java.util.UUID;
  * @param categoryName the modification category name
  * @param title short title of the modification (e.g., "H&R Coilovers")
  * @param description detailed description of the modification (up to 1000 chars)
- * @param beforeImageUrl URL to the before/original state image
- * @param afterImageUrl URL to the after/modified state image
+ * @param media all before/after images and videos attached to this modification
  * @param installationDate when the modification was installed
  * @param price the cost of the modification in the car owner's currency (null if private
  *        and viewer is not the owner)
@@ -32,8 +32,7 @@ public record CarModificationDto(
         String categoryName,
         String title,
         String description,
-        String beforeImageUrl,
-        String afterImageUrl,
+        List<CarModificationMediaDto> media,
         Instant installationDate,
         Float price,
         boolean isPricePublic,

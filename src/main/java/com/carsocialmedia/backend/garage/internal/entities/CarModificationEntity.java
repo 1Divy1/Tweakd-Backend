@@ -48,14 +48,6 @@ public class CarModificationEntity {
     /** Detailed description of the modification (up to 1000 chars). */
     private String description;
 
-    /** URL to the before/original state image. */
-    @Column(name = "before_image_url")
-    private String beforeImageUrl;
-
-    /** URL to the after/modified state image. */
-    @Column(name = "after_image_url")
-    private String afterImageUrl;
-
     /** When the modification was installed on the car. */
     @Column(name = "installation_date")
     private Instant installationDate;

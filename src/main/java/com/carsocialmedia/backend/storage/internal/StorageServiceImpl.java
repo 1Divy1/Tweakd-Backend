@@ -6,19 +6,28 @@ import com.carsocialmedia.backend.storage.internal.cloudflare.PresignedUrlGenera
 import com.carsocialmedia.backend.storage.internal.cloudflare.R2Config;
 import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
 import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
 public class StorageServiceImpl implements StorageService {
 
+    private static final Logger log = LoggerFactory.getLogger(StorageServiceImpl.class);
+
     private final PresignedUrlGenerator presigner;
     private final R2Config config;
+    private final S3Client s3Client;
 
-    StorageServiceImpl (PresignedUrlGenerator presigner, R2Config config) {
+    StorageServiceImpl(PresignedUrlGenerator presigner, R2Config config, S3Client s3Client) {
         this.presigner = presigner;
         this.config = config;
+        this.s3Client = s3Client;
     }
 
     // === GARAGE ===
@@ -52,16 +61,37 @@ public class StorageServiceImpl implements StorageService {
         return buildUploadUrlResponse(config.getGarage(), key, format);
     }
 
+    @Override
+    public void deleteObjects(List<String> urls) {
+        String garagePublicUrl = config.getGarage().getPublicUrl();
+        String garageBucket    = config.getGarage().getBucket();
+
+        List<ObjectIdentifier> keys = urls.stream()
+                .filter(url -> {
+                    if (!url.startsWith(garagePublicUrl + "/")) {
+                        log.warn("Skipping deletion — URL does not match any known bucket: {}", url);
+                        return false;
+                    }
+                    return true;
+                })
+                .map(url -> ObjectIdentifier.builder()
+                        .key(url.substring(garagePublicUrl.length() + 1))
+                        .build())
+                .toList();
+
+        if (keys.isEmpty()) return;
+
+        s3Client.deleteObjects(r -> r
+                .bucket(garageBucket)
+                .delete(d -> d.objects(keys))
+        );
+    }
+
     // ========== HELPERS ==========
 
     private UploadUrlResponse buildUploadUrlResponse(R2Config.BucketTarget target, String key, FileFormat format) {
-
-        // Generate the presigned URL for uploading
         String uploadUrl = presigner.generateUploadUrl(target.getBucket(), key, format.getContentType());
-
-        // Construct the final URL where the file will be publicly accessible after upload
-        String finalUrl = target.getPublicUrl() + "/" + key;
-
+        String finalUrl  = target.getPublicUrl() + "/" + key;
         return new UploadUrlResponse(key, uploadUrl, finalUrl);
     }
 }

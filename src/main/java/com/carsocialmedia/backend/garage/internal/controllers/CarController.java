@@ -2,22 +2,15 @@ package com.carsocialmedia.backend.garage.internal.controllers;
 
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarDto;
-import com.carsocialmedia.backend.garage.dto.CarRequest;
-import com.carsocialmedia.backend.garage.dto.CreateCarRequest;
-import com.carsocialmedia.backend.garage.dto.CreateCarResponse;
+import com.carsocialmedia.backend.garage.dto.request.CarRequest;
+import com.carsocialmedia.backend.garage.dto.request.CreateCarRequest;
+import com.carsocialmedia.backend.garage.dto.request.GalleryUrlsRequest;
+import com.carsocialmedia.backend.garage.dto.response.CreateCarResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
@@ -37,6 +30,8 @@ public class CarController {
     public CarController(GarageService garageService) {
         this.garageService = garageService;
     }
+
+    // ----- BASIC CAR ENDPOINTS -----
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -63,5 +58,45 @@ public class CarController {
     public CarDto getCar(@AuthenticationPrincipal Jwt jwt,
                          @PathVariable UUID carId) {
         return garageService.getCar(jwt.getSubject(), carId);
+    }
+
+    // ----- MEDIA ENDPOINTS -----
+
+    @PatchMapping("/{carId}/cover")
+    public void updateCarCover(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @RequestParam("coverImageUrl") String coverImageUrl
+    ) {
+        garageService.saveCarCoverImageUrl(jwt.getSubject(), carId, coverImageUrl);
+    }
+
+    @PatchMapping("/{carId}/modifications/{modId}/before")
+    public void updateModificationBeforeImage(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @PathVariable UUID modId,
+            @RequestParam("beforeImageUrl") String beforeImageUrl
+    ) {
+        garageService.saveModificationBeforeImageUrl(jwt.getSubject(), carId, modId, beforeImageUrl);
+    }
+
+    @PatchMapping("/{carId}/modifications/{modId}/after")
+    public void updateModificationAfterImage(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @PathVariable UUID modId,
+            @RequestParam("afterImageUrl") String afterImageUrl
+    ) {
+        garageService.saveModificationAfterImageUrl(jwt.getSubject(), carId, modId, afterImageUrl);
+    }
+
+    @PatchMapping("/{carId}/gallery")
+    public void updateCarGallery(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @Valid @RequestBody GalleryUrlsRequest request
+    ) {
+        garageService.saveGalleryImageUrls(jwt.getSubject(), carId, request.urls());
     }
 }
