@@ -4,14 +4,15 @@ import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.response.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.request.CarModificationRequest;
+import com.carsocialmedia.backend.garage.dto.request.UpdateModificationRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -44,12 +45,12 @@ public class CarModificationController {
         return garageService.addModification(jwt.getSubject(), carId, request);
     }
 
-    @PutMapping("/{modificationId}")
-    public CarModificationDto updateModification(@AuthenticationPrincipal Jwt jwt,
-                                                 @PathVariable UUID carId,
-                                                 @PathVariable UUID modificationId,
-                                                 @Valid @RequestBody CarModificationRequest request) {
-        return garageService.updateModification(jwt.getSubject(), carId, modificationId, request);
+    @PatchMapping("/{modificationId}")
+    public CarModificationDto patchModification(@AuthenticationPrincipal Jwt jwt,
+                                                @PathVariable UUID carId,
+                                                @PathVariable UUID modificationId,
+                                                @Valid @RequestBody UpdateModificationRequest request) {
+        return garageService.patchModification(jwt.getSubject(), carId, modificationId, request);
     }
 
     @DeleteMapping("/{modificationId}")

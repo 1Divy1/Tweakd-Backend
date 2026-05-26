@@ -71,26 +71,6 @@ public class CarController {
         garageService.saveCarCoverImageUrl(jwt.getSubject(), carId, coverImageUrl);
     }
 
-    @PatchMapping("/{carId}/modifications/{modId}/before")
-    public void updateModificationBeforeImage(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID carId,
-            @PathVariable UUID modId,
-            @RequestParam("beforeImageUrl") String beforeImageUrl
-    ) {
-        garageService.saveModificationBeforeImageUrl(jwt.getSubject(), carId, modId, beforeImageUrl);
-    }
-
-    @PatchMapping("/{carId}/modifications/{modId}/after")
-    public void updateModificationAfterImage(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID carId,
-            @PathVariable UUID modId,
-            @RequestParam("afterImageUrl") String afterImageUrl
-    ) {
-        garageService.saveModificationAfterImageUrl(jwt.getSubject(), carId, modId, afterImageUrl);
-    }
-
     @PatchMapping("/{carId}/gallery")
     public void updateCarGallery(
             @AuthenticationPrincipal Jwt jwt,

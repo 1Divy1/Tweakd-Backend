@@ -1,8 +1,10 @@
 package com.carsocialmedia.backend.storage.internal;
 
 import com.carsocialmedia.backend.storage.StorageService;
+import com.carsocialmedia.backend.storage.dto.ModificationUploadUrlsResponse;
 import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
 import com.carsocialmedia.backend.storage.internal.cloudflare.PresignedUrlGenerator;
+import com.carsocialmedia.backend.storage.internal.ModificationUploadRequest;
 import com.carsocialmedia.backend.storage.internal.cloudflare.R2Config;
 import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
 import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
@@ -59,6 +61,24 @@ public class StorageServiceImpl implements StorageService {
                 "/" + UUID.randomUUID() + format.getExtension();
 
         return buildUploadUrlResponse(config.getGarage(), key, format);
+    }
+
+    // cars/{carId}/modifications/{modId}/{phase}/{uuid}.{ext}  (one per item)
+    @Override
+    public ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files) {
+        List<ModificationUploadUrlsResponse.Item> uploads = files.stream()
+                .map(file -> {
+                    String key = "cars/" + carId +
+                            "/modifications/" + modId +
+                            "/" + file.phase().folder() +
+                            "/" + UUID.randomUUID() + file.format().getExtension();
+                    String uploadUrl = presigner.generateUploadUrl(
+                            config.getGarage().getBucket(), key, file.format().getContentType());
+                    String finalUrl = config.getGarage().getPublicUrl() + "/" + key;
+                    return new ModificationUploadUrlsResponse.Item(key, uploadUrl, finalUrl, file.phase().folder());
+                })
+                .toList();
+        return new ModificationUploadUrlsResponse(uploads);
     }
 
     @Override

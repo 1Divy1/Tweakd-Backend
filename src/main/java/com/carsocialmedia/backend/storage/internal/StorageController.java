@@ -1,9 +1,11 @@
 package com.carsocialmedia.backend.storage.internal;
 
 import com.carsocialmedia.backend.storage.StorageService;
+import com.carsocialmedia.backend.storage.dto.ModificationUploadUrlsResponse;
 import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
 import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
 import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,5 +36,14 @@ public class StorageController {
             @RequestParam FileFormat format
     ) {
         return storageService.modificationUploadUrlRequest(carId, modId, phase, format);
+    }
+
+    @PostMapping("/cars/{carId}/modifications/{modId}/upload-urls")
+    public ModificationUploadUrlsResponse modificationBatch(
+            @PathVariable UUID carId,
+            @PathVariable UUID modId,
+            @Valid @RequestBody ModificationUploadRequest request
+    ) {
+        return storageService.modificationBatchUploadUrlRequest(carId, modId, request.files());
     }
 }
