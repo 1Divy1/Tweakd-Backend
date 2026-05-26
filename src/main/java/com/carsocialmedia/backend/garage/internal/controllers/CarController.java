@@ -2,23 +2,25 @@ package com.carsocialmedia.backend.garage.internal.controllers;
 
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarDto;
-import com.carsocialmedia.backend.garage.dto.CarRequest;
+import com.carsocialmedia.backend.garage.dto.request.CarRequest;
+import com.carsocialmedia.backend.garage.dto.request.CreateCarRequest;
+import com.carsocialmedia.backend.garage.dto.request.GalleryUrlsRequest;
+import com.carsocialmedia.backend.garage.dto.response.CreateCarResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+/**
+ * REST endpoints for car operations within a garage.
+ *
+ * Cars belong to a garage and contain detailed specifications along with
+ * a list of modifications. This controller provides endpoints to add, update,
+ * retrieve, and delete cars owned by the current user.
+ */
 @RestController
 @RequestMapping("/api/v1/garage/cars")
 public class CarController {
@@ -29,10 +31,12 @@ public class CarController {
         this.garageService = garageService;
     }
 
+    // ----- BASIC CAR ENDPOINTS -----
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CarDto addCar(@AuthenticationPrincipal Jwt jwt,
-                         @Valid @RequestBody CarRequest request) {
+    public CreateCarResponse addCar(@AuthenticationPrincipal Jwt jwt,
+                                    @Valid @RequestBody CreateCarRequest request) {
         return garageService.addCar(jwt.getSubject(), request);
     }
 
@@ -54,5 +58,25 @@ public class CarController {
     public CarDto getCar(@AuthenticationPrincipal Jwt jwt,
                          @PathVariable UUID carId) {
         return garageService.getCar(jwt.getSubject(), carId);
+    }
+
+    // ----- MEDIA ENDPOINTS -----
+
+    @PatchMapping("/{carId}/cover")
+    public void updateCarCover(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @RequestParam("coverImageUrl") String coverImageUrl
+    ) {
+        garageService.saveCarCoverImageUrl(jwt.getSubject(), carId, coverImageUrl);
+    }
+
+    @PatchMapping("/{carId}/gallery")
+    public void updateCarGallery(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @Valid @RequestBody GalleryUrlsRequest request
+    ) {
+        garageService.saveGalleryImageUrls(jwt.getSubject(), carId, request.urls());
     }
 }

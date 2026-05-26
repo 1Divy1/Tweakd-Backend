@@ -14,6 +14,13 @@ import org.hibernate.annotations.DynamicUpdate;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * A modification (upgrade, customization, or change) made to a car.
+ *
+ * Tracks when the modification was installed, cost, before/after documentation images,
+ * and the mileage at installation. Price visibility is controlled by the isPricePublic flag.
+ * The createdAt timestamp is DB-managed and read-only from the ORM side.
+ */
 @Entity
 @DynamicUpdate
 @Table(name = "car_modifications")
@@ -21,38 +28,42 @@ import java.util.UUID;
 @Setter
 public class CarModificationEntity {
 
+    /** The modification ID (UUID, PK). */
     @Id
     private UUID id;
 
+    /** The car this modification was made to (required, FK to cars.id, cascades on delete). */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "car_id")
     private CarEntity car;
 
+    /** The modification category (required, FK to car_mod_categories.id). */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id")
     private CarModCategoryEntity category;
 
+    /** Short title describing the modification (e.g., "H&R Coilovers"). */
     private String title;
+
+    /** Detailed description of the modification (up to 1000 chars). */
     private String description;
 
-    @Column(name = "before_image_url")
-    private String beforeImageUrl;
-
-    @Column(name = "after_image_url")
-    private String afterImageUrl;
-
+    /** When the modification was installed on the car. */
     @Column(name = "installation_date")
     private Instant installationDate;
 
+    /** The cost of the modification (nullable, controlled by isPricePublic). */
     private Float price;
 
+    /** Whether the modification price is visible to other users. */
     @Column(name = "is_price_public")
     private boolean isPricePublic;
 
+    /** The car's mileage reading when the modification was installed (nullable). */
     @Column(name = "mileage_at_install")
     private Integer mileageAtInstall;
 
-    // DB-managed: DEFAULT now() in Supabase.
+    /** When this modification record was created (managed by Supabase, read-only). */
     @Column(insertable = false, updatable = false)
     private Instant createdAt;
 }
