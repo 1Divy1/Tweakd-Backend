@@ -52,6 +52,7 @@ public record CarDto(
         String colorCode,
         String mileageUnitId,
         String mileageUnitName,
+        Integer mileage,
         int year,
         int horsepower,
         int torque,
