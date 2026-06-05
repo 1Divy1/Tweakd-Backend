@@ -121,14 +121,24 @@ class GarageServiceImpl implements GarageService {
     @Override
     @Transactional(readOnly = true)
     public GarageDto getGarageByUsername(String currentUserId, String username) {
+
+        // Extract user's ID from the request
         UUID viewerId = UUID.fromString(currentUserId);
-        UUID ownerId = profileService.findIdByUsername(username)
+
+        // Check if the user exists
+        UUID ownerId = profileService
+                .findIdByUsername(username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
 
+        // Verify that the viewer has permission to view (read-only) the garage based on privacy settings and follow
+        // relationship
         ensureCanViewGarage(viewerId, ownerId, username);
 
-        GarageEntity garage = garageRepository.findByOwnerId(ownerId)
+        // Fetch the garage entity for the owner if it exists or throw if not found
+        GarageEntity garage = garageRepository
+                .findByOwnerId(ownerId)
                 .orElseThrow(() -> GarageNotFoundException.forOwner(ownerId.toString()));
+
         return toGarageDto(garage);
     }
 
@@ -229,6 +239,8 @@ class GarageServiceImpl implements GarageService {
     @Override
     @Transactional
     public void saveCarCoverImageUrl(String currentUserId, UUID carId, String url) {
+
+        // Extract the user's ID from the request
         UUID userId = UUID.fromString(currentUserId);
 
         // Find the car in DB by its ID
@@ -243,7 +255,6 @@ class GarageServiceImpl implements GarageService {
         car.setCoverImageUrl(url);
         carRepository.save(car);
     }
-
 
     @Override
     @Transactional
@@ -654,6 +665,7 @@ class GarageServiceImpl implements GarageService {
                 car.getColor().getColorCode(),
                 car.getMileageUnit().getId(),
                 car.getMileageUnit().getName(),
+                car.getMileage(),
                 car.getYear(),
                 car.getHorsepower(),
                 car.getTorque(),

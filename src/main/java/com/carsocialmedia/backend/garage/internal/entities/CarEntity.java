@@ -32,6 +32,45 @@ public class CarEntity {
     @Id
     private UUID id;
 
+    /** The year the car was manufactured (1900-2100). */
+    private int year;
+
+    /** Engine horsepower. */
+    private int horsepower;
+
+    /** Engine torque in Nm (can be 0 for electric cars). */
+    private int torque;
+
+    /** Car weight in kilograms. */
+    private int weight;
+
+    /** Ddistance driven - Integer because the value can be null. */
+    private Integer mileage;
+
+    /** Engine displacement in liters. */
+    @Column(name = "engine_displacement")
+    private float engineDisplacement;
+
+    /** 0-100 km/h acceleration time in seconds (nullable). */
+    @Column(name = "zero_to_one_hundred")
+    private Float zeroToOneHundred;
+
+    /** Internal chassis/body code (e.g., F80, F82 for BMW). */
+    @Column(name = "chassis_code")
+    private String chassisCode;
+
+    /** Internal engine code (e.g., S65B40, M340i). */
+    @Column(name = "engine_code")
+    private String engineCode;
+
+    /** URL to the car's cover/hero image. */
+    @Column(name = "cover_image_url")
+    private String coverImageUrl;
+
+    /** When the car was added to the garage (managed by Supabase, read-only). */
+    @Column(insertable = false, updatable = false)
+    private Instant createdAt;
+
     /** The garage this car belongs to (required, FK to garages.id). */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "garage_id")
@@ -66,40 +105,4 @@ public class CarEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "status_id")
     private CarStatusOptionEntity status;
-
-    /** The year the car was manufactured (1900-2100). */
-    private int year;
-
-    /** Engine horsepower. */
-    private int horsepower;
-
-    /** Engine torque in Nm (can be 0 for electric cars). */
-    private int torque;
-
-    /** Car weight in kilograms. */
-    private int weight;
-
-    /** Engine displacement in liters. */
-    @Column(name = "engine_displacement")
-    private float engineDisplacement;
-
-    /** 0-100 km/h acceleration time in seconds (nullable). */
-    @Column(name = "zero_to_one_hundred")
-    private Float zeroToOneHundred;
-
-    /** Internal chassis/body code (e.g., F80, F82 for BMW). */
-    @Column(name = "chassis_code")
-    private String chassisCode;
-
-    /** Internal engine code (e.g., S65B40, M340i). */
-    @Column(name = "engine_code")
-    private String engineCode;
-
-    /** URL to the car's cover/hero image. */
-    @Column(name = "cover_image_url")
-    private String coverImageUrl;
-
-    /** When the car was added to the garage (managed by Supabase, read-only). */
-    @Column(insertable = false, updatable = false)
-    private Instant createdAt;
 }

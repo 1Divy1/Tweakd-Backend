@@ -66,7 +66,7 @@ public class CarController {
     public void updateCarCover(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID carId,
-            @RequestParam("coverImageUrl") String coverImageUrl
+            @RequestParam("cover_image_url") String coverImageUrl
     ) {
         garageService.saveCarCoverImageUrl(jwt.getSubject(), carId, coverImageUrl);
     }
