@@ -27,7 +27,7 @@ class FollowController {
         this.followService = followService;
     }
 
-    // ---- follow / unfollow / status -----------------------------------
+    // ---- Follow / Unfollow / Status -----------------------------------
 
     @PostMapping("/{username}")
     public FollowStatusDto follow(@AuthenticationPrincipal Jwt jwt,
@@ -48,7 +48,7 @@ class FollowController {
         return followService.getFollowStatus(jwt.getSubject(), username);
     }
 
-    // ---- pending requests addressed to me -----------------------------
+    // ---- Pending requests addressed to me -----------------------------
 
     @GetMapping("/requests")
     public List<FollowRequestDto> getPendingRequests(@AuthenticationPrincipal Jwt jwt) {
@@ -69,7 +69,7 @@ class FollowController {
         followService.rejectRequest(jwt.getSubject(), username);
     }
 
-    // ---- followers / following lists ----------------------------------
+    // ---- Followers / Following lists ----------------------------------
 
     @GetMapping("/{username}/followers")
     public List<ProfileSearchResultDto> getFollowers(@AuthenticationPrincipal Jwt jwt,

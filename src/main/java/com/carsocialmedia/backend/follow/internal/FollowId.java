@@ -20,7 +20,6 @@ import java.util.UUID;
 @AllArgsConstructor
 @EqualsAndHashCode
 class FollowId implements Serializable {
-
     private UUID followerId;
     private UUID followingId;
 }
