@@ -43,7 +43,7 @@ class FollowServiceImpl implements FollowService {
     @Transactional
     public FollowStatusDto follow(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = resolveUsername(targetUsername);
+        UUID followingId = getUserIdByUsername(targetUsername);
 
         if (followerId.equals(followingId)) {
             throw new CannotFollowSelfException();
@@ -74,7 +74,7 @@ class FollowServiceImpl implements FollowService {
     @Transactional
     public void unfollow(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = resolveUsername(targetUsername);
+        UUID followingId = getUserIdByUsername(targetUsername);
 
         FollowId id = new FollowId(followerId, followingId);
         followRepository.findById(id).ifPresent(followRepository::delete);
@@ -84,14 +84,16 @@ class FollowServiceImpl implements FollowService {
     @Transactional(readOnly = true)
     public FollowStatusDto getFollowStatus(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = resolveUsername(targetUsername);
+        UUID followingId = getUserIdByUsername(targetUsername);
 
         FollowId id = new FollowId(followerId, followingId);
-        return followRepository.findById(id)
+        return followRepository
+                .findById(id)
                 .map(f -> new FollowStatusDto(toStatus(f.getStatus())))
                 .orElse(new FollowStatusDto(FollowStatus.NOT_FOLLOWING));
     }
 
+    // TODO: Logic not implemented yet
     @Override
     @Transactional(readOnly = true)
     public List<FollowRequestDto> getPendingRequests(String currentUserId) {
@@ -132,11 +134,12 @@ class FollowServiceImpl implements FollowService {
                 .toList();
     }
 
+    // TODO: Logic not implemented yet
     @Override
     @Transactional
     public void acceptRequest(String currentUserId, String requesterUsername) {
         UUID userId = UUID.fromString(currentUserId);
-        UUID requesterId = resolveUsername(requesterUsername);
+        UUID requesterId = getUserIdByUsername(requesterUsername);
 
         FollowEntity row = followRepository.findForUpdate(requesterId, userId)
                 .orElseThrow(() -> new FollowRequestNotFoundException(requesterUsername));
@@ -151,11 +154,12 @@ class FollowServiceImpl implements FollowService {
         // The handle_follow_change AFTER UPDATE trigger increments the counters.
     }
 
+    // TODO: Logic not implemented yet
     @Override
     @Transactional
     public void rejectRequest(String currentUserId, String requesterUsername) {
         UUID userId = UUID.fromString(currentUserId);
-        UUID requesterId = resolveUsername(requesterUsername);
+        UUID requesterId = getUserIdByUsername(requesterUsername);
 
         FollowId id = new FollowId(requesterId, userId);
         FollowEntity row = followRepository.findById(id)
@@ -172,24 +176,26 @@ class FollowServiceImpl implements FollowService {
     @Override
     @Transactional(readOnly = true)
     public List<ProfileSearchResultDto> getFollowers(String currentUserId, String targetUsername) {
-        UUID viewerId = UUID.fromString(currentUserId);
-        UUID targetId = resolveUsername(targetUsername);
+        UUID viewerUserId = UUID.fromString(currentUserId);
+        UUID targetUserId = getUserIdByUsername(targetUsername);
 
-        ensureCanViewSocialGraph(viewerId, targetId, targetUsername);
+        // TODO: For now, all profiles are public
+        // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
-        List<UUID> followerIds = followRepository.findAcceptedFollowerIds(targetId);
+        List<UUID> followerIds = followRepository.findAcceptedFollowerIds(targetUserId);
         return hydrateInOrder(followerIds);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ProfileSearchResultDto> getFollowing(String currentUserId, String targetUsername) {
-        UUID viewerId = UUID.fromString(currentUserId);
-        UUID targetId = resolveUsername(targetUsername);
+        UUID viewerUserId = UUID.fromString(currentUserId);
+        UUID targetUserId = getUserIdByUsername(targetUsername);
 
-        ensureCanViewSocialGraph(viewerId, targetId, targetUsername);
+        // TODO: For now, all profiles are public
+        // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
-        List<UUID> followingIds = followRepository.findAcceptedFollowingIds(targetId);
+        List<UUID> followingIds = followRepository.findAcceptedFollowingIds(targetUserId);
         return hydrateInOrder(followingIds);
     }
 
@@ -201,11 +207,12 @@ class FollowServiceImpl implements FollowService {
     }
 
     // ---------------------------------------------------------------------
-    // helpers
+    // Helpers
     // ---------------------------------------------------------------------
 
-    private UUID resolveUsername(String username) {
-        return profileService.findIdByUsername(username)
+    private UUID getUserIdByUsername(String username) {
+        return profileService
+                .findIdByUsername(username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
     }
 

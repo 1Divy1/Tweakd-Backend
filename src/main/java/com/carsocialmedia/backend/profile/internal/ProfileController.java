@@ -34,14 +34,6 @@ class ProfileController {
         return profileService.getProfile(jwt.getSubject());
     }
 
-    @PostMapping("/onboarding")
-    public ProfileDto completeOnboarding(
-            @AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody OnboardingRequest request
-    ) {
-        return profileService.completeOnboarding(jwt.getSubject(), request);
-    }
-
     @PatchMapping("/me/privacy")
     public ProfileDto setPrivacy(
             @AuthenticationPrincipal Jwt jwt,
@@ -50,6 +42,15 @@ class ProfileController {
         return profileService.setPrivacy(jwt.getSubject(), request.isPrivate());
     }
 
+    @PostMapping("/onboarding")
+    public ProfileDto completeOnboarding(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody OnboardingRequest request
+    ) {
+        return profileService.completeOnboarding(jwt.getSubject(), request);
+    }
+
+    // TODO: remove '/by-username' and just use '/{username}'
     @GetMapping("/by-username/{username}")
     public PublicProfileDto getProfileByUsername(@PathVariable String username) {
         return profileService.getPublicProfileByUsername(username);

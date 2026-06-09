@@ -11,12 +11,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface ProfileService {
-    ProfileDto getProfile(String userId);
-    ProfileDto completeOnboarding(String userId, OnboardingRequest request);
-    ProfileDto setPrivacy(String userId, boolean isPrivate);
-    PublicProfileDto getPublicProfileByUsername(String username);
-    List<ProfileSearchResultDto> searchByUsername(String prefix);
-
     /**
      * Lookup helpers for sibling modules. Returning DTOs (not entities) keeps
      * profile internals private while still letting other modules resolve
@@ -25,4 +19,16 @@ public interface ProfileService {
     Optional<UUID> findIdByUsername(String username);
     boolean isPrivate(UUID userId);
     List<ProfileSearchResultDto> findByIds(Collection<UUID> ids);
+
+    // TODO: Add docs for the below methods.
+
+    ProfileDto getProfile(String userId);
+
+    ProfileDto completeOnboarding(String userId, OnboardingRequest request);
+
+    ProfileDto setPrivacy(String userId, boolean isPrivate);
+
+    PublicProfileDto getPublicProfileByUsername(String username);
+
+    List<ProfileSearchResultDto> searchByUsername(String prefix);
 }
