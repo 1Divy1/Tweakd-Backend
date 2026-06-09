@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.follow.internal;
 
 import com.carsocialmedia.backend.follow.FollowService;
+import com.carsocialmedia.backend.follow.dto.FollowProfileSearchResult;
 import com.carsocialmedia.backend.follow.dto.FollowRequestDto;
 import com.carsocialmedia.backend.follow.dto.FollowStatus;
 import com.carsocialmedia.backend.follow.dto.FollowStatusDto;
@@ -19,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -175,7 +177,7 @@ class FollowServiceImpl implements FollowService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ProfileSearchResultDto> getFollowers(String currentUserId, String targetUsername) {
+    public List<FollowProfileSearchResult> getFollowers(String currentUserId, String targetUsername) {
         UUID viewerUserId = UUID.fromString(currentUserId);
         UUID targetUserId = getUserIdByUsername(targetUsername);
 
@@ -183,12 +185,12 @@ class FollowServiceImpl implements FollowService {
         // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
         List<UUID> followerIds = followRepository.findAcceptedFollowerIds(targetUserId);
-        return hydrateInOrder(followerIds);
+        return convertToFollowProfileSearchResult(viewerUserId, followerIds);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<ProfileSearchResultDto> getFollowing(String currentUserId, String targetUsername) {
+    public List<FollowProfileSearchResult> getFollowing(String currentUserId, String targetUsername) {
         UUID viewerUserId = UUID.fromString(currentUserId);
         UUID targetUserId = getUserIdByUsername(targetUsername);
 
@@ -196,7 +198,7 @@ class FollowServiceImpl implements FollowService {
         // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
         List<UUID> followingIds = followRepository.findAcceptedFollowingIds(targetUserId);
-        return hydrateInOrder(followingIds);
+        return convertToFollowProfileSearchResult(viewerUserId, followingIds);
     }
 
     @Override
@@ -230,18 +232,26 @@ class FollowServiceImpl implements FollowService {
         }
     }
 
-    private List<ProfileSearchResultDto> hydrateInOrder(List<UUID> ids) {
+    private List<FollowProfileSearchResult> convertToFollowProfileSearchResult(UUID viewerId, List<UUID> ids) {
         if (ids.isEmpty()) {
             return List.of();
         }
         Map<UUID, ProfileSearchResultDto> byId = indexById(profileService.findByIds(ids));
+        // Single bulk query: which of these profiles does the viewer already follow?
+        Set<UUID> followedByViewer = Set.copyOf(
+                followRepository.findAcceptedFollowingIdsIn(viewerId, ids));
         return ids.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
+                .map(p -> new FollowProfileSearchResult(
+                        p.id(),
+                        p.username(),
+                        p.avatarUrl(),
+                        followedByViewer.contains(p.id())))
                 .toList();
     }
 
-    private static Map<UUID, ProfileSearchResultDto> indexById(List<ProfileSearchResultDto> dtos) {
+    private static Map<UUID, ProfileSearchResultDto> indexById (List<ProfileSearchResultDto> dtos) {
         Map<UUID, ProfileSearchResultDto> map = new HashMap<>();
         for (ProfileSearchResultDto dto : dtos) {
             map.put(dto.id(), dto);
