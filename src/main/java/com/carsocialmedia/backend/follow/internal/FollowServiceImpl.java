@@ -208,6 +208,16 @@ class FollowServiceImpl implements FollowService {
                 .existsByIdFollowerIdAndIdFollowingIdAndStatus(viewerId, targetId, STATUS_ACCEPTED);
     }
 
+    @Override
+    @Transactional
+    public void removeFollower(String currentUserId, String followerUsernameToRemove) {
+        UUID userId = UUID.fromString(currentUserId);
+        UUID followerId = getUserIdByUsername(followerUsernameToRemove);
+
+        FollowId id = new FollowId(followerId, userId);
+        followRepository.findById(id).ifPresent(followRepository::delete);
+    }
+
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
