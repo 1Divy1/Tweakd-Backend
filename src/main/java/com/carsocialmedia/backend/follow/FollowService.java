@@ -58,4 +58,11 @@ public interface FollowService {
      * use this to gate access to private content (e.g. another user's garage).
      */
     boolean isAcceptedFollower(UUID viewerId, UUID targetId);
+
+    /**
+     * Removes a follower from the current user's list of followers.
+     * @param currentUserId the ID of the current user
+     * @param followerUsernameToRemove the username of the follower to remove
+     */
+    void removeFollower(String currentUserId, String followerUsernameToRemove);
 }

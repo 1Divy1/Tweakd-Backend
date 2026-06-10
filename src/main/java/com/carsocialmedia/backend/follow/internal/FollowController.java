@@ -48,6 +48,13 @@ class FollowController {
         return followService.getFollowStatus(jwt.getSubject(), username);
     }
 
+    @DeleteMapping("/followers/{username}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeFollower(@AuthenticationPrincipal Jwt jwt,
+                               @PathVariable String username) {
+        followService.removeFollower(jwt.getSubject(), username);
+    }
+
     // ---- Pending requests addressed to me -----------------------------
 
     @GetMapping("/requests")
