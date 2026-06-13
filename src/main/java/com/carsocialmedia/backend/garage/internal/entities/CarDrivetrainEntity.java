@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.garage.internal.entities;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -17,10 +18,12 @@ import lombok.Setter;
 @Getter
 @Setter
 public class CarDrivetrainEntity {
+
     /** The drivetrain ID (string, PK, e.g., "fwd", "rwd", "awd"). */
     @Id
     private String id;
 
     /** The drivetrain name (e.g., "Front-Wheel Drive", "Rear-Wheel Drive"). */
+    @Column(name = "name")
     private String name;
 }

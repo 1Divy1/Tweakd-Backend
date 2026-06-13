@@ -31,11 +31,15 @@ import java.util.UUID;
  * @param engineDisplacement engine displacement in liters
  * @param zeroToOneHundred 0-100 km/h acceleration time in seconds (nullable)
  * @param chassisCode internal chassis/body code (e.g., F80, F82)
+ * @param modelCode manufacturer model code/generation (e.g., E60 for the BMW 5 Series)
  * @param engineCode internal engine code
  * @param coverImageUrl URL to the car's cover/hero image
  * @param galleryUrls ordered list of gallery image URLs
  * @param createdAt when the car was added to the garage
- * @param status the car's status option (e.g., daily driver, weekend cruiser); nullable
+ * @param fuelTypeId the fuel type ID (e.g., gasoline, diesel, electric)
+ * @param fuelTypeName the fuel type display name
+ * @param statusId the car's status option ID (e.g., daily driver, weekend cruiser)
+ * @param statusName the car's status display name
  * @param modifications list of modifications (upgrades) made to this car
  */
 public record CarDto(
@@ -60,10 +64,14 @@ public record CarDto(
         float engineDisplacement,
         Float zeroToOneHundred,
         String chassisCode,
+        String modelCode,
         String engineCode,
         String coverImageUrl,
         List<String> galleryUrls,
         Instant createdAt,
-        CarStatusOptionDto status,
+        String fuelTypeId,
+        String fuelTypeName,
+        String statusId,
+        String statusName,
         List<CarModificationDto> modifications
 ) {}

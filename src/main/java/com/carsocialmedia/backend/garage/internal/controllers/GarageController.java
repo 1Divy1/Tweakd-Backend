@@ -33,7 +33,9 @@ public class GarageController {
      */
     @GetMapping("/me")
     public GarageDto getMyGarage(@AuthenticationPrincipal Jwt jwt) {
-        return garageService.getMyGarage(jwt.getSubject());
+        GarageDto garage = garageService.getMyGarage(jwt.getSubject());
+        System.out.println("Garage: " + garage);
+        return garage;
     }
 
     /**

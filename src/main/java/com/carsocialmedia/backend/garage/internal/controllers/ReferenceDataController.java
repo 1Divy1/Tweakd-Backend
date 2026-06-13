@@ -4,6 +4,7 @@ import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarColorDto;
 import com.carsocialmedia.backend.garage.dto.CarDistanceUnitDto;
+import com.carsocialmedia.backend.garage.dto.CarFuelTypeOptionsDto;
 import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
@@ -102,5 +103,15 @@ public class ReferenceDataController {
     @GetMapping("/mod-categories")
     public List<CarModCategoryDto> getModCategories() {
         return garageService.listModCategories();
+    }
+
+    /**
+     * Lists all fuel type options (e.g., gasoline, diesel, hybrid, electric).
+     *
+     * @return list of fuel type options sorted alphabetically by name
+     */
+    @GetMapping("/fuel-type-options")
+    public List<CarFuelTypeOptionsDto> getFuelTypeOptions() {
+        return garageService.listFuelTypeOptions();
     }
 }

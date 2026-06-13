@@ -3,6 +3,7 @@ package com.carsocialmedia.backend.garage;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarColorDto;
 import com.carsocialmedia.backend.garage.dto.CarDistanceUnitDto;
+import com.carsocialmedia.backend.garage.dto.CarFuelTypeOptionsDto;
 import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
@@ -148,7 +149,6 @@ public interface GarageService {
     /**
      * Partially updates a modification. Only non-null fields are applied; null means "no change".
      * Media can be added ({@code addMedia}) or removed ({@code removeMediaUrls}) in the same call.
-     * After applying changes, validates that if {@code isPricePublic} is true, a price is present.
      *
      * @param currentUserId the current user's UUID from the JWT subject
      * @param carId the car ID
@@ -158,8 +158,7 @@ public interface GarageService {
      * @throws CarModificationNotFoundException if the modification does not exist or
      *         does not belong to the specified car
      * @throws NotCarOwnerException if the current user is not the car owner
-     * @throws InvalidReferenceException if the category ID is invalid, or if isPricePublic
-     *         is true but no price exists after applying changes
+     * @throws InvalidReferenceException if the category ID is invalid
      */
     CarModificationDto patchModification(String currentUserId, UUID carId, UUID modificationId, UpdateModificationRequest request);
 
@@ -229,4 +228,12 @@ public interface GarageService {
      * @return list of modification categories with IDs and names
      */
     List<CarModCategoryDto> listModCategories();
+
+    /**
+     * Lists all available fuel type options (e.g., gasoline, diesel, hybrid, electric),
+     * sorted alphabetically by name.
+     *
+     * @return list of fuel type options with IDs and names
+     */
+    List<CarFuelTypeOptionsDto> listFuelTypeOptions();
 }

@@ -24,8 +24,7 @@ import java.util.UUID;
  * REST endpoints for car modifications (upgrades, parts, customizations).
  *
  * Modifications record changes or upgrades made to a car, including installation
- * date, cost, and category. Price visibility respects the owner's privacy setting
- * (isPricePublic flag).
+ * date, cost, and category.
  */
 @RestController
 @RequestMapping("/api/v1/garage/cars/{carId}/modifications")
