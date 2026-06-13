@@ -22,6 +22,7 @@ import java.util.UUID;
  * @param drivetrainId the drivetrain type ID (e.g., FWD, RWD, AWD)
  * @param colorId the paint/body color ID (e.g., Black, Red)
  * @param mileageUnitId the distance unit ID (e.g., kilometers, miles)
+ * @param mileage current odometer reading (nullable, must be zero or positive)
  * @param year the manufacturing year (1900-2100)
  * @param horsepower engine horsepower (must be positive)
  * @param torque engine torque in Nm (can be zero for electric cars)
@@ -29,6 +30,8 @@ import java.util.UUID;
  * @param engineDisplacement engine displacement in liters
  * @param zeroToOneHundred 0-100 km/h acceleration time in seconds (nullable)
  * @param chassisCode internal chassis/body code (e.g., F80, F82), max 50 chars
+ * @param modelCode manufacturer model code/generation (e.g., E60 for the BMW 5 Series), max 50 chars
+ * @param fuelTypeId the fuel type ID (must exist in car_fuel_type_options table)
  * @param engineCode internal engine code (e.g., S65B40, M340i), max 50 chars
  * @param statusId the car status option ID (optional, e.g., daily driver, weekend cruiser)
  */
@@ -38,17 +41,16 @@ public record CarRequest(
         @NotBlank String drivetrainId,
         @NotBlank String colorId,
         @NotBlank String mileageUnitId,
-
+        @NotBlank String statusId,
         @Min(1900) @Max(2100) int year,
-        @Positive int horsepower,
+        @Size(max = 50) String engineCode,
+        @Size(max = 50) String chassisCode,
+        @Size(max = 50) String modelCode,
+        @NotBlank String fuelTypeId,
+        @PositiveOrZero Integer mileage,
         @PositiveOrZero int torque,
+        @Positive int horsepower,
         @Positive int weight,
         @Positive float engineDisplacement,
-
-        @Positive Float zeroToOneHundred,
-
-        @Size(max = 50) String chassisCode,
-        @Size(max = 50) String engineCode,
-
-        @NotBlank String statusId
+        @Positive Float zeroToOneHundred
 ) {}

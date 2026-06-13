@@ -46,6 +46,7 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
               join fetch c.drivetrain
               join fetch c.color
               join fetch c.mileageUnit
+              join fetch c.fuelType
               join fetch c.status
              where c.id = :id
             """)

@@ -7,10 +7,6 @@ import java.util.UUID;
 /**
  * A modification (upgrade, customization, or change) made to a car.
  *
- * Price visibility is controlled by the {@code isPricePublic} flag. When viewing a
- * modification on a car that is not yours, the price will be null if the owner marked
- * it as private.
- *
  * @param id the modification ID
  * @param carId the car this modification belongs to
  * @param categoryId the modification category ID (e.g., suspension, engine)
@@ -19,9 +15,7 @@ import java.util.UUID;
  * @param description detailed description of the modification (up to 1000 chars)
  * @param media all before/after images and videos attached to this modification
  * @param installationDate when the modification was installed
- * @param price the cost of the modification in the car owner's currency (null if private
- *        and viewer is not the owner)
- * @param isPricePublic whether the modification price is visible to other users
+ * @param price the cost of the modification in the car owner's currency (null if not set)
  * @param mileageAtInstall the car's mileage when the modification was installed
  * @param createdAt when this modification record was created
  */
@@ -34,8 +28,7 @@ public record CarModificationDto(
         String description,
         List<CarModificationMediaDto> media,
         Instant installationDate,
-        Float price,
-        boolean isPricePublic,
+        Integer price,
         Integer mileageAtInstall,
         Instant createdAt
 ) {}

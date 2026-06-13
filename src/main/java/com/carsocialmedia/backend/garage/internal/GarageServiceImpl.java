@@ -5,6 +5,7 @@ import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarColorDto;
 import com.carsocialmedia.backend.garage.dto.CarDistanceUnitDto;
+import com.carsocialmedia.backend.garage.dto.CarFuelTypeOptionsDto;
 import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
@@ -63,6 +64,7 @@ class GarageServiceImpl implements GarageService {
     private final CarDrivetrainRepository drivetrainRepository;
     private final CarColorRepository colorRepository;
     private final CarDistanceUnitRepository distanceUnitRepository;
+    private final CarFuelTypeOptionsRepository fuelTypeOptionsRepository;
     private final CarStatusOptionRepository statusOptionRepository;
     private final CarModCategoryRepository modCategoryRepository;
     private final ProfileService profileService;
@@ -83,6 +85,7 @@ class GarageServiceImpl implements GarageService {
                       CarDrivetrainRepository drivetrainRepository,
                       CarColorRepository colorRepository,
                       CarDistanceUnitRepository distanceUnitRepository,
+                      CarFuelTypeOptionsRepository fuelTypeOptionsRepository,
                       CarStatusOptionRepository statusOptionRepository,
                       CarModCategoryRepository modCategoryRepository,
                       ProfileService profileService,
@@ -98,6 +101,7 @@ class GarageServiceImpl implements GarageService {
         this.drivetrainRepository = drivetrainRepository;
         this.colorRepository = colorRepository;
         this.distanceUnitRepository = distanceUnitRepository;
+        this.fuelTypeOptionsRepository = fuelTypeOptionsRepository;
         this.statusOptionRepository = statusOptionRepository;
         this.modCategoryRepository = modCategoryRepository;
         this.profileService = profileService;
@@ -180,7 +184,7 @@ class GarageServiceImpl implements GarageService {
         CarEntity hydrated = carRepository.findDetailById(carId)
                 .orElseThrow(() -> new CarNotFoundException(carId));
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
-        CarDto carDto = toCarDto(hydrated, mods, true);
+        CarDto carDto = toCarDto(hydrated, mods);
 
         return new CreateCarResponse(carDto);
     }
@@ -198,7 +202,7 @@ class GarageServiceImpl implements GarageService {
         carRepository.save(car);
 
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
-        return toCarDto(car, mods, true);
+        return toCarDto(car, mods);
     }
 
     @Override
@@ -219,7 +223,8 @@ class GarageServiceImpl implements GarageService {
     public CarDto getCar(String currentUserId, UUID carId) {
         UUID viewerId = UUID.fromString(currentUserId);
 
-        CarEntity car = carRepository.findDetailById(carId)
+        CarEntity car = carRepository
+                .findDetailById(carId)
                 .orElseThrow(() -> new CarNotFoundException(carId));
 
         UUID ownerId = car.getGarage().getOwnerId();
@@ -229,7 +234,7 @@ class GarageServiceImpl implements GarageService {
         }
 
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
-        return toCarDto(car, mods, isOwner);
+        return toCarDto(car, mods);
     }
 
     // -------------------------------------------------------------------
@@ -333,7 +338,7 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new CarModificationNotFoundException(modId));
 
         // New mod has no media yet — images are uploaded separately after creation.
-        return new AddModificationResponse(toModificationDto(reloaded, List.of(), true));
+        return new AddModificationResponse(toModificationDto(reloaded, List.of()));
     }
 
     @Override
@@ -359,13 +364,7 @@ class GarageServiceImpl implements GarageService {
         if (request.description() != null)      mod.setDescription(request.description());
         if (request.installationDate() != null) mod.setInstallationDate(request.installationDate());
         if (request.price() != null)            mod.setPrice(request.price());
-        if (request.isPricePublic() != null)    mod.setPricePublic(request.isPricePublic());
         if (request.mileageAtInstall() != null) mod.setMileageAtInstall(request.mileageAtInstall());
-
-        // Price consistency: if isPricePublic ends up true, a price must exist.
-        if (mod.isPricePublic() && mod.getPrice() == null) {
-            throw new InvalidReferenceException("price must be set when isPricePublic is true");
-        }
 
         modificationRepository.save(mod);
 
@@ -381,7 +380,7 @@ class GarageServiceImpl implements GarageService {
         }
 
         List<CarModificationGalleryEntity> media = modificationGalleryRepository.findAllByModification_Id(modificationId);
-        return toModificationDto(mod, media, true);
+        return toModificationDto(mod, media);
     }
 
     @Override
@@ -460,6 +459,14 @@ class GarageServiceImpl implements GarageService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<CarFuelTypeOptionsDto> listFuelTypeOptions() {
+        return fuelTypeOptionsRepository.findAllByOrderByNameAsc().stream()
+                .map(f -> new CarFuelTypeOptionsDto(f.getId(), f.getName()))
+                .toList();
+    }
+
     // -------------------------------------------------------------------
     // HELPERS
     // -------------------------------------------------------------------
@@ -481,9 +488,11 @@ class GarageServiceImpl implements GarageService {
      */
     private void applyCarRequest(CarEntity car, CarRequest req) {
 
-        CarBrandEntity brand = brandRepository.findById(req.brandId())
+        CarBrandEntity brand = brandRepository
+                .findById(req.brandId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown brand id: " + req.brandId()));
-        CarModelEntity model = modelRepository.findById(req.modelId())
+        CarModelEntity model = modelRepository
+                .findById(req.modelId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown model id: " + req.modelId()));
 
         // Reject inconsistent brand/model pairs — the DB lets this through but it'd produce
@@ -491,20 +500,28 @@ class GarageServiceImpl implements GarageService {
         if (!model.getBrand().getId().equals(brand.getId())) {
             throw new InvalidReferenceException("Model " + req.modelId() + " does not belong to brand " + req.brandId());
         }
-        CarDrivetrainEntity drivetrain = drivetrainRepository.findById(req.drivetrainId())
+        CarDrivetrainEntity drivetrain = drivetrainRepository
+                .findById(req.drivetrainId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown drivetrain id: " + req.drivetrainId()));
-        CarColorEntity color = colorRepository.findById(req.colorId())
+        CarColorEntity color = colorRepository
+                .findById(req.colorId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown color id: " + req.colorId()));
-        CarDistanceUnitEntity unit = distanceUnitRepository.findById(req.mileageUnitId())
+        CarDistanceUnitEntity unit = distanceUnitRepository
+                .findById(req.mileageUnitId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown mileage unit id: " + req.mileageUnitId()));
-        CarStatusOptionEntity status = statusOptionRepository.findById(req.statusId())
+        CarStatusOptionEntity status = statusOptionRepository
+                .findById(req.statusId())
                 .orElseThrow(() -> new InvalidReferenceException("Unknown status id: " + req.statusId()));
+        CarFuelTypeOptionsEntity fuelType = fuelTypeOptionsRepository
+                .findById(req.fuelTypeId())
+                .orElseThrow(() -> new InvalidReferenceException("Unknown fuel type id: " + req.fuelTypeId()));
 
         car.setBrand(brand);
         car.setModel(model);
         car.setDrivetrain(drivetrain);
         car.setColor(color);
         car.setMileageUnit(unit);
+        car.setMileage(req.mileage());
         car.setStatus(status);
         car.setYear(req.year());
         car.setHorsepower(req.horsepower());
@@ -513,7 +530,9 @@ class GarageServiceImpl implements GarageService {
         car.setEngineDisplacement(req.engineDisplacement());
         car.setZeroToOneHundred(req.zeroToOneHundred());
         car.setChassisCode(req.chassisCode());
+        car.setModelCode(req.modelCode());
         car.setEngineCode(req.engineCode());
+        car.setFuelType(fuelType);
     }
 
     /**
@@ -534,7 +553,6 @@ class GarageServiceImpl implements GarageService {
         mod.setDescription(req.description());
         mod.setInstallationDate(req.installationDate());
         mod.setPrice(req.price());
-        mod.setPricePublic(req.isPricePublic());
         mod.setMileageAtInstall(req.mileageAtInstall());
     }
 
@@ -630,21 +648,20 @@ class GarageServiceImpl implements GarageService {
      *
      * Denormalizes reference values (e.g., brandId + brandName) so the client has both
      * the ID (for form state) and display label (for rendering) without needing separate
-     * lookups. Converts modification prices based on ownership and privacy settings.
+     * lookups.
      *
      * @param car the car entity (with all references eagerly loaded)
      * @param mods the list of modifications for this car
-     * @param isOwner whether the current user is the car owner (used for price privacy)
      * @return the car DTO with all specifications and modifications
      */
-    private CarDto toCarDto(CarEntity car, List<CarModificationEntity> mods, boolean isOwner) {
+    private CarDto toCarDto(CarEntity car, List<CarModificationEntity> mods) {
         // Load all media for this car's modifications in one query, then group by mod ID.
-        Map<UUID, List<CarModificationGalleryEntity>> mediaByModId =
-                modificationGalleryRepository.findAllByCarId(car.getId()).stream()
+        Map<UUID, List<CarModificationGalleryEntity>> mediaByModId = modificationGalleryRepository
+                .findAllByCarId(car.getId()).stream()
                         .collect(Collectors.groupingBy(g -> g.getModification().getId()));
 
         List<CarModificationDto> modDtos = mods.stream()
-                .map(m -> toModificationDto(m, mediaByModId.getOrDefault(m.getId(), List.of()), isOwner))
+                .map(m -> toModificationDto(m, mediaByModId.getOrDefault(m.getId(), List.of())))
                 .toList();
 
         List<String> galleryUrls = carGalleryRepository.findAllByCarIdOrderByPositionAsc(car.getId()).stream()
@@ -673,11 +690,15 @@ class GarageServiceImpl implements GarageService {
                 car.getEngineDisplacement(),
                 car.getZeroToOneHundred(),
                 car.getChassisCode(),
+                car.getModelCode(),
                 car.getEngineCode(),
                 car.getCoverImageUrl(),
                 galleryUrls,
                 car.getCreatedAt(),
-                toStatusOptionDto(car.getStatus()),
+                car.getFuelType().getId(),
+                car.getFuelType().getName(),
+                car.getStatus().getId(),
+                car.getStatus().getType(),
                 modDtos);
     }
 
@@ -685,28 +706,11 @@ class GarageServiceImpl implements GarageService {
         return new CarStatusOptionDto(s.getId(), s.getType());
     }
 
-    /**
-     * Converts a modification entity to a DTO, respecting price visibility.
-     *
-     * Price visibility rules:
-     * <ul>
-     *   <li>If current user is the car owner: price is always visible</li>
-     *   <li>If modification is marked public: price is visible to everyone</li>
-     *   <li>Otherwise: price is null (hidden from non-owners)</li>
-     * </ul>
-     *
-     * @param mod the modification entity
-     * @param isOwner whether the current user is the car owner
-     * @return the modification DTO with privacy-controlled price visibility
-     */
     private CarModificationDto toModificationDto(CarModificationEntity mod,
-                                                   List<CarModificationGalleryEntity> media,
-                                                   boolean isOwner) {
+                                                   List<CarModificationGalleryEntity> media) {
         List<CarModificationMediaDto> mediaDtos = media.stream()
                 .map(g -> new CarModificationMediaDto(g.getUrl(), g.getType(), g.getPhase()))
                 .toList();
-        // Hide the price from non-owners when the owner marked it private.
-        Float price = (isOwner || mod.isPricePublic()) ? mod.getPrice() : null;
         return new CarModificationDto(
                 mod.getId(),
                 mod.getCar().getId(),
@@ -716,8 +720,7 @@ class GarageServiceImpl implements GarageService {
                 mod.getDescription(),
                 mediaDtos,
                 mod.getInstallationDate(),
-                price,
-                mod.isPricePublic(),
+                mod.getPrice(),
                 mod.getMileageAtInstall(),
                 mod.getCreatedAt());
     }

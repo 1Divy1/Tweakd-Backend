@@ -22,7 +22,6 @@ import java.util.List;
  * @param description detailed description (max 1000 chars); null = no change
  * @param installationDate when the mod was installed; null = no change
  * @param price cost of the modification; null = no change
- * @param isPricePublic whether the price is visible to other users; null = no change
  * @param mileageAtInstall mileage reading at installation; null = no change
  * @param addMedia media items to append (each requires a URL and a phase)
  * @param removeMediaUrls URLs of existing media items to delete
@@ -36,9 +35,7 @@ public record UpdateModificationRequest(
 
         Instant installationDate,
 
-        @Positive Float price,
-
-        Boolean isPricePublic,
+        @Positive Integer price,
 
         @Positive Integer mileageAtInstall,
 
