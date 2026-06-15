@@ -79,4 +79,23 @@ public class CarController {
     ) {
         garageService.saveGalleryImageUrls(jwt.getSubject(), carId, request.urls());
     }
+
+    @DeleteMapping("/{carId}/cover")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteCarCover(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId
+    ) {
+        garageService.deleteCarCoverImage(jwt.getSubject(), carId);
+    }
+
+    @DeleteMapping("/{carId}/gallery")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteCarGallery(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID carId,
+            @Valid @RequestBody GalleryUrlsRequest request
+    ) {
+        garageService.deleteGalleryImages(jwt.getSubject(), carId, request.urls());
+    }
 }

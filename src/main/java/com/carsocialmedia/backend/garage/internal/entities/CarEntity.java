@@ -72,6 +72,10 @@ public class CarEntity {
     @Column(name = "engine_code")
     private String engineCode;
 
+    /** The car's story/description (optional, free text). */
+    @Column(name = "story")
+    private String story;
+
     /** URL to the car's cover/hero image. */
     @Column(name = "cover_image_url")
     private String coverImageUrl;

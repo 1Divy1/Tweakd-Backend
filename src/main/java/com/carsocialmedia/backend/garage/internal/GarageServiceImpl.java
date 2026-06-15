@@ -214,8 +214,24 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new CarNotFoundException(carId));
         ensureOwnership(car, userId);
 
+        // Collect every R2 object owned by this car BEFORE the DB rows disappear: the cover image,
+        // all gallery images, and all media of every modification. The DB child rows are removed by
+        // the Supabase ON DELETE CASCADE, but that cascade only touches the database, not R2.
+        List<String> r2Urls = new ArrayList<>();
+        if (car.getCoverImageUrl() != null) {
+            r2Urls.add(car.getCoverImageUrl());
+        }
+        carGalleryRepository.findAllByCarIdOrderByPositionAsc(carId).stream()
+                .map(CarGalleryEntity::getUrl)
+                .forEach(r2Urls::add);
+        modificationGalleryRepository.findAllByCarId(carId).stream()
+                .map(CarModificationGalleryEntity::getUrl)
+                .forEach(r2Urls::add);
+
         // car_modifications.car_id is ON DELETE CASCADE in Supabase.
         carRepository.delete(car);
+
+        deleteR2ObjectsAfterCommit(r2Urls, carId);
     }
 
     @Override
@@ -292,22 +308,55 @@ class GarageServiceImpl implements GarageService {
         carGalleryRepository.saveAll(entries);
 
         // R2: delete removed objects only after the DB transaction commits.
-        // If the DB rolls back, this callback never fires, so R2 is untouched.
-        // If R2 deletion fails after commit, the DB is correct and we just log —
-        // those files become orphans but no references point to them.
-        if (!removedUrls.isEmpty()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    try {
-                        storageService.deleteObjects(removedUrls);
-                    } catch (Exception e) {
-                        log.warn("DB committed but failed to delete {} orphaned R2 objects for car {}",
-                                removedUrls.size(), carId, e);
-                    }
-                }
-            });
+        deleteR2ObjectsAfterCommit(removedUrls, carId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteCarCoverImage(String currentUserId, UUID carId) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        CarEntity car = carRepository.findById(carId)
+                .orElseThrow(() -> new CarNotFoundException(carId));
+        ensureOwnership(car, userId);
+
+        String coverUrl = car.getCoverImageUrl();
+        if (coverUrl == null) {
+            return;
         }
+
+        car.setCoverImageUrl(null);
+        carRepository.save(car);
+
+        deleteR2ObjectsAfterCommit(List.of(coverUrl), carId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteGalleryImages(String currentUserId, UUID carId, List<String> urls) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        CarEntity car = carRepository.findById(carId)
+                .orElseThrow(() -> new CarNotFoundException(carId));
+        ensureOwnership(car, userId);
+
+        if (urls == null || urls.isEmpty()) {
+            return;
+        }
+
+        // Only act on URLs that actually belong to this car's gallery. This keeps the DB scope and
+        // the R2 deletion in sync and prevents an owner from deleting unrelated R2 objects by URL.
+        Set<String> requested = new HashSet<>(urls);
+        List<String> toDelete = carGalleryRepository.findAllByCarIdOrderByPositionAsc(carId).stream()
+                .map(CarGalleryEntity::getUrl)
+                .filter(requested::contains)
+                .toList();
+        if (toDelete.isEmpty()) {
+            return;
+        }
+
+        carGalleryRepository.deleteAllByCarIdAndUrlIn(carId, toDelete);
+        deleteR2ObjectsAfterCommit(toDelete, carId);
     }
 
     // -------------------------------------------------------------------
@@ -369,8 +418,17 @@ class GarageServiceImpl implements GarageService {
         modificationRepository.save(mod);
 
         // Remove media items first so a re-upload of the same URL isn't double-inserted.
+        // Scope to URLs that actually belong to this mod, then delete the rows and the R2 objects.
         if (request.removeMediaUrls() != null && !request.removeMediaUrls().isEmpty()) {
-            modificationGalleryRepository.deleteAllByModification_IdAndUrlIn(modificationId, request.removeMediaUrls());
+            Set<String> requested = new HashSet<>(request.removeMediaUrls());
+            List<String> toDelete = modificationGalleryRepository.findAllByModification_Id(modificationId).stream()
+                    .map(CarModificationGalleryEntity::getUrl)
+                    .filter(requested::contains)
+                    .toList();
+            if (!toDelete.isEmpty()) {
+                modificationGalleryRepository.deleteAllByModification_IdAndUrlIn(modificationId, toDelete);
+                deleteR2ObjectsAfterCommit(toDelete, carId);
+            }
         }
 
         if (request.addMedia() != null) {
@@ -396,7 +454,47 @@ class GarageServiceImpl implements GarageService {
         }
         ensureOwnership(mod.getCar(), userId);
 
+        // Collect this mod's media URLs before deletion. Gallery rows go via the Supabase
+        // ON DELETE CASCADE, but the R2 objects must be removed explicitly.
+        List<String> r2Urls = modificationGalleryRepository.findAllByModification_Id(modificationId).stream()
+                .map(CarModificationGalleryEntity::getUrl)
+                .toList();
+
         modificationRepository.delete(mod);
+
+        deleteR2ObjectsAfterCommit(r2Urls, carId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteModificationMedia(String currentUserId, UUID carId, UUID modificationId, List<String> urls) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        CarModificationEntity mod = modificationRepository.findById(modificationId)
+                .orElseThrow(() -> new CarModificationNotFoundException(modificationId));
+
+        if (!mod.getCar().getId().equals(carId)) {
+            throw new CarModificationNotFoundException(modificationId);
+        }
+        ensureOwnership(mod.getCar(), userId);
+
+        if (urls == null || urls.isEmpty()) {
+            return;
+        }
+
+        // Only act on URLs that actually belong to this modification — keeps the DB scope and the
+        // R2 deletion in sync and prevents deleting unrelated R2 objects by URL.
+        Set<String> requested = new HashSet<>(urls);
+        List<String> toDelete = modificationGalleryRepository.findAllByModification_Id(modificationId).stream()
+                .map(CarModificationGalleryEntity::getUrl)
+                .filter(requested::contains)
+                .toList();
+        if (toDelete.isEmpty()) {
+            return;
+        }
+
+        modificationGalleryRepository.deleteAllByModification_IdAndUrlIn(modificationId, toDelete);
+        deleteR2ObjectsAfterCommit(toDelete, carId);
     }
 
     // -------------------------------------------------------------------
@@ -472,6 +570,33 @@ class GarageServiceImpl implements GarageService {
     // -------------------------------------------------------------------
 
     /**
+     * Registers an after-commit callback that deletes the given objects from R2.
+     *
+     * Deletion runs only if the surrounding DB transaction commits — if it rolls back, the
+     * callback never fires and R2 is untouched. If R2 deletion fails after commit, the DB is
+     * already consistent and we just log: those files become orphans but nothing references them.
+     *
+     * @param urls public R2 URLs to delete (empty list is a no-op)
+     * @param carId the owning car ID, for log context
+     */
+    private void deleteR2ObjectsAfterCommit(List<String> urls, UUID carId) {
+        if (urls.isEmpty()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    storageService.deleteObjects(urls);
+                } catch (Exception e) {
+                    log.warn("DB committed but failed to delete {} orphaned R2 objects for car {}",
+                            urls.size(), carId, e);
+                }
+            }
+        });
+    }
+
+    /**
      * Applies a car request (create or update) to a car entity, resolving all reference
      * IDs and validating consistency constraints.
      *
@@ -532,6 +657,7 @@ class GarageServiceImpl implements GarageService {
         car.setChassisCode(req.chassisCode());
         car.setModelCode(req.modelCode());
         car.setEngineCode(req.engineCode());
+        car.setStory(req.story());
         car.setFuelType(fuelType);
     }
 
@@ -699,6 +825,7 @@ class GarageServiceImpl implements GarageService {
                 car.getFuelType().getName(),
                 car.getStatus().getId(),
                 car.getStatus().getType(),
+                car.getStory(),
                 modDtos);
     }
 

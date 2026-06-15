@@ -40,6 +40,7 @@ import java.util.UUID;
  * @param fuelTypeName the fuel type display name
  * @param statusId the car's status option ID (e.g., daily driver, weekend cruiser)
  * @param statusName the car's status display name
+ * @param story the car's story/description (optional, free text)
  * @param modifications list of modifications (upgrades) made to this car
  */
 public record CarDto(
@@ -73,5 +74,6 @@ public record CarDto(
         String fuelTypeName,
         String statusId,
         String statusName,
+        String story,
         List<CarModificationDto> modifications
 ) {}

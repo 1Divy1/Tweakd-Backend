@@ -9,4 +9,7 @@ import java.util.UUID;
 public interface CarGalleryRepository extends JpaRepository<CarGalleryEntity, UUID> {
     List<CarGalleryEntity> findAllByCarIdOrderByPositionAsc(UUID carId);
     void deleteAllByCarId(UUID carId);
+
+    /** Bulk-delete specific gallery items for a car by their URLs. */
+    void deleteAllByCarIdAndUrlIn(UUID carId, List<String> urls);
 }
