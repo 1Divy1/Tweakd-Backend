@@ -4,6 +4,7 @@ import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.response.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.request.CarModificationRequest;
+import com.carsocialmedia.backend.garage.dto.request.GalleryUrlsRequest;
 import com.carsocialmedia.backend.garage.dto.request.UpdateModificationRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -58,5 +59,14 @@ public class CarModificationController {
                                    @PathVariable UUID carId,
                                    @PathVariable UUID modificationId) {
         garageService.deleteModification(jwt.getSubject(), carId, modificationId);
+    }
+
+    @DeleteMapping("/{modificationId}/media")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteModificationMedia(@AuthenticationPrincipal Jwt jwt,
+                                        @PathVariable UUID carId,
+                                        @PathVariable UUID modificationId,
+                                        @Valid @RequestBody GalleryUrlsRequest request) {
+        garageService.deleteModificationMedia(jwt.getSubject(), carId, modificationId, request.urls());
     }
 }

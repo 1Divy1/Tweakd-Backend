@@ -131,6 +131,31 @@ public interface GarageService {
      */
     void saveGalleryImageUrls(String currentUserId, UUID carId, List<String> imageUrls);
 
+    /**
+     * Deletes the car's cover image: clears the {@code cover_image_url} column and removes the
+     * underlying object from R2. The R2 deletion runs only after the DB transaction commits.
+     * No-op if the car has no cover image.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    void deleteCarCoverImage(String currentUserId, UUID carId);
+
+    /**
+     * Deletes specific gallery images for a car by their URLs: removes the matching gallery rows
+     * and the underlying objects from R2. Only URLs that actually belong to this car's gallery are
+     * acted on; unknown URLs are ignored. The R2 deletion runs only after the DB transaction commits.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @param urls the public R2 URLs of the gallery images to delete
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    void deleteGalleryImages(String currentUserId, UUID carId, List<String> urls);
+
     // ---- MODIFICATIONS -----------------------------------------------------
 
     /**
@@ -174,6 +199,22 @@ public interface GarageService {
      * @throws NotCarOwnerException if the current user is not the car owner
      */
     void deleteModification(String currentUserId, UUID carId, UUID modificationId);
+
+    /**
+     * Deletes specific before/after media items of a modification by their URLs: removes the matching
+     * gallery rows and the underlying objects from R2. Only URLs that actually belong to this
+     * modification are acted on; unknown URLs are ignored. The R2 deletion runs only after the DB
+     * transaction commits.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @param modificationId the modification ID
+     * @param urls the public R2 URLs of the media items to delete
+     * @throws CarModificationNotFoundException if the modification does not exist or
+     *         does not belong to the specified car
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    void deleteModificationMedia(String currentUserId, UUID carId, UUID modificationId, List<String> urls);
 
     // ---- REFERENCE DATA ----------------------------------------------------
 

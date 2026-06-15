@@ -34,6 +34,7 @@ import java.util.UUID;
  * @param fuelTypeId the fuel type ID (must exist in car_fuel_type_options table)
  * @param engineCode internal engine code (e.g., S65B40, M340i), max 50 chars
  * @param statusId the car status option ID (optional, e.g., daily driver, weekend cruiser)
+ * @param story the car's story/description (optional, free text)
  */
 public record CarRequest(
         @NotNull UUID brandId,
@@ -52,5 +53,6 @@ public record CarRequest(
         @Positive int horsepower,
         @Positive int weight,
         @Positive float engineDisplacement,
-        @Positive Float zeroToOneHundred
+        @Positive Float zeroToOneHundred,
+        @Size(max = 2000) String story
 ) {}
