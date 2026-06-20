@@ -1,5 +1,6 @@
-package com.carsocialmedia.backend.profile.internal;
+package com.carsocialmedia.backend.profile.internal.repository;
 
+import com.carsocialmedia.backend.profile.internal.entity.ProfileEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
@@ -7,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-interface ProfileRepository extends JpaRepository<ProfileEntity, UUID> {
+public interface ProfileRepository extends JpaRepository<ProfileEntity, UUID> {
     boolean existsByUsername(String username);
     Optional<ProfileEntity> findByUsername(String username);
     List<ProfileEntity> findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc(String prefix);

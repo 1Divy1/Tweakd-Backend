@@ -1,9 +1,13 @@
 # garage module
 
 Manages each user's garage (one per user) and the cars and modifications inside it.
-Owns the `garages`, `cars`, `car_modifications` and the seven car-reference lookup
-tables (`car_brands`, `car_models`, `car_drivetrain_options`, `car_color_options`,
-`car_distance_units`, `car_status_options`, `car_mod_categories`).
+Owns the `garages`, `cars`, `car_modifications`, `dream_cars` and the seven
+car-reference lookup tables (`car_brands`, `car_models`, `car_drivetrain_options`,
+`car_color_options`, `car_distance_units`, `car_status_options`, `car_mod_categories`).
+
+> `dream_cars` (a user's wishlist) lives here rather than in `profile` because it
+> references `car_brands`/`car_models`. The owning user is stored as a raw
+> `profile_id` UUID, mirroring `garages.owner_id`.
 
 Depends on the `profile` module for username resolution and privacy flags, and on
 the `follow` module for the accepted-follower check used to gate access to private
@@ -30,6 +34,10 @@ users' garages.
 | `deleteCarImage(currentUserId, carId, imageId)` | Deletes a gallery image record; only the car owner may delete |
 | `generateCarImageDownloadUrl(currentUserId, storagePath)` | Returns a short-lived presigned download URL after verifying view permission |
 | `listBrands()` / `listModelsByBrand(brandId)` / `listDrivetrains()` / `listColors()` / `listDistanceUnits()` / `listStatusOptions()` / `listModCategories()` | Reference data for client dropdowns |
+| `listDreamCars(currentUserId)` | The caller's dream cars in display order |
+| `addDreamCar(currentUserId, DreamCarRequest)` | Appends one or more dream cars to the caller's list; returns the created cars |
+| `updateDreamCar(currentUserId, dreamCarId, DreamCarRequestBody)` | Updates an owned dream car (brand/model) |
+| `deleteDreamCar(currentUserId, dreamCarId)` | Removes an owned dream car |
 
 ### DTOs / records
 
@@ -50,6 +58,9 @@ users' garages.
 | `CarRequest` | Create / replace payload for a car (validated) |
 | `CarModificationRequest` | Create / replace payload for a modification (validated; enforces `isPricePublic ⇒ price != null` via `@AssertTrue`) |
 | `CarBrandDto`, `CarModelDto`, `CarDrivetrainDto`, `CarColorDto`, `CarDistanceUnitDto`, `CarStatusOptionDto`, `CarModCategoryDto` | Reference data |
+| `DreamCarDto` | A dream car with denormalized brand/model names, createdAt |
+| `DreamCarRequest` | Create payload: a non-empty `dreamCars` list of `DreamCarRequestBody` |
+| `DreamCarRequestBody` | A single dream car: `brandId` (required), `modelId` (optional). Also the body of a single-item update |
 
 ### Exceptions
 
@@ -60,6 +71,7 @@ users' garages.
 | `CarModificationNotFoundException` | 404 | Modification id doesn't exist (or doesn't belong to the path's car id) |
 | `CarImageNotFoundException` | 404 | Gallery image id doesn't exist or doesn't belong to the path's car id |
 | `NotCarOwnerException` | 403 | Caller is not the owner of the car they're trying to mutate |
+| `DreamCarNotFoundException` | 404 | Dream car id doesn't exist or isn't owned by the caller (queries are owner-scoped) |
 | `PrivateGarageException` | 403 | Caller is viewing a private user's garage without being an accepted follower |
 | `InvalidReferenceException` | 400 | Request references an unknown brand / model / drivetrain / color / unit / category, or a model that doesn't belong to the brand id provided |
 | `InvalidStoragePathException` | 400 | `storagePath` in a download-url request doesn't match the canonical `car-photos/{ownerId}/{carId}/...` format |
@@ -105,6 +117,15 @@ Base path: `/api/v1/garage`
 > Upload URLs for cover, modification before/after, and gallery slots are issued by
 > `POST /cars` as part of car creation. Clients PUT file bytes directly to the returned
 > Supabase URLs — no bytes travel through the backend.
+
+### Dream cars
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/dream-cars` | Your dream cars (oldest first) |
+| POST | `/dream-cars` | Add one or more dream cars from a `dreamCars` list (201) |
+| PUT | `/dream-cars/{dreamCarId}` | Update one of your dream cars (single `DreamCarRequestBody`) |
+| DELETE | `/dream-cars/{dreamCarId}` | Remove one of your dream cars (204) |
 
 ### Reference data (for dropdowns)
 
@@ -157,6 +178,19 @@ the DB enforces the same via `car_modifications_price_visibility_check`.
 
 Cover image and modification before/after image paths are stored as plain `String` columns
 on `CarEntity` and `CarModificationEntity` respectively — they are not rows in `car_images`.
+
+### `DreamCarEntity` → `dream_cars`
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID | PK; app-generated on insert via `UUID.randomUUID()` |
+| profileId | UUID | FK → `profiles.id` (owning user, raw UUID — no cross-module entity ref) |
+| brand | CarBrandEntity | `@ManyToOne(LAZY)`, required (`brand_id`) |
+| model | CarModelEntity | `@ManyToOne(LAZY)`, optional (`model_id`); must belong to the brand |
+| createdAt | Instant | DB default `now()`; `insertable=false, updatable=false` |
+
+All dream-car queries are scoped by `profileId`, so a user can only ever read or
+mutate their own. `@DynamicUpdate` keeps updates lean.
 
 ### Reference entities
 

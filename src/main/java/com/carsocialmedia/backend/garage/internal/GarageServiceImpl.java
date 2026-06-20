@@ -18,11 +18,15 @@ import com.carsocialmedia.backend.garage.dto.request.CarRequest;
 import com.carsocialmedia.backend.garage.dto.request.UpdateModificationRequest;
 import com.carsocialmedia.backend.garage.dto.CarStatusOptionDto;
 import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
+import com.carsocialmedia.backend.garage.dto.DreamCarDto;
 import com.carsocialmedia.backend.garage.dto.request.CreateCarRequest;
+import com.carsocialmedia.backend.garage.dto.request.DreamCarRequest;
+import com.carsocialmedia.backend.garage.dto.request.DreamCarRequestBody;
 import com.carsocialmedia.backend.garage.dto.response.CreateCarResponse;
 import com.carsocialmedia.backend.garage.dto.GarageDto;
 import com.carsocialmedia.backend.garage.exception.CarModificationNotFoundException;
 import com.carsocialmedia.backend.garage.exception.CarNotFoundException;
+import com.carsocialmedia.backend.garage.exception.DreamCarNotFoundException;
 import com.carsocialmedia.backend.garage.exception.GarageNotFoundException;
 import com.carsocialmedia.backend.garage.exception.InvalidReferenceException;
 import com.carsocialmedia.backend.garage.exception.NotCarOwnerException;
@@ -67,6 +71,7 @@ class GarageServiceImpl implements GarageService {
     private final CarFuelTypeOptionsRepository fuelTypeOptionsRepository;
     private final CarStatusOptionRepository statusOptionRepository;
     private final CarModCategoryRepository modCategoryRepository;
+    private final DreamCarRepository dreamCarRepository;
     private final ProfileService profileService;
     private final FollowService followService;
     private final StorageService storageService;
@@ -88,6 +93,7 @@ class GarageServiceImpl implements GarageService {
                       CarFuelTypeOptionsRepository fuelTypeOptionsRepository,
                       CarStatusOptionRepository statusOptionRepository,
                       CarModCategoryRepository modCategoryRepository,
+                      DreamCarRepository dreamCarRepository,
                       ProfileService profileService,
                       FollowService followService,
                       StorageService storageService) {
@@ -104,6 +110,7 @@ class GarageServiceImpl implements GarageService {
         this.fuelTypeOptionsRepository = fuelTypeOptionsRepository;
         this.statusOptionRepository = statusOptionRepository;
         this.modCategoryRepository = modCategoryRepository;
+        this.dreamCarRepository = dreamCarRepository;
         this.profileService = profileService;
         this.followService = followService;
         this.storageService = storageService;
@@ -563,6 +570,102 @@ class GarageServiceImpl implements GarageService {
         return fuelTypeOptionsRepository.findAllByOrderByNameAsc().stream()
                 .map(f -> new CarFuelTypeOptionsDto(f.getId(), f.getName()))
                 .toList();
+    }
+
+    // -------------------------------------------------------------------
+    // DREAM CARS
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<DreamCarDto> listDreamCars(String currentUserId) {
+        UUID userId = UUID.fromString(currentUserId);
+        return dreamCarRepository.findByProfileIdOrderByCreatedAtAsc(userId).stream()
+                .map(this::toDreamCarDto)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public List<DreamCarDto> addDreamCar(String currentUserId, DreamCarRequest request) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        List<UUID> createdIds = new ArrayList<>();
+        for (DreamCarRequestBody body : request.dreamCars()) {
+            DreamCarEntity dreamCar = new DreamCarEntity();
+            dreamCar.setId(UUID.randomUUID());
+            dreamCar.setProfileId(userId);
+            applyDreamCarBody(dreamCar, body);
+            dreamCarRepository.save(dreamCar);
+            createdIds.add(dreamCar.getId());
+        }
+
+        // Flush + clear so the re-fetch picks up the DB-managed createdAt.
+        entityManager.flush();
+        entityManager.clear();
+        return createdIds.stream()
+                .map(id -> dreamCarRepository.findById(id)
+                        .orElseThrow(() -> new DreamCarNotFoundException(id)))
+                .map(this::toDreamCarDto)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public DreamCarDto updateDreamCar(String currentUserId, UUID dreamCarId, DreamCarRequestBody body) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        DreamCarEntity dreamCar = dreamCarRepository.findByIdAndProfileId(dreamCarId, userId)
+                .orElseThrow(() -> new DreamCarNotFoundException(dreamCarId));
+        applyDreamCarBody(dreamCar, body);
+        dreamCarRepository.save(dreamCar);
+        return toDreamCarDto(dreamCar);
+    }
+
+    @Override
+    @Transactional
+    public void deleteDreamCar(String currentUserId, UUID dreamCarId) {
+        UUID userId = UUID.fromString(currentUserId);
+
+        DreamCarEntity dreamCar = dreamCarRepository.findByIdAndProfileId(dreamCarId, userId)
+                .orElseThrow(() -> new DreamCarNotFoundException(dreamCarId));
+        dreamCarRepository.delete(dreamCar);
+    }
+
+    /**
+     * Resolves and validates the brand/model references of a single dream car body. The
+     * model is optional; when present it must belong to the chosen brand.
+     *
+     * @param dreamCar the entity to populate (mutated in-place)
+     * @param body the dream car body
+     * @throws InvalidReferenceException if the brand/model is unknown or inconsistent
+     */
+    private void applyDreamCarBody(DreamCarEntity dreamCar, DreamCarRequestBody body) {
+        CarBrandEntity brand = brandRepository.findById(body.brandId())
+                .orElseThrow(() -> new InvalidReferenceException("Unknown brand id: " + body.brandId()));
+
+        CarModelEntity model = null;
+        if (body.modelId() != null) {
+            model = modelRepository.findById(body.modelId())
+                    .orElseThrow(() -> new InvalidReferenceException("Unknown model id: " + body.modelId()));
+            if (!model.getBrand().getId().equals(brand.getId())) {
+                throw new InvalidReferenceException("Model " + body.modelId() + " does not belong to brand " + body.brandId());
+            }
+        }
+
+        dreamCar.setBrand(brand);
+        dreamCar.setModel(model);
+    }
+
+    private DreamCarDto toDreamCarDto(DreamCarEntity d) {
+        CarModelEntity model = d.getModel();
+        return new DreamCarDto(
+                d.getId(),
+                d.getBrand().getId(),
+                d.getBrand().getName(),
+                model == null ? null : model.getId(),
+                model == null ? null : model.getModel(),
+                d.getCreatedAt());
     }
 
     // -------------------------------------------------------------------
