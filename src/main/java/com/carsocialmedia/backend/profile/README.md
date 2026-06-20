@@ -1,6 +1,12 @@
 # profile module
 
-Manages user profile data. Owns the `profiles` table.
+Manages user profile data and onboarding. Owns the `profiles` table plus the
+onboarding reference/selection tables: `countries`, `cities`,
+`community_role_options`, `car_category_options`, `notification_preferences`, and
+the junctions `profile_car_categories_junction` / `profile_community_roles_junction`.
+
+> **dream_cars** is intentionally *not* here — it references `car_brands`/`car_models`
+> (owned by the garage module), so it will live in the **garage** module when built.
 
 ## Public API
 
@@ -16,6 +22,13 @@ Manages user profile data. Owns the `profiles` table.
 | `findIdByUsername(username)` | Lookup helper for sibling modules — resolves a username to its UUID |
 | `isPrivate(userId)` | Lookup helper for sibling modules — checks privacy flag without exposing the entity |
 | `findByIds(ids)` | Lookup helper for sibling modules — bulk hydrate a list of UUIDs to search result DTOs |
+| `listCountries()` / `listCities(countryId)` | Read-only onboarding reference lists |
+| `listCommunityRoles()` / `listCarCategories()` | Read-only onboarding reference lists |
+| `updateLocation(userId, request)` | Sets city, discovery radius, and/or home-location point |
+| `updateRealtimeLocation(userId, request)` | Stores the user's live location after opt-in |
+| `getCarCategories(userId)` / `setCarCategories(userId, request)` | Read / replace-all favorite car categories |
+| `getCommunityRoles(userId)` / `setCommunityRoles(userId, request)` | Read / replace-all community roles |
+| `getNotificationPreferences(userId)` / `updateNotificationPreferences(userId, request)` | Read (lazily defaults) / replace notification toggles |
 
 ### DTOs / records
 
@@ -24,8 +37,18 @@ Manages user profile data. Owns the `profiles` table.
 | `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, isPrivate, requiresOnboarding | Own-profile responses |
 | `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, isPrivate | Public profile view (no `requiresOnboarding`) |
 | `ProfileSearchResultDto` | id, username, avatarUrl | Search results and cross-module hydration |
-| `OnboardingRequest` | username (required), bio (optional) | POST /onboarding body |
+| `OnboardingRequest` | username (required), bio, cityId, discoveryRadiusKm, categoryIds, roleIds (all optional) | POST /onboarding body |
 | `PrivacyRequest` | isPrivate | PATCH /me/privacy body |
+| `LocationRequest` | cityId, discoveryRadiusKm (all optional) | PATCH /me/location body |
+| `RealtimeLocationRequest` | lat, lng (required) | PATCH /me/realtime-location body |
+| `CategorySelectionRequest` | categoryIds | PUT /me/car-categories body (replace-all) |
+| `RoleSelectionRequest` | roleIds | PUT /me/community-roles body (replace-all) |
+| `NotificationPreferencesRequest` | 6 boolean toggles (all required) | PUT /me/notifications body |
+| `CountryDto` / `CityDto` | reference data (CityDto exposes lat/lng) | reference reads |
+| `CommunityRoleDto` / `CarCategoryDto` | id, name | reference + selection reads |
+| `NotificationPreferencesDto` | 6 boolean toggles | notification reads/writes |
+
+`ProfileDto` additionally carries `cityId` and `discoveryRadiusKm`.
 
 ### Domain events
 
@@ -51,6 +74,20 @@ Base path: `/api/v1/profile`
 | PATCH | `/me/privacy` | required | Toggle public / private |
 | GET | `/by-username/{username}` | required | Public view of any profile |
 | GET | `/search?q={prefix}` | required | Username prefix search |
+| PATCH | `/me/location` | required | Update city / radius |
+| PATCH | `/me/realtime-location` | required | Push live location after opt-in |
+| GET / PUT | `/me/car-categories` | required | Read / replace favorite car categories |
+| GET / PUT | `/me/community-roles` | required | Read / replace community roles |
+| GET / PUT | `/me/notifications` | required | Read / replace notification toggles |
+
+Reference reads (base path `/api/v1/profile/reference`):
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/countries` | All countries |
+| GET | `/countries/{countryId}/cities` | Cities in a country |
+| GET | `/community-roles` | All community role options |
+| GET | `/car-categories` | All car category options |
 
 ## Entity — `ProfileEntity` → table `profiles`
 
@@ -69,9 +106,36 @@ Base path: `/api/v1/profile`
 | isBusiness | boolean | |
 | isPrivate | boolean | |
 | requiresOnboarding | boolean | |
+| city | CityEntity | `@ManyToOne` on `city_id`, nullable |
+| discoveryRadiusKm | Integer | nullable, DB check 1–100 |
+| realtimeLocation | Point | `geography` (unconstrained), nullable |
 
 `@DynamicUpdate` is set so only changed columns are sent in UPDATE statements.
+
+### Other entities
+
+`CountryEntity`, `CityEntity`, `CommunityRoleOptionEntity`, `CarCategoryOptionEntity`
+are read-only reference tables. `NotificationPreferencesEntity` is 1:1 with a profile
+(`profile_id` PK). The two junction entities (`ProfileCarCategoryEntity`,
+`ProfileCommunityRoleEntity`) use composite `@EmbeddedId` keys, mirroring
+`follow/internal/FollowEntity`; they are written replace-all per profile.
+
+### Geography
+
+Location columns are mapped with **JTS `Point`** via `hibernate-spatial`
+(`@JdbcTypeCode(GEOGRAPHY)`, SRID 4326). The API speaks plain lat/lng doubles;
+`GeoSupport` (profile/internal) converts to/from `Point` (coordinate order is
+**lng, lat**). This stores location as first-class, queryable data for future
+proximity-based features.
+
+> **Pending Supabase migrations** (flagged, not applied): constrain
+> `profiles.realtime_location` to `geography(Point,4326)`, and set `cities.region`
+> NOT NULL to match the entity (`region` is mapped `nullable = false`).
 
 ## Supabase triggers
 
 Counter columns (`followersCount`, `followingCount`) are maintained by triggers in Supabase. The Java layer never writes them directly.
+
+`notification_preferences` flags default to `true` at the DB level; the service also
+inserts a default row during onboarding (and lazily on first read) so the app always
+has a row to read.

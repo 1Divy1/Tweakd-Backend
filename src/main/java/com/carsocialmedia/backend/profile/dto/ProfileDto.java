@@ -15,5 +15,7 @@ public record ProfileDto(
         boolean isVerified,
         boolean isBusiness,
         boolean isPrivate,
-        boolean requiresOnboarding
+        boolean requiresOnboarding,
+        String cityId,
+        Integer discoveryRadiusKm
 ) {}

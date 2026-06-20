@@ -8,6 +8,9 @@ import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
+import com.carsocialmedia.backend.garage.dto.DreamCarDto;
+import com.carsocialmedia.backend.garage.dto.request.DreamCarRequest;
+import com.carsocialmedia.backend.garage.dto.request.DreamCarRequestBody;
 import com.carsocialmedia.backend.garage.dto.response.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.request.CarModificationRequest;
@@ -277,4 +280,47 @@ public interface GarageService {
      * @return list of fuel type options with IDs and names
      */
     List<CarFuelTypeOptionsDto> listFuelTypeOptions();
+
+    // ---- DREAM CARS --------------------------------------------------------
+
+    /**
+     * Lists the current user's dream cars in display order.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @return the user's dream cars, ordered by position
+     */
+    List<DreamCarDto> listDreamCars(String currentUserId);
+
+    /**
+     * Adds one or more dream cars to the current user's list (appended at the end, in
+     * request order).
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param request the dream cars to add, each with a brand (required) and optional model
+     * @return the created dream cars, in request order
+     * @throws InvalidReferenceException if a brand/model is unknown or the model
+     *         does not belong to the brand
+     */
+    List<DreamCarDto> addDreamCar(String currentUserId, DreamCarRequest request);
+
+    /**
+     * Fully updates one of the current user's dream cars (brand, model).
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param dreamCarId the dream car ID
+     * @param body the updated brand/model
+     * @return the updated dream car
+     * @throws DreamCarNotFoundException if it does not exist or is not owned by the user
+     * @throws InvalidReferenceException if the brand/model is unknown or inconsistent
+     */
+    DreamCarDto updateDreamCar(String currentUserId, UUID dreamCarId, DreamCarRequestBody body);
+
+    /**
+     * Removes one of the current user's dream cars.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param dreamCarId the dream car ID
+     * @throws DreamCarNotFoundException if it does not exist or is not owned by the user
+     */
+    void deleteDreamCar(String currentUserId, UUID dreamCarId);
 }
