@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.follow.internal;
 
 import com.carsocialmedia.backend.follow.FollowService;
+import com.carsocialmedia.backend.follow.dto.FollowProfileSearchResult;
 import com.carsocialmedia.backend.follow.dto.FollowRequestDto;
 import com.carsocialmedia.backend.follow.dto.FollowStatus;
 import com.carsocialmedia.backend.follow.dto.FollowStatusDto;
@@ -19,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -43,7 +45,7 @@ class FollowServiceImpl implements FollowService {
     @Transactional
     public FollowStatusDto follow(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = resolveUsername(targetUsername);
+        UUID followingId = getUserIdByUsername(targetUsername);
 
         if (followerId.equals(followingId)) {
             throw new CannotFollowSelfException();
@@ -74,7 +76,7 @@ class FollowServiceImpl implements FollowService {
     @Transactional
     public void unfollow(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = resolveUsername(targetUsername);
+        UUID followingId = getUserIdByUsername(targetUsername);
 
         FollowId id = new FollowId(followerId, followingId);
         followRepository.findById(id).ifPresent(followRepository::delete);
@@ -84,14 +86,16 @@ class FollowServiceImpl implements FollowService {
     @Transactional(readOnly = true)
     public FollowStatusDto getFollowStatus(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = resolveUsername(targetUsername);
+        UUID followingId = getUserIdByUsername(targetUsername);
 
         FollowId id = new FollowId(followerId, followingId);
-        return followRepository.findById(id)
+        return followRepository
+                .findById(id)
                 .map(f -> new FollowStatusDto(toStatus(f.getStatus())))
                 .orElse(new FollowStatusDto(FollowStatus.NOT_FOLLOWING));
     }
 
+    // TODO: Logic not implemented yet
     @Override
     @Transactional(readOnly = true)
     public List<FollowRequestDto> getPendingRequests(String currentUserId) {
@@ -132,11 +136,12 @@ class FollowServiceImpl implements FollowService {
                 .toList();
     }
 
+    // TODO: Logic not implemented yet
     @Override
     @Transactional
     public void acceptRequest(String currentUserId, String requesterUsername) {
         UUID userId = UUID.fromString(currentUserId);
-        UUID requesterId = resolveUsername(requesterUsername);
+        UUID requesterId = getUserIdByUsername(requesterUsername);
 
         FollowEntity row = followRepository.findForUpdate(requesterId, userId)
                 .orElseThrow(() -> new FollowRequestNotFoundException(requesterUsername));
@@ -151,11 +156,12 @@ class FollowServiceImpl implements FollowService {
         // The handle_follow_change AFTER UPDATE trigger increments the counters.
     }
 
+    // TODO: Logic not implemented yet
     @Override
     @Transactional
     public void rejectRequest(String currentUserId, String requesterUsername) {
         UUID userId = UUID.fromString(currentUserId);
-        UUID requesterId = resolveUsername(requesterUsername);
+        UUID requesterId = getUserIdByUsername(requesterUsername);
 
         FollowId id = new FollowId(requesterId, userId);
         FollowEntity row = followRepository.findById(id)
@@ -171,26 +177,28 @@ class FollowServiceImpl implements FollowService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ProfileSearchResultDto> getFollowers(String currentUserId, String targetUsername) {
-        UUID viewerId = UUID.fromString(currentUserId);
-        UUID targetId = resolveUsername(targetUsername);
+    public List<FollowProfileSearchResult> getFollowers(String currentUserId, String targetUsername) {
+        UUID viewerUserId = UUID.fromString(currentUserId);
+        UUID targetUserId = getUserIdByUsername(targetUsername);
 
-        ensureCanViewSocialGraph(viewerId, targetId, targetUsername);
+        // TODO: For now, all profiles are public
+        // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
-        List<UUID> followerIds = followRepository.findAcceptedFollowerIds(targetId);
-        return hydrateInOrder(followerIds);
+        List<UUID> followerIds = followRepository.findAcceptedFollowerIds(targetUserId);
+        return convertToFollowProfileSearchResult(viewerUserId, followerIds);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<ProfileSearchResultDto> getFollowing(String currentUserId, String targetUsername) {
-        UUID viewerId = UUID.fromString(currentUserId);
-        UUID targetId = resolveUsername(targetUsername);
+    public List<FollowProfileSearchResult> getFollowing(String currentUserId, String targetUsername) {
+        UUID viewerUserId = UUID.fromString(currentUserId);
+        UUID targetUserId = getUserIdByUsername(targetUsername);
 
-        ensureCanViewSocialGraph(viewerId, targetId, targetUsername);
+        // TODO: For now, all profiles are public
+        // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
-        List<UUID> followingIds = followRepository.findAcceptedFollowingIds(targetId);
-        return hydrateInOrder(followingIds);
+        List<UUID> followingIds = followRepository.findAcceptedFollowingIds(targetUserId);
+        return convertToFollowProfileSearchResult(viewerUserId, followingIds);
     }
 
     @Override
@@ -200,12 +208,23 @@ class FollowServiceImpl implements FollowService {
                 .existsByIdFollowerIdAndIdFollowingIdAndStatus(viewerId, targetId, STATUS_ACCEPTED);
     }
 
+    @Override
+    @Transactional
+    public void removeFollower(String currentUserId, String followerUsernameToRemove) {
+        UUID userId = UUID.fromString(currentUserId);
+        UUID followerId = getUserIdByUsername(followerUsernameToRemove);
+
+        FollowId id = new FollowId(followerId, userId);
+        followRepository.findById(id).ifPresent(followRepository::delete);
+    }
+
     // ---------------------------------------------------------------------
-    // helpers
+    // Helpers
     // ---------------------------------------------------------------------
 
-    private UUID resolveUsername(String username) {
-        return profileService.findIdByUsername(username)
+    private UUID getUserIdByUsername(String username) {
+        return profileService
+                .findIdByUsername(username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
     }
 
@@ -223,18 +242,26 @@ class FollowServiceImpl implements FollowService {
         }
     }
 
-    private List<ProfileSearchResultDto> hydrateInOrder(List<UUID> ids) {
+    private List<FollowProfileSearchResult> convertToFollowProfileSearchResult(UUID viewerId, List<UUID> ids) {
         if (ids.isEmpty()) {
             return List.of();
         }
         Map<UUID, ProfileSearchResultDto> byId = indexById(profileService.findByIds(ids));
+        // Single bulk query: which of these profiles does the viewer already follow?
+        Set<UUID> followedByViewer = Set.copyOf(
+                followRepository.findAcceptedFollowingIdsIn(viewerId, ids));
         return ids.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
+                .map(p -> new FollowProfileSearchResult(
+                        p.id(),
+                        p.username(),
+                        p.avatarUrl(),
+                        followedByViewer.contains(p.id())))
                 .toList();
     }
 
-    private static Map<UUID, ProfileSearchResultDto> indexById(List<ProfileSearchResultDto> dtos) {
+    private static Map<UUID, ProfileSearchResultDto> indexById (List<ProfileSearchResultDto> dtos) {
         Map<UUID, ProfileSearchResultDto> map = new HashMap<>();
         for (ProfileSearchResultDto dto : dtos) {
             map.put(dto.id(), dto);

@@ -18,12 +18,6 @@
  *   </li>
  * </ul>
  *
- * <h2>Price Privacy</h2>
- * Modification prices are controlled by the car owner's {@code isPricePublic} flag:
- * <ul>
- *   <li>The owner always sees the price</li>
- *   <li>Other users see the price only if the owner marked it public; otherwise null is returned</li>
- * </ul>
  *
  * <h2>Main API</h2>
  * Public interface: {@link com.carsocialmedia.backend.garage.GarageService}
@@ -37,8 +31,7 @@
  * <h2>Database Constraints</h2>
  * <ul>
  *   <li>Brand/model consistency: model.brand_id must equal the selected brand</li>
- *   <li>Price visibility: if isPricePublic=true, price must be set</li>
- *   <li>Cascading deletes: deleting a car cascades to delete its modifications</li>
+ * *   <li>Cascading deletes: deleting a car cascades to delete its modifications</li>
  *   <li>createdAt fields are managed by Supabase (DEFAULT now()), not writable by the ORM</li>
  * </ul>
  */

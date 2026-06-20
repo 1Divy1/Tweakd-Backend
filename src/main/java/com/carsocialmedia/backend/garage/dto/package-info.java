@@ -11,8 +11,8 @@
  *
  * <h2>Request DTOs</h2>
  * <ul>
- *   <li>{@link com.carsocialmedia.backend.garage.dto.CarRequest} - payload for POST/PUT car (all fields required)</li>
- *   <li>{@link com.carsocialmedia.backend.garage.dto.CarModificationRequest} - payload for POST/PUT modification (includes price visibility validation)</li>
+ *   <li>{@link com.carsocialmedia.backend.garage.dto.request.CarRequest} - payload for POST/PUT car (all fields required)</li>
+ *   <li>{@link com.carsocialmedia.backend.garage.dto.request.CarModificationRequest} - payload for POST/PUT modification (includes price visibility validation)</li>
  * </ul>
  *
  * <h2>Reference Data DTOs</h2>

@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.follow;
 
+import com.carsocialmedia.backend.follow.dto.FollowProfileSearchResult;
 import com.carsocialmedia.backend.follow.dto.FollowRequestDto;
 import com.carsocialmedia.backend.follow.dto.FollowStatusDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
@@ -44,17 +45,24 @@ public interface FollowService {
      * Followers of {@code targetUsername}. If the target account is private, the list
      * is only visible to the owner or to users who are already accepted followers.
      */
-    List<ProfileSearchResultDto> getFollowers(String currentUserId, String targetUsername);
+    List<FollowProfileSearchResult> getFollowers(String currentUserId, String targetUsername);
 
     /**
      * Users that {@code targetUsername} follows. Same privacy rules as
      * {@link #getFollowers(String, String)}.
      */
-    List<ProfileSearchResultDto> getFollowing(String currentUserId, String targetUsername);
+    List<FollowProfileSearchResult> getFollowing(String currentUserId, String targetUsername);
 
     /**
      * Whether {@code viewerId} is an accepted follower of {@code targetId}. Sibling modules
      * use this to gate access to private content (e.g. another user's garage).
      */
     boolean isAcceptedFollower(UUID viewerId, UUID targetId);
+
+    /**
+     * Removes a follower from the current user's list of followers.
+     * @param currentUserId the ID of the current user
+     * @param followerUsernameToRemove the username of the follower to remove
+     */
+    void removeFollower(String currentUserId, String followerUsernameToRemove);
 }

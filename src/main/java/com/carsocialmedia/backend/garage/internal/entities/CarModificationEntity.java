@@ -18,7 +18,7 @@ import java.util.UUID;
  * A modification (upgrade, customization, or change) made to a car.
  *
  * Tracks when the modification was installed, cost, before/after documentation images,
- * and the mileage at installation. Price visibility is controlled by the isPricePublic flag.
+ * and the mileage at installation. Price is optional — null means not set.
  * The createdAt timestamp is DB-managed and read-only from the ORM side.
  */
 @Entity
@@ -48,24 +48,12 @@ public class CarModificationEntity {
     /** Detailed description of the modification (up to 1000 chars). */
     private String description;
 
-    /** URL to the before/original state image. */
-    @Column(name = "before_image_url")
-    private String beforeImageUrl;
-
-    /** URL to the after/modified state image. */
-    @Column(name = "after_image_url")
-    private String afterImageUrl;
-
     /** When the modification was installed on the car. */
     @Column(name = "installation_date")
     private Instant installationDate;
 
-    /** The cost of the modification (nullable, controlled by isPricePublic). */
-    private Float price;
-
-    /** Whether the modification price is visible to other users. */
-    @Column(name = "is_price_public")
-    private boolean isPricePublic;
+    /** The cost of the modification (optional, null if not set). */
+    private Integer price;
 
     /** The car's mileage reading when the modification was installed (nullable). */
     @Column(name = "mileage_at_install")
