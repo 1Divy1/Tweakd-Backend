@@ -33,5 +33,11 @@
  *   <li><strong>Price Privacy:</strong> CarModificationDto.price is null when the viewer is not the owner and the price is marked private</li>
  *   <li><strong>Validation:</strong> Request DTOs use Jakarta validation annotations (NotNull, NotBlank, Size, etc.). CarModificationRequest additionally validates price/visibility consistency</li>
  * </ul>
+ *
+ * <p>Exposed as a named interface so other modules (e.g. {@code posts}) can consume these
+ * DTOs without crossing into {@code garage.internal}.
  */
+@NamedInterface("dto")
 package com.carsocialmedia.backend.garage.dto;
+
+import org.springframework.modulith.NamedInterface;

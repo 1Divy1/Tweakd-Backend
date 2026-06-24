@@ -16,8 +16,20 @@ public interface StorageService {
     ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files);
 
     /**
-     * Deletes objects from R2 by their public URLs. URLs that don't match any known
-     * bucket's public base URL are skipped with a warning.
+     * Builds the public URL for a stored R2 object key. The bucket name and public domain are
+     * resolved from configuration at call time, so persisted keys stay valid even if those change.
+     *
+     * @param bucket the logical bucket the key belongs to
+     * @param key the bucket-relative R2 object key (as persisted by the owning module)
+     * @return the full public URL, or {@code null} if {@code key} is null or blank
      */
-    void deleteObjects(List<String> urls);
+    String publicUrl(StorageBucket bucket, String key);
+
+    /**
+     * Deletes objects from R2 by their bucket-relative keys. Null/blank keys are skipped.
+     *
+     * @param bucket the logical bucket the keys belong to
+     * @param keys the R2 object keys to delete (empty list is a no-op)
+     */
+    void deleteByKeys(StorageBucket bucket, List<String> keys);
 }

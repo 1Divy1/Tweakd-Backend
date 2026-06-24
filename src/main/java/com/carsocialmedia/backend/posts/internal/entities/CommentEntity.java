@@ -32,6 +32,23 @@ public class CommentEntity {
     @Column(name = "content", nullable = false)
     private String content;
 
+    /**
+     * Parent comment for threaded replies (Reddit-style). {@code null} for a root comment.
+     * Self-referential FK to {@code comments.id}.
+     */
+    @Column(name = "parent_comment_id")
+    private UUID parentCommentId;
+
+    /**
+     * Soft-delete flag. When {@code true} the row is kept (it may still anchor replies)
+     * but the client renders it as "[deleted]" — the content is not surfaced.
+     */
+    @Column(name = "is_deleted", nullable = false)
+    private boolean deleted;
+
+    @Column(name = "likes_count", nullable = false)
+    private int likesCount;
+
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

@@ -154,7 +154,8 @@ Base path: `/api/v1/garage`
 `@ManyToOne(LAZY)` to `GarageEntity`, `CarBrandEntity`, `CarModelEntity`,
 `CarDrivetrainEntity`, `CarColorEntity`, `CarDistanceUnitEntity`. Scalars: year,
 horsepower, torque, weight, engineDisplacement, optional `zeroToOneHundred`,
-`chassisCode`, `engineCode`, `coverImageUrl`. `createdAt` is DB-managed.
+`chassisCode`, `engineCode`, `coverImageKey` (R2 key in the `cover_image_url` column).
+`createdAt` is DB-managed.
 
 Schema-derived id (`gen_random_uuid()` default in Supabase) is set by the application
 with `UUID.randomUUID()`. `@DynamicUpdate` keeps PATCH-style updates lean.

@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.storage.internal;
 
+import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
 import com.carsocialmedia.backend.storage.dto.ModificationUploadUrlsResponse;
 import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
@@ -8,8 +9,6 @@ import com.carsocialmedia.backend.storage.internal.ModificationUploadRequest;
 import com.carsocialmedia.backend.storage.internal.cloudflare.R2Config;
 import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
 import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
@@ -19,8 +18,6 @@ import java.util.UUID;
 
 @Service
 public class StorageServiceImpl implements StorageService {
-
-    private static final Logger log = LoggerFactory.getLogger(StorageServiceImpl.class);
 
     private final PresignedUrlGenerator presigner;
     private final R2Config config;
@@ -74,36 +71,34 @@ public class StorageServiceImpl implements StorageService {
                             "/" + UUID.randomUUID() + file.format().getExtension();
                     String uploadUrl = presigner.generateUploadUrl(
                             config.getGarage().getBucket(), key, file.format().getContentType());
-                    String finalUrl = config.getGarage().getPublicUrl() + "/" + key;
-                    return new ModificationUploadUrlsResponse.Item(key, uploadUrl, finalUrl, file.phase().folder());
+                    return new ModificationUploadUrlsResponse.Item(key, uploadUrl, file.phase().folder());
                 })
                 .toList();
         return new ModificationUploadUrlsResponse(uploads);
     }
 
     @Override
-    public void deleteObjects(List<String> urls) {
-        String garagePublicUrl = config.getGarage().getPublicUrl();
-        String garageBucket    = config.getGarage().getBucket();
+    public String publicUrl(StorageBucket bucket, String key) {
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        return config.target(bucket).getPublicUrl() + "/" + key;
+    }
 
-        List<ObjectIdentifier> keys = urls.stream()
-                .filter(url -> {
-                    if (!url.startsWith(garagePublicUrl + "/")) {
-                        log.warn("Skipping deletion — URL does not match any known bucket: {}", url);
-                        return false;
-                    }
-                    return true;
-                })
-                .map(url -> ObjectIdentifier.builder()
-                        .key(url.substring(garagePublicUrl.length() + 1))
-                        .build())
+    @Override
+    public void deleteByKeys(StorageBucket bucket, List<String> keys) {
+        if (keys == null || keys.isEmpty()) return;
+
+        List<ObjectIdentifier> objects = keys.stream()
+                .filter(key -> key != null && !key.isBlank())
+                .map(key -> ObjectIdentifier.builder().key(key).build())
                 .toList();
 
-        if (keys.isEmpty()) return;
+        if (objects.isEmpty()) return;
 
         s3Client.deleteObjects(r -> r
-                .bucket(garageBucket)
-                .delete(d -> d.objects(keys))
+                .bucket(config.target(bucket).getBucket())
+                .delete(d -> d.objects(objects))
         );
     }
 
@@ -111,7 +106,6 @@ public class StorageServiceImpl implements StorageService {
 
     private UploadUrlResponse buildUploadUrlResponse(R2Config.BucketTarget target, String key, FileFormat format) {
         String uploadUrl = presigner.generateUploadUrl(target.getBucket(), key, format.getContentType());
-        String finalUrl  = target.getPublicUrl() + "/" + key;
-        return new UploadUrlResponse(key, uploadUrl, finalUrl);
+        return new UploadUrlResponse(key, uploadUrl);
     }
 }

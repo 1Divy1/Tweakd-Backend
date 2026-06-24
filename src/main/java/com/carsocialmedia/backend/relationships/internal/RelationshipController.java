@@ -1,0 +1,92 @@
+package com.carsocialmedia.backend.relationships.internal;
+
+import com.carsocialmedia.backend.relationships.RelationshipService;
+import com.carsocialmedia.backend.relationships.dto.FollowProfileSearchResult;
+import com.carsocialmedia.backend.relationships.dto.FollowRequestDto;
+import com.carsocialmedia.backend.relationships.dto.FollowStatusDto;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/v1/follow")
+class RelationshipController {
+
+    private final RelationshipService relationshipService;
+
+    RelationshipController(RelationshipService relationshipService) {
+        this.relationshipService = relationshipService;
+    }
+
+    // ---- Follow / Unfollow / Status -----------------------------------
+
+    @PostMapping("/{username}")
+    public FollowStatusDto follow(@AuthenticationPrincipal Jwt jwt,
+                                  @PathVariable String username) {
+        return relationshipService.follow(jwt.getSubject(), username);
+    }
+
+    @DeleteMapping("/{username}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unfollow(@AuthenticationPrincipal Jwt jwt,
+                         @PathVariable String username) {
+        relationshipService.unfollow(jwt.getSubject(), username);
+    }
+
+    @GetMapping("/{username}/status")
+    public FollowStatusDto getStatus(@AuthenticationPrincipal Jwt jwt,
+                                     @PathVariable String username) {
+        return relationshipService.getFollowStatus(jwt.getSubject(), username);
+    }
+
+    @DeleteMapping("/followers/{username}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeFollower(@AuthenticationPrincipal Jwt jwt,
+                               @PathVariable String username) {
+        relationshipService.removeFollower(jwt.getSubject(), username);
+    }
+
+    // ---- Pending requests addressed to me -----------------------------
+
+    @GetMapping("/requests")
+    public List<FollowRequestDto> getPendingRequests(@AuthenticationPrincipal Jwt jwt) {
+        return relationshipService.getPendingRequests(jwt.getSubject());
+    }
+
+    @PostMapping("/requests/{username}/accept")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void acceptRequest(@AuthenticationPrincipal Jwt jwt,
+                              @PathVariable String username) {
+        relationshipService.acceptRequest(jwt.getSubject(), username);
+    }
+
+    @DeleteMapping("/requests/{username}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void rejectRequest(@AuthenticationPrincipal Jwt jwt,
+                              @PathVariable String username) {
+        relationshipService.rejectRequest(jwt.getSubject(), username);
+    }
+
+    // ---- Followers / Following lists ----------------------------------
+
+    @GetMapping("/{username}/followers")
+    public List<FollowProfileSearchResult> getFollowers(@AuthenticationPrincipal Jwt jwt,
+                                                        @PathVariable String username) {
+        return relationshipService.getFollowers(jwt.getSubject(), username);
+    }
+
+    @GetMapping("/{username}/following")
+    public List<FollowProfileSearchResult> getFollowing(@AuthenticationPrincipal Jwt jwt,
+                                                        @PathVariable String username) {
+        return relationshipService.getFollowing(jwt.getSubject(), username);
+    }
+}

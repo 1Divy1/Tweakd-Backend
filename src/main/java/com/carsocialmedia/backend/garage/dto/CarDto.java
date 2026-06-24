@@ -33,8 +33,8 @@ import java.util.UUID;
  * @param chassisCode internal chassis/body code (e.g., F80, F82)
  * @param modelCode manufacturer model code/generation (e.g., E60 for the BMW 5 Series)
  * @param engineCode internal engine code
- * @param coverImageUrl URL to the car's cover/hero image
- * @param galleryUrls ordered list of gallery image URLs
+ * @param coverImage the car's cover/hero image as a {key, url} pair (null if none)
+ * @param gallery ordered list of gallery images, each as a {key, url} pair
  * @param createdAt when the car was added to the garage
  * @param fuelTypeId the fuel type ID (e.g., gasoline, diesel, electric)
  * @param fuelTypeName the fuel type display name
@@ -67,8 +67,8 @@ public record CarDto(
         String chassisCode,
         String modelCode,
         String engineCode,
-        String coverImageUrl,
-        List<String> galleryUrls,
+        MediaRefDto coverImage,
+        List<MediaRefDto> gallery,
         Instant createdAt,
         String fuelTypeId,
         String fuelTypeName,

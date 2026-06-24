@@ -17,6 +17,6 @@ public interface CarModificationGalleryRepository extends JpaRepository<CarModif
     @Query("select g from CarModificationGalleryEntity g where g.modification.car.id = :carId")
     List<CarModificationGalleryEntity> findAllByCarId(@Param("carId") UUID carId);
 
-    /** Bulk-delete specific media items for a modification by their URLs. */
-    void deleteAllByModification_IdAndUrlIn(UUID modificationId, List<String> urls);
+    /** Bulk-delete specific media items for a modification by their R2 keys. */
+    void deleteAllByModification_IdAndKeyIn(UUID modificationId, List<String> keys);
 }
