@@ -23,8 +23,9 @@ public class CarModificationGalleryEntity {
     @JoinColumn(name = "mod_id")
     private CarModificationEntity modification;
 
+    /** R2 object key. The {@code url} column stores a bucket-relative key, not a full URL. */
     @Column(name = "url")
-    private String url;
+    private String key;
 
     @Column(name = "type")
     private String type;

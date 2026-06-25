@@ -2,6 +2,7 @@ package com.carsocialmedia.backend.storage.internal;
 
 import com.carsocialmedia.backend.storage.StorageService;
 import com.carsocialmedia.backend.storage.dto.ModificationUploadUrlsResponse;
+import com.carsocialmedia.backend.storage.dto.PostImagesUploadUrlsResponse;
 import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
 import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
 import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
@@ -26,6 +27,14 @@ public class StorageController {
     @GetMapping("/cars/{carId}/gallery")
     public UploadUrlResponse gallery(@PathVariable UUID carId) {
         return storageService.galleryUploadUrlRequest(carId);
+    }
+
+    @PostMapping("/posts/{postId}/upload-urls")
+    public PostImagesUploadUrlsResponse postImages(
+            @PathVariable UUID postId,
+            @Valid @RequestBody PostImagesUploadRequest request
+    ) {
+        return storageService.postImagesUploadUrlRequest(postId, request.count());
     }
 
     @GetMapping("/cars/{carId}/modifications/{modId}")

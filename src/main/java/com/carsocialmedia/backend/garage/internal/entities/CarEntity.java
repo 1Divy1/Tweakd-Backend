@@ -76,9 +76,9 @@ public class CarEntity {
     @Column(name = "story")
     private String story;
 
-    /** URL to the car's cover/hero image. */
+    /** R2 object key for the car's cover/hero image. The {@code cover_image_url} column stores a key, not a full URL. */
     @Column(name = "cover_image_url")
-    private String coverImageUrl;
+    private String coverImageKey;
 
     /** When the car was added to the garage (managed by Supabase, read-only). */
     @Column(insertable = false, updatable = false)

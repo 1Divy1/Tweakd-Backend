@@ -82,7 +82,7 @@ Entities use `@Getter` / `@Setter`. The Lombok annotation processor is wired in 
 Each module has a `README.md` with its specific API surface, endpoints, entities, exceptions, and Supabase trigger dependencies:
 
 - [`profile` module](src/main/java/com/carsocialmedia/backend/profile/README.md)
-- [`follow` module](src/main/java/com/carsocialmedia/backend/follow/README.md)
+- [`follow` module](src/main/java/com/carsocialmedia/backend/relationships/README.md)
 - [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
 - [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
 - [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)
