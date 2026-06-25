@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.storage.internal.cloudflare;
 
+import com.carsocialmedia.backend.storage.StorageBucket;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -16,6 +17,18 @@ public class R2Config {
     private int presignExpiryMinutes;
 
     private BucketTarget garage;
+    private BucketTarget posts;
+
+    /**
+     * Resolves a logical bucket to its configured name + public URL. Add a case (and a config
+     * entry) here when a new {@link StorageBucket} constant is introduced.
+     */
+    public BucketTarget target(StorageBucket bucket) {
+        return switch (bucket) {
+            case GARAGE -> garage;
+            case POSTS -> posts;
+        };
+    }
 
     /*
         Groups bucket + public URL

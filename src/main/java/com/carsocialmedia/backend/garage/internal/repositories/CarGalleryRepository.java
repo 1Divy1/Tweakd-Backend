@@ -10,6 +10,6 @@ public interface CarGalleryRepository extends JpaRepository<CarGalleryEntity, UU
     List<CarGalleryEntity> findAllByCarIdOrderByPositionAsc(UUID carId);
     void deleteAllByCarId(UUID carId);
 
-    /** Bulk-delete specific gallery items for a car by their URLs. */
-    void deleteAllByCarIdAndUrlIn(UUID carId, List<String> urls);
+    /** Bulk-delete specific gallery items for a car by their R2 keys. */
+    void deleteAllByCarIdAndKeyIn(UUID carId, List<String> keys);
 }

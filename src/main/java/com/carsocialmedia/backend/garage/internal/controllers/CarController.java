@@ -4,7 +4,7 @@ import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.request.CarRequest;
 import com.carsocialmedia.backend.garage.dto.request.CreateCarRequest;
-import com.carsocialmedia.backend.garage.dto.request.GalleryUrlsRequest;
+import com.carsocialmedia.backend.garage.dto.request.MediaKeysRequest;
 import com.carsocialmedia.backend.garage.dto.response.CreateCarResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -66,18 +66,18 @@ public class CarController {
     public void updateCarCover(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID carId,
-            @RequestParam("cover_image_url") String coverImageUrl
+            @RequestParam("key") String key
     ) {
-        garageService.saveCarCoverImageUrl(jwt.getSubject(), carId, coverImageUrl);
+        garageService.saveCarCoverImageKey(jwt.getSubject(), carId, key);
     }
 
     @PatchMapping("/{carId}/gallery")
     public void updateCarGallery(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID carId,
-            @Valid @RequestBody GalleryUrlsRequest request
+            @Valid @RequestBody MediaKeysRequest request
     ) {
-        garageService.saveGalleryImageUrls(jwt.getSubject(), carId, request.urls());
+        garageService.saveGalleryImageKeys(jwt.getSubject(), carId, request.keys());
     }
 
     @DeleteMapping("/{carId}/cover")
@@ -94,8 +94,8 @@ public class CarController {
     public void deleteCarGallery(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID carId,
-            @Valid @RequestBody GalleryUrlsRequest request
+            @Valid @RequestBody MediaKeysRequest request
     ) {
-        garageService.deleteGalleryImages(jwt.getSubject(), carId, request.urls());
+        garageService.deleteGalleryImages(jwt.getSubject(), carId, request.keys());
     }
 }
