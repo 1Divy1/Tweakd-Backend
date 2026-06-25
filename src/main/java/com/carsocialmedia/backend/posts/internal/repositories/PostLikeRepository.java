@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,6 +17,16 @@ public interface PostLikeRepository extends JpaRepository<PostLikeEntity, PostLi
     boolean existsByIdPostIdAndIdUserId(UUID postId, UUID userId);
 
     void deleteByIdPostIdAndIdUserId(UUID postId, UUID userId);
+
+    /** Of the given posts, the IDs the viewer has liked — one query for the whole page. */
+    @Query("""
+            select pl.id.postId
+              from PostLikeEntity pl
+             where pl.id.userId = :viewerId
+               and pl.id.postId in :postIds
+            """)
+    List<UUID> findLikedPostIds(@Param("viewerId") UUID viewerId,
+                                @Param("postIds") Collection<UUID> postIds);
 
     /**
      * One keyset page of a post's likes (the likers), ordered most-recent first with the

@@ -50,6 +50,24 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
     List<CarEntity> findSummaryByIds(@Param("ids") Collection<UUID> ids);
 
     /**
+     * Resolves each car's owner (its garage's {@code ownerId}). Used by other modules to enforce
+     * ownership-aware rules without exposing garage internals — e.g. posts only allowing a car to
+     * be tagged when its owner is also tagged. Missing car ids are simply absent from the result.
+     */
+    @Query("""
+            select c.id as carId, c.garage.ownerId as ownerId
+              from CarEntity c
+             where c.id in :ids
+            """)
+    List<CarOwner> findOwnerIdsByCarIds(@Param("ids") Collection<UUID> ids);
+
+    /** Projection of a car id to its owning profile id. */
+    interface CarOwner {
+        UUID getCarId();
+        UUID getOwnerId();
+    }
+
+    /**
      * Car detail. Pulls every reference row the {@link CarEntity} touches so the response
      * mapping stays inside the open session.
      */

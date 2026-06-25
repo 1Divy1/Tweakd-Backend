@@ -3,6 +3,7 @@ package com.carsocialmedia.backend.storage.internal;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
 import com.carsocialmedia.backend.storage.dto.ModificationUploadUrlsResponse;
+import com.carsocialmedia.backend.storage.dto.PostImagesUploadUrlsResponse;
 import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
 import com.carsocialmedia.backend.storage.internal.cloudflare.PresignedUrlGenerator;
 import com.carsocialmedia.backend.storage.internal.ModificationUploadRequest;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,6 +49,19 @@ public class StorageServiceImpl implements StorageService {
                 "/gallery/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
 
         return buildUploadUrlResponse(config.getGarage(), key, FileFormat.WEBP);
+    }
+
+    // === POSTS ===
+    // posts/{postId}/{uuid}.webp  (one per requested image)
+    @Override
+    public PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count) {
+        List<UploadUrlResponse> uploads = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String key = "posts/" + postId +
+                    "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
+            uploads.add(buildUploadUrlResponse(config.getPosts(), key, FileFormat.WEBP));
+        }
+        return new PostImagesUploadUrlsResponse(uploads);
     }
 
     // cars/{carId}/modifications/{modId}/{phase}/{uuid}.{ext}

@@ -9,5 +9,6 @@ package com.carsocialmedia.backend.storage;
  * matching {@code cloudflare.r2.*} config entry) when a new bucket is introduced.
  */
 public enum StorageBucket {
-    GARAGE
+    GARAGE,
+    POSTS
 }

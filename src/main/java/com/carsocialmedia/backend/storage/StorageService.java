@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.storage;
 
 import com.carsocialmedia.backend.storage.dto.ModificationUploadUrlsResponse;
+import com.carsocialmedia.backend.storage.dto.PostImagesUploadUrlsResponse;
 import com.carsocialmedia.backend.storage.dto.UploadUrlResponse;
 import com.carsocialmedia.backend.storage.internal.ModificationUploadRequest;
 import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
@@ -12,6 +13,17 @@ import java.util.UUID;
 public interface StorageService {
     UploadUrlResponse coverUploadUrlRequest(UUID carId);
     UploadUrlResponse galleryUploadUrlRequest(UUID carId);
+
+    /**
+     * Issues a batch of presigned PUT URLs for a post's images in one call. Flutter uploads each
+     * image directly to R2 and then sends the returned {@code key}s back to the posts module to
+     * persist. Replaces N single-image round-trips for a multi-image post.
+     *
+     * @param postId the post the images belong to (used to namespace the R2 keys)
+     * @param count how many upload slots to mint (1–10)
+     * @return one {@code {key, uploadUrl}} slot per requested image
+     */
+    PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count);
     UploadUrlResponse modificationUploadUrlRequest(UUID carId, UUID modId, ModificationPhase phase, FileFormat format);
     ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files);
 

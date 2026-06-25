@@ -1,0 +1,122 @@
+# posts module
+
+Owns everything in the feed: `posts` and their child tables `post_images`,
+`tagged_people`, `tagged_cars`, plus engagement tables `post_likes`, `post_shares`,
+`saved_posts`, `comments`, and `comment_likes`.
+
+Tagged people and tagged cars are stored as flat reference UUIDs — the post never holds
+profile or car entities. They are resolved to `ProfileSearchResultDto` / `CarSummaryDto`
+through the `profile` and `garage` module interfaces when a `PostDto` is assembled.
+
+**Tagging rule.** Tagging people and tagging cars are both optional, but a car can only be
+tagged if its owner is tagged in the same post (the author's own cars are exempt — no
+self-tag needed). This matches the client flow: you search a user, then pick from their
+cars in a dropdown. On create and update the rule is enforced over the post's *resulting*
+tag set — e.g. untagging a person whose car is still tagged is rejected
+(`CarOwnerNotTaggedException`). Car ownership is resolved via `GarageService.findCarOwnerIds`.
+
+Depends on the `profile` module (author + tagged-people resolution), the `garage` module
+(tagged-car resolution), and the `storage` module (presigned upload URLs + key→URL).
+
+## Create-a-post flow
+
+Mirrors the garage "add a car" flow — the post row is created first so its id exists, then
+images are uploaded to R2 and their keys sent back. No file bytes ever travel through the
+backend.
+
+1. `POST /api/v1/posts` — create the post (caption, tagged people/cars, count toggles).
+   Returns the `PostDto` (no images yet) carrying the new `id`.
+2. `POST /api/storage/posts/{postId}/upload-urls` with `{ "count": N }` — returns `N`
+   `{ key, uploadUrl }` slots in one call (no per-image round-trips).
+3. Flutter `PUT`s each image straight to R2 at `uploadUrl`.
+4. `PATCH /api/v1/posts/{postId}/images` — send the ordered `keys`; the backend replaces
+   the post's `post_images` rows (position = list index) and deletes any dropped key from R2
+   after the transaction commits.
+
+Image keys are namespaced `posts/{postId}/{uuid}.webp` in the `POSTS` R2 bucket. Only the
+key is persisted; the public URL is built on read via `StorageService.publicUrl`.
+
+## Public API — `PostsService`
+
+| Method | Description |
+|---|---|
+| `createPost(currentUserId, CreatePostRequest)` | Creates a post + its tagged people/cars; returns the `PostDto` (no images) |
+| `getPost(currentUserId, postId)` | One fully-assembled post; privacy-gated |
+| `getMyPosts(currentUserId, cursor, size)` | Keyset page of the caller's own posts, newest first |
+| `getUserPosts(currentUserId, username, cursor, size)` | Keyset page of another user's posts, newest first; privacy-gated |
+| `updatePost(currentUserId, postId, UpdatePostRequest)` | Partial update (caption, tags, count toggles); owner only |
+| `deletePost(currentUserId, postId)` | Deletes a post; child rows cascade, R2 images cleaned up after commit; owner only |
+| `savePostImageKeys(currentUserId, postId, keys)` | Replace-all of a post's images by R2 key, in order; owner only |
+| `getComments(viewerId, postId, cursor, size)` | One keyset page of root comments, newest first |
+| `getPostLikers(postId, cursor, size)` | One keyset page of likers, most recent first |
+
+### DTOs / records
+
+| Type | Used for |
+|---|---|
+| `PostDto` | Full post for feed/detail: author, images, tagged people/cars, counts + visibility flags, viewer like/save state |
+| `PostImageDto` | One image: `id`, full `imageUrl` (built from R2 key), `displayOrder` |
+| `CreatePostRequest` | Create payload: caption, `taggedPeople`, `taggedCars`, three `*CountEnabled` toggles. No images |
+| `UpdatePostRequest` | Partial-update payload (PATCH semantics: null = leave unchanged; non-null tag list = replace-all) |
+| `PostImageKeysRequest` | Ordered list of R2 keys (max 10) — the post's complete desired image set |
+| `PostPageDto` | One keyset page of posts (`items` + `nextCursor`) — profile grids |
+| `CommentDto` / `CommentPageDto` | A comment / one keyset page of comments |
+| `LikerPageDto` | One keyset page of likers (`ProfileSearchResultDto` items) |
+
+### Exceptions
+
+| Exception | HTTP | Trigger |
+|---|---|---|
+| `PostNotFoundException` | 404 | Post id doesn't exist |
+| `NotPostOwnerException` | 403 | Caller tries to mutate a post they don't own |
+| `PrivatePostException` | 403 | Caller reads a private author's post without being an accepted follower |
+| `InvalidReferenceException` | 400 | A tagged person or car id doesn't exist |
+| `CarOwnerNotTaggedException` | 400 | A tagged car's owner is neither the author nor a tagged person |
+| `InvalidCursorException` | 400 | A pagination cursor can't be decoded |
+
+## REST endpoints
+
+Base path: `/api/v1/posts`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/` | Create a post (201) |
+| GET | `/me` | Keyset page of the caller's own posts (`?cursor=&size=`) |
+| GET | `/by-username/{username}` | Keyset page of another user's posts; privacy-gated (`?cursor=&size=`) |
+| GET | `/{postId}` | One post, fully assembled; privacy-gated |
+| PATCH | `/{postId}` | Partial update of caption / tags / count toggles (owner only) |
+| DELETE | `/{postId}` | Delete a post (204; owner only) |
+| PATCH | `/{postId}/images` | Replace the post's images by ordered R2 keys |
+| GET | `/{postId}/comments` | Keyset page of root comments (`?cursor=&size=`) |
+| GET | `/{postId}/likes` | Keyset page of likers (`?cursor=&size=`) |
+
+> Image upload URLs are issued in batch by the storage module:
+> `POST /api/storage/posts/{postId}/upload-urls` with `{ "count": N }`.
+
+The profile grid uses a **batch assembler** (`PostsServiceImpl.toPostDtos`) that resolves a whole
+page with a fixed, small number of queries (one `profileService.findByIds` for all authors +
+tagged people, one `garageService.findCarsByIds`, one batch each for images / tags / viewer
+like-save) instead of per-row lookups. The single-post `toPostDto` delegates to it.
+
+A global feed endpoint is still pending, but it now only needs its own keyset query
+(`posts ORDER BY created_at DESC, id DESC`, no `user_id` filter) plus a `getFeed` that reuses
+`toPostDtos` — the assembly work is already done.
+
+## Entities
+
+| Entity → table | Notes |
+|---|---|
+| `PostEntity` → `posts` | App-generated `id`; `createdAt` DB-managed (`insertable=false`); `updatedAt` set on write; counts default 0, set explicitly on create |
+| `PostImageEntity` → `post_images` | `imageKey` holds the R2 key only; `displayOrder` is `smallint` |
+| `TaggedPersonEntity` → `tagged_people` | Composite PK `(post_id, user_id)`; `user_id` is a flat `profiles.id` ref |
+| `TaggedCarEntity` → `tagged_cars` | Composite PK `(post_id, car_id)`; `car_id` is a flat `cars.id` ref |
+| `PostLikeEntity` / `SavedPostEntity` / `PostShareEntity` | Composite-PK engagement rows |
+| `CommentEntity` / `CommentLikeEntity` | Threaded comments (self-ref `parent_comment_id`) and their likes |
+
+## Cross-module dependencies
+
+- **`profile.ProfileService.findByIds`** — resolve the author and tagged people.
+- **`garage.GarageService.findCarsByIds`** — resolve tagged cars (no privacy gating; built for this).
+- **`garage.GarageService.findCarOwnerIds`** — resolve each tagged car's owner to enforce the tagging rule.
+- **`storage.StorageService`** — `postImageUploadUrlRequest`, `publicUrl(POSTS, key)`, and
+  `deleteByKeys(POSTS, …)`. The posts module owns key persistence; storage owns R2 I/O.

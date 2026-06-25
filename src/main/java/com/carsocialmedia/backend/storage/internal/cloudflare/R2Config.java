@@ -17,6 +17,7 @@ public class R2Config {
     private int presignExpiryMinutes;
 
     private BucketTarget garage;
+    private BucketTarget posts;
 
     /**
      * Resolves a logical bucket to its configured name + public URL. Add a case (and a config
@@ -25,6 +26,7 @@ public class R2Config {
     public BucketTarget target(StorageBucket bucket) {
         return switch (bucket) {
             case GARAGE -> garage;
+            case POSTS -> posts;
         };
     }
 

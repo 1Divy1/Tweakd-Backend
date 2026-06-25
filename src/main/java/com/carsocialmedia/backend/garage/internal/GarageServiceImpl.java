@@ -870,6 +870,16 @@ class GarageServiceImpl implements GarageService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, UUID> findCarOwnerIds(Collection<UUID> carIds) {
+        if (carIds == null || carIds.isEmpty()) {
+            return Map.of();
+        }
+        return carRepository.findOwnerIdsByCarIds(carIds).stream()
+                .collect(Collectors.toMap(CarRepository.CarOwner::getCarId, CarRepository.CarOwner::getOwnerId));
+    }
+
     private GarageDto toGarageDto(GarageEntity garage) {
         List<CarSummaryDto> cars = carRepository.findGarageSummary(garage.getId()).stream()
                 .map(this::toCarSummaryDto)

@@ -24,6 +24,7 @@ import com.carsocialmedia.backend.garage.dto.GarageDto;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -47,6 +48,17 @@ public interface GarageService {
      * @return the matching car summaries (may be smaller than {@code ids})
      */
     List<CarSummaryDto> findCarsByIds(Collection<UUID> ids);
+
+    /**
+     * Resolves each given car's owner (profile id), regardless of owning garage and without
+     * privacy gating. Intended for other modules that must apply ownership-aware rules by id —
+     * e.g. the posts module only allows a car to be tagged when its owner is also tagged.
+     * Missing car ids are omitted from the result.
+     *
+     * @param carIds the car IDs to resolve
+     * @return a map of car id → owner (profile) id (may be smaller than {@code carIds})
+     */
+    Map<UUID, UUID> findCarOwnerIds(Collection<UUID> carIds);
 
     // ---- garage views ------------------------------------------------------
 
