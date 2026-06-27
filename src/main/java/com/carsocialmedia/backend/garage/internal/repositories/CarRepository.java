@@ -26,6 +26,7 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
     @Query("""
             select c
               from CarEntity c
+              join fetch c.garage
               join fetch c.brand
               join fetch c.model
               join fetch c.status
@@ -42,6 +43,7 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
     @Query("""
             select c
               from CarEntity c
+              join fetch c.garage
               join fetch c.brand
               join fetch c.model
               join fetch c.status

@@ -15,13 +15,11 @@ import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
 import com.carsocialmedia.backend.profile.dto.RoleSelectionRequest;
-import com.carsocialmedia.backend.profile.event.ProfileBecamePublicEvent;
 import com.carsocialmedia.backend.profile.exception.InvalidReferenceException;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.profile.exception.UsernameAlreadyTakenException;
 import com.carsocialmedia.backend.profile.internal.entity.*;
 import com.carsocialmedia.backend.profile.internal.repository.*;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,7 +41,6 @@ class ProfileServiceImpl implements ProfileService {
     private final NotificationPreferencesRepository notificationPreferencesRepository;
     private final ProfileCarCategoryRepository profileCarCategoryRepository;
     private final ProfileCommunityRoleRepository profileCommunityRoleRepository;
-    private final ApplicationEventPublisher eventPublisher;
 
     ProfileServiceImpl(ProfileRepository profileRepository,
                        CountryRepository countryRepository,
@@ -52,8 +49,7 @@ class ProfileServiceImpl implements ProfileService {
                        CarCategoryOptionRepository carCategoryOptionRepository,
                        NotificationPreferencesRepository notificationPreferencesRepository,
                        ProfileCarCategoryRepository profileCarCategoryRepository,
-                       ProfileCommunityRoleRepository profileCommunityRoleRepository,
-                       ApplicationEventPublisher eventPublisher) {
+                       ProfileCommunityRoleRepository profileCommunityRoleRepository) {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
         this.cityRepository = cityRepository;
@@ -62,7 +58,6 @@ class ProfileServiceImpl implements ProfileService {
         this.notificationPreferencesRepository = notificationPreferencesRepository;
         this.profileCarCategoryRepository = profileCarCategoryRepository;
         this.profileCommunityRoleRepository = profileCommunityRoleRepository;
-        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -112,32 +107,6 @@ class ProfileServiceImpl implements ProfileService {
     }
 
     @Override
-    @Transactional
-    public ProfileDto setPrivacy(String userId, boolean isPrivate) {
-        UUID id = UUID.fromString(userId);
-        ProfileEntity profile = profileRepository
-                .findById(id)
-                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
-
-        boolean wasPrivate = profile.isPrivate();
-        if (wasPrivate == isPrivate) {
-            return profile.toDto();
-        }
-
-        profile.setPrivate(isPrivate);
-        profileRepository.save(profile);
-
-        // private -> public: any pending follow requests should be auto-accepted.
-        // The follow module owns the follows table, so we publish a domain
-        // event and let it react.
-        if (wasPrivate && !isPrivate) {
-            eventPublisher.publishEvent(new ProfileBecamePublicEvent(id));
-        }
-
-        return profile.toDto();
-    }
-
-    @Override
     @Transactional(readOnly = true)
     public PublicProfileDto getPublicProfileByUsername(String username) {
         return profileRepository
@@ -163,14 +132,6 @@ class ProfileServiceImpl implements ProfileService {
     @Transactional(readOnly = true)
     public Optional<UUID> findIdByUsername(String username) {
         return profileRepository.findByUsername(username).map(ProfileEntity::getId);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public boolean isPrivate(UUID userId) {
-        return profileRepository.findById(userId)
-                .map(ProfileEntity::isPrivate)
-                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId.toString()));
     }
 
     @Override

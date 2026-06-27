@@ -15,8 +15,8 @@ import java.util.UUID;
  * per image, uploads to R2, and finally sends the resulting keys back via
  * {@code PATCH /api/v1/posts/{postId}/images}.
  *
- * The three {@code *CountEnabled} flags are the author's per-post visibility toggles for the
- * like / comment / share counts. They are optional and default to {@code true} when omitted.
+ * The four {@code *CountEnabled} flags are the author's per-post visibility toggles for the
+ * like / comment / share / saved counts. They are optional and default to {@code true} when omitted.
  *
  * @param description the post caption (may be empty; null is treated as empty)
  * @param taggedPeople ids of profiles tagged in the post (optional, deduplicated server-side)
@@ -24,6 +24,7 @@ import java.util.UUID;
  * @param likesCountEnabled whether to expose the like count (default true)
  * @param commentsCountEnabled whether to expose the comment count (default true)
  * @param sharesCountEnabled whether to expose the share count (default true)
+ * @param savedCountEnabled whether to expose the saved count (default true)
  */
 public record CreatePostRequest(
         @Size(max = 2200) String description,
@@ -31,5 +32,6 @@ public record CreatePostRequest(
         @Size(max = 30) List<@NotNull UUID> taggedCars,
         Boolean likesCountEnabled,
         Boolean commentsCountEnabled,
-        Boolean sharesCountEnabled
+        Boolean sharesCountEnabled,
+        Boolean savedCountEnabled
 ) {}

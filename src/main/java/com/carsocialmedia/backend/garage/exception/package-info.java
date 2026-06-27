@@ -13,7 +13,6 @@
  *   <li><strong>ForbiddenException (403)</strong>
  *     <ul>
  *       <li>{@link com.carsocialmedia.backend.garage.exception.NotCarOwnerException} - user is not the car owner</li>
- *       <li>{@link com.carsocialmedia.backend.garage.exception.PrivateGarageException} - garage is private and user is not allowed access</li>
  *     </ul>
  *   </li>
  *   <li><strong>BadRequestException (400)</strong>

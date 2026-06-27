@@ -12,11 +12,13 @@ import java.util.UUID;
  * @param model the car model name
  * @param coverImage the car's cover image as a {key, url} pair (null if none)
  * @param status the car's status option (e.g., daily driver, weekend cruiser)
+ * @param owner the profile that owns the car (id + username)
  */
 public record CarSummaryDto(
         UUID id,
         String brand,
         String model,
         MediaRefDto coverImage,
-        CarStatusOptionDto status
+        CarStatusOptionDto status,
+        CarOwnerDto owner
 ) {}

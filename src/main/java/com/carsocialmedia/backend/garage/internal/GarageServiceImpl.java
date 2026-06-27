@@ -1,6 +1,5 @@
 package com.carsocialmedia.backend.garage.internal;
 
-import com.carsocialmedia.backend.relationships.RelationshipService;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarColorDto;
@@ -10,6 +9,7 @@ import com.carsocialmedia.backend.garage.dto.CarDrivetrainDto;
 import com.carsocialmedia.backend.garage.dto.CarDto;
 import com.carsocialmedia.backend.garage.dto.CarModCategoryDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
+import com.carsocialmedia.backend.garage.dto.CarOwnerDto;
 import com.carsocialmedia.backend.garage.dto.response.AddModificationResponse;
 import com.carsocialmedia.backend.garage.dto.CarModificationDto;
 import com.carsocialmedia.backend.garage.dto.CarModificationMediaDto;
@@ -31,10 +31,10 @@ import com.carsocialmedia.backend.garage.exception.DreamCarNotFoundException;
 import com.carsocialmedia.backend.garage.exception.GarageNotFoundException;
 import com.carsocialmedia.backend.garage.exception.InvalidReferenceException;
 import com.carsocialmedia.backend.garage.exception.NotCarOwnerException;
-import com.carsocialmedia.backend.garage.exception.PrivateGarageException;
 import com.carsocialmedia.backend.garage.internal.entities.*;
 import com.carsocialmedia.backend.garage.internal.repositories.*;
 import com.carsocialmedia.backend.profile.ProfileService;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
@@ -76,7 +76,6 @@ class GarageServiceImpl implements GarageService {
     private final CarModCategoryRepository modCategoryRepository;
     private final DreamCarRepository dreamCarRepository;
     private final ProfileService profileService;
-    private final RelationshipService relationshipService;
     private final StorageService storageService;
 
     // Question: what does it do and why do we need it ?
@@ -98,7 +97,6 @@ class GarageServiceImpl implements GarageService {
                       CarModCategoryRepository modCategoryRepository,
                       DreamCarRepository dreamCarRepository,
                       ProfileService profileService,
-                      RelationshipService relationshipService,
                       StorageService storageService) {
         this.garageRepository = garageRepository;
         this.carRepository = carRepository;
@@ -115,7 +113,6 @@ class GarageServiceImpl implements GarageService {
         this.modCategoryRepository = modCategoryRepository;
         this.dreamCarRepository = dreamCarRepository;
         this.profileService = profileService;
-        this.relationshipService = relationshipService;
         this.storageService = storageService;
     }
 
@@ -136,17 +133,10 @@ class GarageServiceImpl implements GarageService {
     @Transactional(readOnly = true)
     public GarageDto getGarageByUsername(String currentUserId, String username) {
 
-        // Extract user's ID from the request
-        UUID viewerId = UUID.fromString(currentUserId);
-
         // Check if the user exists
         UUID ownerId = profileService
                 .findIdByUsername(username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
-
-        // Verify that the viewer has permission to view (read-only) the garage based on privacy settings and follow
-        // relationship
-        ensureCanViewGarage(viewerId, ownerId, username);
 
         // Fetch the garage entity for the owner if it exists or throw if not found
         GarageEntity garage = garageRepository
@@ -247,17 +237,9 @@ class GarageServiceImpl implements GarageService {
     @Override
     @Transactional(readOnly = true)
     public CarDto getCar(String currentUserId, UUID carId) {
-        UUID viewerId = UUID.fromString(currentUserId);
-
         CarEntity car = carRepository
                 .findDetailById(carId)
                 .orElseThrow(() -> new CarNotFoundException(carId));
-
-        UUID ownerId = car.getGarage().getOwnerId();
-        boolean isOwner = viewerId.equals(ownerId);
-        if (!isOwner) {
-            ensureCanViewGarageById(viewerId, ownerId);
-        }
 
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
         return toCarDto(car, mods);
@@ -805,52 +787,6 @@ class GarageServiceImpl implements GarageService {
     }
 
     /**
-     * Verifies that the viewer has permission to access the garage based on the owner's
-     * privacy settings and follow relationship.
-     *
-     * Rules:
-     * <ul>
-     *   <li>If viewer == owner: always allowed</li>
-     *   <li>If owner's profile is public: always allowed</li>
-     *   <li>If owner's profile is private: only allowed if viewer is an accepted follower</li>
-     * </ul>
-     *
-     * @param viewerId the user ID requesting access
-     * @param ownerId the garage owner's user ID
-     * @param username the garage owner's username (for error message)
-     * @throws PrivateGarageException if access is denied
-     */
-    private void ensureCanViewGarage(UUID viewerId, UUID ownerId, String username) {
-        if (viewerId.equals(ownerId)) {
-            return;
-        }
-        if (!profileService.isPrivate(ownerId)) {
-            return;
-        }
-        if (!relationshipService.isAcceptedFollower(viewerId, ownerId)) {
-            throw new PrivateGarageException(username);
-        }
-    }
-
-    /**
-     * Verifies that the viewer has permission to access the garage based on the owner's
-     * privacy settings and follow relationship. Same gate as {@link #ensureCanViewGarage}
-     * but used when the username is not available.
-     *
-     * @param viewerId the user ID requesting access
-     * @param ownerId the garage owner's user ID
-     * @throws PrivateGarageException if access is denied
-     */
-    private void ensureCanViewGarageById(UUID viewerId, UUID ownerId) {
-        if (!profileService.isPrivate(ownerId)) {
-            return;
-        }
-        if (!relationshipService.isAcceptedFollower(viewerId, ownerId)) {
-            throw new PrivateGarageException(ownerId.toString());
-        }
-    }
-
-    /**
      * Converts a garage entity to a DTO with a list of car summaries.
      *
      * The car list is fetched with a specialized query ({@link CarRepository#findGarageSummary})
@@ -865,9 +801,7 @@ class GarageServiceImpl implements GarageService {
         if (ids == null || ids.isEmpty()) {
             return List.of();
         }
-        return carRepository.findSummaryByIds(ids).stream()
-                .map(this::toCarSummaryDto)
-                .toList();
+        return toCarSummaries(carRepository.findSummaryByIds(ids));
     }
 
     @Override
@@ -881,9 +815,7 @@ class GarageServiceImpl implements GarageService {
     }
 
     private GarageDto toGarageDto(GarageEntity garage) {
-        List<CarSummaryDto> cars = carRepository.findGarageSummary(garage.getId()).stream()
-                .map(this::toCarSummaryDto)
-                .toList();
+        List<CarSummaryDto> cars = toCarSummaries(carRepository.findGarageSummary(garage.getId()));
         return new GarageDto(
                 garage.getId(),
                 garage.getOwnerId(),
@@ -954,13 +886,31 @@ class GarageServiceImpl implements GarageService {
                 modDtos);
     }
 
-    private CarSummaryDto toCarSummaryDto(CarEntity c) {
+    /**
+     * Maps cars to summaries, batch-resolving each car owner's username in a single
+     * profile lookup to avoid an N+1 across the list.
+     */
+    private List<CarSummaryDto> toCarSummaries(List<CarEntity> cars) {
+        Set<UUID> ownerIds = cars.stream()
+                .map(c -> c.getGarage().getOwnerId())
+                .collect(Collectors.toSet());
+        Map<UUID, String> usernamesById = profileService.findByIds(ownerIds).stream()
+                .collect(Collectors.toMap(ProfileSearchResultDto::id, ProfileSearchResultDto::username));
+        return cars.stream()
+                .map(c -> toCarSummaryDto(c, usernamesById))
+                .toList();
+    }
+
+    private CarSummaryDto toCarSummaryDto(CarEntity c, Map<UUID, String> usernamesById) {
+        UUID ownerId = c.getGarage().getOwnerId();
+        CarOwnerDto owner = new CarOwnerDto(ownerId, usernamesById.get(ownerId));
         return new CarSummaryDto(
                 c.getId(),
                 c.getBrand().getName(),
                 c.getModel().getModel(),
                 toMediaRef(c.getCoverImageKey()),
-                toStatusOptionDto(c.getStatus()));
+                toStatusOptionDto(c.getStatus()),
+                owner);
     }
 
     /** Builds a {key, url} pair for a stored R2 object. Returns {@code null} if the key is null/blank. */

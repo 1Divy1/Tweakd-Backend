@@ -52,10 +52,12 @@ public class StorageServiceImpl implements StorageService {
     }
 
     // === POSTS ===
+
     // posts/{postId}/{uuid}.webp  (one per requested image)
     @Override
     public PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count) {
         List<UploadUrlResponse> uploads = new ArrayList<>(count);
+
         for (int i = 0; i < count; i++) {
             String key = "posts/" + postId +
                     "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();

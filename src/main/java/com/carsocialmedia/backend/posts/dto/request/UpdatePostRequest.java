@@ -26,6 +26,7 @@ import java.util.UUID;
  * @param likesCountEnabled new like-count visibility, or null to leave unchanged
  * @param commentsCountEnabled new comment-count visibility, or null to leave unchanged
  * @param sharesCountEnabled new share-count visibility, or null to leave unchanged
+ * @param savedCountEnabled new saved-count visibility, or null to leave unchanged
  */
 public record UpdatePostRequest(
         @Size(max = 2200) String description,
@@ -33,5 +34,6 @@ public record UpdatePostRequest(
         @Size(max = 30) List<@NotNull UUID> taggedCars,
         Boolean likesCountEnabled,
         Boolean commentsCountEnabled,
-        Boolean sharesCountEnabled
+        Boolean sharesCountEnabled,
+        Boolean savedCountEnabled
 ) {}

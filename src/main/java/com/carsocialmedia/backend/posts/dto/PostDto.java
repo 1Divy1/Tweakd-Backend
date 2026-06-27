@@ -28,10 +28,13 @@ import java.util.UUID;
  * @param taggedCars cars tagged in the post
  * @param likesCount denormalized like count
  * @param commentsCount denormalized comment count
- * @param sharesCount denormalized share count
+ * @param sharesCount total shares shown — plain shares plus quote shares (re-shares with a custom
+ *        description); i.e. the post's {@code shares_count + quote_shares_count}
+ * @param savedCount denormalized count of how many users saved the post
  * @param likesCountEnabled whether the author exposes the like count
  * @param commentsCountEnabled whether the author exposes the comment count
  * @param sharesCountEnabled whether the author exposes the share count
+ * @param savedCountEnabled whether the author exposes the saved count
  * @param viewerHasLiked whether the requesting user has liked this post
  * @param viewerHasSaved whether the requesting user has saved this post
  * @param createdAt when the post was created
@@ -48,9 +51,11 @@ public record PostDto(
         long likesCount,
         long commentsCount,
         long sharesCount,
+        long savedCount,
         boolean likesCountEnabled,
         boolean commentsCountEnabled,
         boolean sharesCountEnabled,
+        boolean savedCountEnabled,
 
         boolean viewerHasLiked,
         boolean viewerHasSaved,

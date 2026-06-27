@@ -39,14 +39,11 @@ public class GarageController {
     }
 
     /**
-     * Gets another user's garage by username. Privacy rules mirror the profile / follow
-     * social-graph rules: private profiles' garages are visible only to the owner or
-     * accepted followers. Returns 403 if access is denied.
+     * Gets another user's garage by username. All accounts are public, so any user's garage is
+     * visible to any authenticated viewer.
      *
      * @param username the username of the garage owner
      * @return the garage with a list of cars and their summaries
-     * @throws PrivateGarageException if the garage owner is private and the current user
-     *         is not an accepted follower
      */
     @GetMapping("/by-username/{username}")
     public GarageDto getGarageByUsername(@AuthenticationPrincipal Jwt jwt,
