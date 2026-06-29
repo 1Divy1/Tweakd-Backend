@@ -49,6 +49,9 @@ public class CommentEntity {
     @Column(name = "likes_count", nullable = false)
     private int likesCount;
 
+    @Column(name = "reply_count", nullable = false)
+    private int replyCount;
+
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
