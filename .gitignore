@@ -35,7 +35,6 @@ build/
 ### Secrets & Local Environment ###
 .env
 .env.*
-application.yaml
 application-local.properties
 application-local.yml
 application-secret.properties
