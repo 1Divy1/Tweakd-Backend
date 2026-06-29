@@ -2,7 +2,6 @@ package com.carsocialmedia.backend.relationships.internal;
 
 import com.carsocialmedia.backend.relationships.RelationshipService;
 import com.carsocialmedia.backend.relationships.dto.FollowProfileSearchResult;
-import com.carsocialmedia.backend.relationships.dto.FollowRequestDto;
 import com.carsocialmedia.backend.relationships.dto.FollowStatusDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -53,27 +52,6 @@ class RelationshipController {
     public void removeFollower(@AuthenticationPrincipal Jwt jwt,
                                @PathVariable String username) {
         relationshipService.removeFollower(jwt.getSubject(), username);
-    }
-
-    // ---- Pending requests addressed to me -----------------------------
-
-    @GetMapping("/requests")
-    public List<FollowRequestDto> getPendingRequests(@AuthenticationPrincipal Jwt jwt) {
-        return relationshipService.getPendingRequests(jwt.getSubject());
-    }
-
-    @PostMapping("/requests/{username}/accept")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void acceptRequest(@AuthenticationPrincipal Jwt jwt,
-                              @PathVariable String username) {
-        relationshipService.acceptRequest(jwt.getSubject(), username);
-    }
-
-    @DeleteMapping("/requests/{username}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void rejectRequest(@AuthenticationPrincipal Jwt jwt,
-                              @PathVariable String username) {
-        relationshipService.rejectRequest(jwt.getSubject(), username);
     }
 
     // ---- Followers / Following lists ----------------------------------

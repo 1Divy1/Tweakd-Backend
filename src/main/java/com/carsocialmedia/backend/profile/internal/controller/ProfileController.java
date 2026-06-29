@@ -8,7 +8,6 @@ import com.carsocialmedia.backend.profile.dto.LocationRequest;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesRequest;
 import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
-import com.carsocialmedia.backend.profile.dto.PrivacyRequest;
 import com.carsocialmedia.backend.profile.dto.ProfileDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
@@ -65,14 +64,6 @@ class ProfileController {
     @GetMapping("/me")
     public ProfileDto getProfile(@AuthenticationPrincipal Jwt jwt) {
         return profileService.getProfile(jwt.getSubject());
-    }
-
-    @PatchMapping("/me/privacy")
-    public ProfileDto setPrivacy(
-            @AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody PrivacyRequest request
-    ) {
-        return profileService.setPrivacy(jwt.getSubject(), request.isPrivate());
     }
 
     @PatchMapping("/me/location")

@@ -59,9 +59,6 @@ public class ProfileEntity {
     @Column(name = "is_business")
     private boolean isBusiness;
 
-    @Column(name = "is_private")
-    private boolean isPrivate;
-
     @Column(name = "requires_onboarding")
     private boolean requiresOnboarding;
 
@@ -80,7 +77,7 @@ public class ProfileEntity {
         return new ProfileDto(
                 id, role, name, username, avatarUrl, bio,
                 externalLink, followersCount, followingCount,
-                isVerified, isBusiness, isPrivate, requiresOnboarding,
+                isVerified, isBusiness, requiresOnboarding,
                 city.getId(),
                 discoveryRadiusKm
         );
@@ -94,7 +91,7 @@ public class ProfileEntity {
         return new PublicProfileDto(
                 id, name, username, avatarUrl, bio,
                 externalLink, followersCount, followingCount,
-                isVerified, isBusiness, isPrivate
+                isVerified, isBusiness
         );
     }
 }

@@ -38,12 +38,13 @@ public interface PostLikeRepository extends JpaRepository<PostLikeEntity, PostLi
             select pl
               from PostLikeEntity pl
              where pl.id.postId = :postId
-               and (:cursorTs is null
+               and (:firstPage = true
                     or pl.createdAt < :cursorTs
                     or (pl.createdAt = :cursorTs and pl.id.userId < :cursorUserId))
              order by pl.createdAt desc, pl.id.userId desc
             """)
     List<PostLikeEntity> findLikerPage(@Param("postId") UUID postId,
+                                       @Param("firstPage") boolean firstPage,
                                        @Param("cursorTs") Instant cursorTs,
                                        @Param("cursorUserId") UUID cursorUserId,
                                        Pageable pageable);
