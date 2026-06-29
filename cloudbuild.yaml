@@ -1,0 +1,35 @@
+steps:
+  # Step 1: Build the Docker container with BuildKit enabled
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/car-gram-social-media-app/cloud-run-source-deploy/car-social-media-backend/tweakd-backend:$COMMIT_SHA'
+      - '.'
+      - '-f'
+      - 'Dockerfile'
+    env:
+      - 'DOCKER_BUILDKIT=1' # This enables the BuildKit features needed for --mount
+
+  # Step 2: Push the image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'europe-west1-docker.pkg.dev/car-gram-social-media-app/cloud-run-source-deploy/car-social-media-backend/tweakd-backend:$COMMIT_SHA'
+
+  # Step 3: Deploy the image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update'
+      - 'tweakd-backend'
+      - '--platform=managed'
+      - '--image=europe-west1-docker.pkg.dev/car-gram-social-media-app/cloud-run-source-deploy/car-social-media-backend/tweakd-backend:$COMMIT_SHA'
+      - '--region=europe-west1'
+      - '--quiet'
+
+images:
+  - 'europe-west1-docker.pkg.dev/car-gram-social-media-app/cloud-run-source-deploy/car-social-media-backend/tweakd-backend:$COMMIT_SHA'

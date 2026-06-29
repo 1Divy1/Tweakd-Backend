@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # ---------------------------------------------------------------------------
 # Stage 1: build the application jar
 # We use a full JDK here because compiling needs the Java compiler + Maven.
@@ -15,12 +13,12 @@ WORKDIR /workspace
 # when you edit your source code.
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q dependency:go-offline
+RUN ./mvnw -B -q dependency:go-offline
 
 # Now copy the source and build. Tests are skipped in the image build —
 # run them in CI instead, so a flaky test never blocks a deploy.
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests package \
+RUN ./mvnw -B -q -DskipTests package \
     && cp target/*.jar app.jar
 
 # ---------------------------------------------------------------------------
