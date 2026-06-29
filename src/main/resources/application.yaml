@@ -1,0 +1,48 @@
+supabase:
+  url: ${SUPABASE_URL}
+  auth:
+    issuer: ${SUPABASE_URL}/auth/v1
+
+cloudflare:
+  r2:
+    account-id: ${CLOUDFLARE_ACCOUNT_ID}
+    access-key: ${CLOUDFLARE_ACCESS_KEY_ID}
+    secret-key: ${CLOUDFLARE_ACCESS_KEY_SECRET}
+    presign-expiry-minutes: 15
+    garage:
+      bucket: ${CLOUDFLARE_GARAGE_BUCKET_NAME}
+      public-url: ${CLOUDFLARE_GARAGE_BUCKET_URL}
+    posts:
+      bucket: ${CLOUDFLARE_POSTS_BUCKET_NAME}
+      public-url: ${CLOUDFLARE_POSTS_BUCKET_URL}
+
+spring:
+  application:
+    name: backend
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    url: ${SUPABASE_DB_URL}
+    username: ${SUPABASE_USER}
+    password: ${SUPABASE_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${supabase.auth.issuer}
+
+  jpa:
+    show-sql: true
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
