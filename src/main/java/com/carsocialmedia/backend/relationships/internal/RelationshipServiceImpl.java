@@ -2,17 +2,12 @@ package com.carsocialmedia.backend.relationships.internal;
 
 import com.carsocialmedia.backend.relationships.RelationshipService;
 import com.carsocialmedia.backend.relationships.dto.FollowProfileSearchResult;
-import com.carsocialmedia.backend.relationships.dto.FollowRequestDto;
 import com.carsocialmedia.backend.relationships.dto.FollowStatus;
 import com.carsocialmedia.backend.relationships.dto.FollowStatusDto;
 import com.carsocialmedia.backend.relationships.exception.CannotFollowSelfException;
-import com.carsocialmedia.backend.relationships.exception.FollowRequestNotFoundException;
-import com.carsocialmedia.backend.relationships.exception.PrivateProfileException;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,14 +21,10 @@ import java.util.UUID;
 @Service
 class RelationshipServiceImpl implements RelationshipService {
 
-    private static final String STATUS_PENDING = "pending";
     private static final String STATUS_ACCEPTED = "accepted";
 
     private final RelationshipRepository relationshipRepository;
     private final ProfileService profileService;
-
-    @PersistenceContext
-    private EntityManager entityManager;
 
     RelationshipServiceImpl(RelationshipRepository relationshipRepository,
                             ProfileService profileService) {
@@ -58,18 +49,15 @@ class RelationshipServiceImpl implements RelationshipService {
             return new FollowStatusDto(toStatus(existing.getStatus()));
         }
 
+        // All accounts are public, so a follow is accepted immediately. (The Supabase
+        // set_follow_initial_status trigger also forces 'accepted'; we set it here too so the
+        // returned status is correct without a re-read.)
         RelationshipEntity entity = new RelationshipEntity();
         entity.setId(id);
-        // status is set by the BEFORE INSERT trigger in Supabase based on the
-        // target's is_private flag; we deliberately leave it null here.
-        RelationshipEntity saved = relationshipRepository.saveAndFlush(entity);
+        entity.setStatus(STATUS_ACCEPTED);
+        relationshipRepository.save(entity);
 
-        // The INSERT is flushed but the managed entity still holds the null status
-        // we wrote — the trigger's value never round-tripped back. refresh() forces
-        // a SELECT so the trigger-set value becomes visible. We refresh the entity
-        // returned by saveAndFlush (the managed one), not the original reference.
-        entityManager.refresh(saved);
-        return new FollowStatusDto(toStatus(saved.getStatus()));
+        return new FollowStatusDto(FollowStatus.ACCEPTED);
     }
 
     @Override
@@ -95,94 +83,11 @@ class RelationshipServiceImpl implements RelationshipService {
                 .orElse(new FollowStatusDto(FollowStatus.NOT_FOLLOWING));
     }
 
-    // TODO: Logic not implemented yet
-    @Override
-    @Transactional(readOnly = true)
-    public List<FollowRequestDto> getPendingRequests(String currentUserId) {
-        UUID userId = UUID.fromString(currentUserId);
-
-        List<UUID> requesterIds = relationshipRepository.findPendingFollowerIds(userId);
-        if (requesterIds.isEmpty()) {
-            return List.of();
-        }
-
-        // Hydrate profile data while preserving the order returned by the query.
-        Map<UUID, ProfileSearchResultDto> profilesById = indexById(
-                profileService.findByIds(requesterIds));
-
-        // We need the createdAt for each request, so re-fetch the entities by id.
-        // The list is small (pending requests for a single user), so this is fine.
-        Map<UUID, RelationshipEntity> rowsByRequester = new HashMap<>();
-        for (UUID requesterId : requesterIds) {
-            relationshipRepository.findById(new RelationshipId(requesterId, userId))
-                    .ifPresent(row -> rowsByRequester.put(requesterId, row));
-        }
-
-        return requesterIds.stream()
-                .map(requesterId -> {
-                    ProfileSearchResultDto p = profilesById.get(requesterId);
-                    RelationshipEntity row = rowsByRequester.get(requesterId);
-                    if (p == null || row == null) {
-                        return null;
-                    }
-                    return new FollowRequestDto(
-                            p.id(),
-                            p.username(),
-                            p.avatarUrl(),
-                            row.getCreatedAt()
-                    );
-                })
-                .filter(Objects::nonNull)
-                .toList();
-    }
-
-    // TODO: Logic not implemented yet
-    @Override
-    @Transactional
-    public void acceptRequest(String currentUserId, String requesterUsername) {
-        UUID userId = UUID.fromString(currentUserId);
-        UUID requesterId = getUserIdByUsername(requesterUsername);
-
-        RelationshipEntity row = relationshipRepository.findForUpdate(requesterId, userId)
-                .orElseThrow(() -> new FollowRequestNotFoundException(requesterUsername));
-
-        if (!STATUS_PENDING.equals(row.getStatus())) {
-            // Already accepted (or unknown status) — treat as a no-op for idempotency.
-            return;
-        }
-
-        row.setStatus(STATUS_ACCEPTED);
-        relationshipRepository.save(row);
-        // The handle_follow_change AFTER UPDATE trigger increments the counters.
-    }
-
-    // TODO: Logic not implemented yet
-    @Override
-    @Transactional
-    public void rejectRequest(String currentUserId, String requesterUsername) {
-        UUID userId = UUID.fromString(currentUserId);
-        UUID requesterId = getUserIdByUsername(requesterUsername);
-
-        RelationshipId id = new RelationshipId(requesterId, userId);
-        RelationshipEntity row = relationshipRepository.findById(id)
-                .orElseThrow(() -> new FollowRequestNotFoundException(requesterUsername));
-
-        if (!STATUS_PENDING.equals(row.getStatus())) {
-            // Reject only applies to pending requests.
-            throw new FollowRequestNotFoundException(requesterUsername);
-        }
-
-        relationshipRepository.delete(row);
-    }
-
     @Override
     @Transactional(readOnly = true)
     public List<FollowProfileSearchResult> getFollowers(String currentUserId, String targetUsername) {
         UUID viewerUserId = UUID.fromString(currentUserId);
         UUID targetUserId = getUserIdByUsername(targetUsername);
-
-        // TODO: For now, all profiles are public
-        // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
 
         List<UUID> followerIds = relationshipRepository.findAcceptedFollowerIds(targetUserId);
         return convertToFollowProfileSearchResult(viewerUserId, followerIds);
@@ -194,18 +99,8 @@ class RelationshipServiceImpl implements RelationshipService {
         UUID viewerUserId = UUID.fromString(currentUserId);
         UUID targetUserId = getUserIdByUsername(targetUsername);
 
-        // TODO: For now, all profiles are public
-        // ensureCanViewSocialGraph(viewerUserId, targetUserId, targetUsername);
-
         List<UUID> followingIds = relationshipRepository.findAcceptedFollowingIds(targetUserId);
         return convertToFollowProfileSearchResult(viewerUserId, followingIds);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public boolean isAcceptedFollower(UUID viewerId, UUID targetId) {
-        return relationshipRepository
-                .existsByIdFollowerIdAndIdFollowingIdAndStatus(viewerId, targetId, STATUS_ACCEPTED);
     }
 
     @Override
@@ -228,20 +123,6 @@ class RelationshipServiceImpl implements RelationshipService {
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
     }
 
-    private void ensureCanViewSocialGraph(UUID viewerId, UUID targetId, String targetUsername) {
-        if (viewerId.equals(targetId)) {
-            return; // owner can always see their own graph
-        }
-        if (!profileService.isPrivate(targetId)) {
-            return; // public profiles are always visible
-        }
-        boolean isAcceptedFollower = relationshipRepository
-                .existsByIdFollowerIdAndIdFollowingIdAndStatus(viewerId, targetId, STATUS_ACCEPTED);
-        if (!isAcceptedFollower) {
-            throw new PrivateProfileException(targetUsername);
-        }
-    }
-
     private List<FollowProfileSearchResult> convertToFollowProfileSearchResult(UUID viewerId, List<UUID> ids) {
         if (ids.isEmpty()) {
             return List.of();
@@ -261,7 +142,7 @@ class RelationshipServiceImpl implements RelationshipService {
                 .toList();
     }
 
-    private static Map<UUID, ProfileSearchResultDto> indexById (List<ProfileSearchResultDto> dtos) {
+    private static Map<UUID, ProfileSearchResultDto> indexById(List<ProfileSearchResultDto> dtos) {
         Map<UUID, ProfileSearchResultDto> map = new HashMap<>();
         for (ProfileSearchResultDto dto : dtos) {
             map.put(dto.id(), dto);
@@ -270,22 +151,6 @@ class RelationshipServiceImpl implements RelationshipService {
     }
 
     private static FollowStatus toStatus(String dbStatus) {
-        if (STATUS_ACCEPTED.equals(dbStatus)) {
-            return FollowStatus.ACCEPTED;
-        }
-        if (STATUS_PENDING.equals(dbStatus)) {
-            return FollowStatus.PENDING;
-        }
-        return FollowStatus.NOT_FOLLOWING;
-    }
-
-    /**
-     * Helper exposed package-privately for the event listener: bulk-accept all pending
-     * follow requests for {@code userId}. The Supabase trigger will increment counters
-     * per row.
-     */
-    @Transactional
-    void acceptAllPendingFor(UUID userId) {
-        relationshipRepository.acceptAllPendingFor(userId);
+        return STATUS_ACCEPTED.equals(dbStatus) ? FollowStatus.ACCEPTED : FollowStatus.NOT_FOLLOWING;
     }
 }

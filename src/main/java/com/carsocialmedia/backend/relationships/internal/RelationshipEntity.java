@@ -19,10 +19,8 @@ class RelationshipEntity {
     private RelationshipId id;
 
     /**
-     * {@code accepted} or {@code pending}. Initial value is set by the
-     * {@code set_follow_initial_status} BEFORE INSERT trigger in Supabase
-     * (based on the target's {@code is_private} flag), so the app should not
-     * pre-fill it on insert.
+     * Always {@code accepted} — all accounts are public, so a follow takes effect immediately.
+     * The {@code set_follow_initial_status} BEFORE INSERT trigger also forces {@code accepted}.
      */
     private String status;
 

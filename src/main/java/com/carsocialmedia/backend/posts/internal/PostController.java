@@ -5,8 +5,11 @@ import com.carsocialmedia.backend.posts.dto.CommentPageDto;
 import com.carsocialmedia.backend.posts.dto.LikerPageDto;
 import com.carsocialmedia.backend.posts.dto.PostDto;
 import com.carsocialmedia.backend.posts.dto.PostPageDto;
+import com.carsocialmedia.backend.posts.dto.CommentDto;
+import com.carsocialmedia.backend.posts.dto.request.CreateCommentRequest;
 import com.carsocialmedia.backend.posts.dto.request.CreatePostRequest;
 import com.carsocialmedia.backend.posts.dto.request.PostImageKeysRequest;
+import com.carsocialmedia.backend.posts.dto.request.SharePostRequest;
 import com.carsocialmedia.backend.posts.dto.request.UpdatePostRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -67,6 +70,28 @@ public class PostController {
         return postsService.getUserPosts(jwt.getSubject(), username, cursor, size);
     }
 
+    /**
+     * One keyset page of the caller's saved (bookmarked) posts, newest save first. The client
+     * passes the {@code nextCursor} from the previous response back as {@code ?cursor=} to page on.
+     */
+    @GetMapping("/saved")
+    public PostPageDto getSavedPosts(@AuthenticationPrincipal Jwt jwt,
+                                     @RequestParam(required = false) String cursor,
+                                     @RequestParam(defaultValue = "20") int size) {
+        return postsService.getSavedPosts(jwt.getSubject(), cursor, size);
+    }
+
+    /**
+     * One keyset page of the caller's shared posts, newest share first. The client passes the
+     * {@code nextCursor} from the previous response back as {@code ?cursor=} to page on.
+     */
+    @GetMapping("/shared")
+    public PostPageDto getSharedPosts(@AuthenticationPrincipal Jwt jwt,
+                                      @RequestParam(required = false) String cursor,
+                                      @RequestParam(defaultValue = "20") int size) {
+        return postsService.getSharedPosts(jwt.getSubject(), cursor, size);
+    }
+
     @GetMapping("/{postId}")
     public PostDto readPost(@AuthenticationPrincipal Jwt jwt,
                             @PathVariable UUID postId) {
@@ -100,6 +125,19 @@ public class PostController {
     }
 
     /**
+     * One keyset page of the replies to a single comment (its direct children), newest first. The
+     * client passes the {@code nextCursor} from the previous response back as {@code ?cursor=}.
+     */
+    @GetMapping("/{postId}/comments/{commentId}/replies")
+    public CommentPageDto getReplies(@AuthenticationPrincipal Jwt jwt,
+                                     @PathVariable UUID postId,
+                                     @PathVariable UUID commentId,
+                                     @RequestParam(required = false) String cursor,
+                                     @RequestParam(defaultValue = "20") int size) {
+        return postsService.getReplies(UUID.fromString(jwt.getSubject()), postId, commentId, cursor, size);
+    }
+
+    /**
      * One keyset page of the users who liked a post, most recent liker first.
      */
     @GetMapping("/{postId}/likes")
@@ -107,5 +145,97 @@ public class PostController {
                                       @RequestParam(required = false) String cursor,
                                       @RequestParam(defaultValue = "20") int size) {
         return postsService.getPostLikers(postId, cursor, size);
+    }
+
+    // -------------------------------------------------------------------
+    // ENGAGEMENT — likes, saves, shares, comments
+    // -------------------------------------------------------------------
+
+    /** Likes a post (idempotent). */
+    @PostMapping("/{postId}/likes")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void likePost(@AuthenticationPrincipal Jwt jwt,
+                         @PathVariable UUID postId) {
+        postsService.likePost(jwt.getSubject(), postId);
+    }
+
+    /** Removes the caller's like from a post (idempotent). */
+    @DeleteMapping("/{postId}/likes")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unlikePost(@AuthenticationPrincipal Jwt jwt,
+                           @PathVariable UUID postId) {
+        postsService.unlikePost(jwt.getSubject(), postId);
+    }
+
+    /** Saves (bookmarks) a post for the caller (idempotent). */
+    @PostMapping("/{postId}/saves")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void savePost(@AuthenticationPrincipal Jwt jwt,
+                         @PathVariable UUID postId) {
+        postsService.savePost(jwt.getSubject(), postId);
+    }
+
+    /** Removes the caller's save of a post (idempotent). */
+    @DeleteMapping("/{postId}/saves")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unsavePost(@AuthenticationPrincipal Jwt jwt,
+                           @PathVariable UUID postId) {
+        postsService.unsavePost(jwt.getSubject(), postId);
+    }
+
+    /**
+     * Shares a post (idempotent). The optional body's {@code content} is the sharer's caption; a
+     * non-blank value makes it a quote share. The body may be omitted for a plain share.
+     */
+    @PostMapping("/{postId}/shares")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void sharePost(@AuthenticationPrincipal Jwt jwt,
+                          @PathVariable UUID postId,
+                          @Valid @RequestBody(required = false) SharePostRequest request) {
+        postsService.sharePost(jwt.getSubject(), postId, request == null ? null : request.content());
+    }
+
+    /** Removes the caller's share of a post (idempotent). */
+    @DeleteMapping("/{postId}/shares")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unsharePost(@AuthenticationPrincipal Jwt jwt,
+                            @PathVariable UUID postId) {
+        postsService.unsharePost(jwt.getSubject(), postId);
+    }
+
+    /** Adds a comment (or threaded reply) to a post. */
+    @PostMapping("/{postId}/comments")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CommentDto addComment(@AuthenticationPrincipal Jwt jwt,
+                                 @PathVariable UUID postId,
+                                 @Valid @RequestBody CreateCommentRequest request) {
+        return postsService.addComment(jwt.getSubject(), postId, request);
+    }
+
+    /** Soft-deletes a comment (idempotent); allowed for the comment's author or the post's owner. */
+    @DeleteMapping("/{postId}/comments/{commentId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteComment(@AuthenticationPrincipal Jwt jwt,
+                              @PathVariable UUID postId,
+                              @PathVariable UUID commentId) {
+        postsService.deleteComment(jwt.getSubject(), postId, commentId);
+    }
+
+    /** Likes a comment (idempotent). */
+    @PostMapping("/{postId}/comments/{commentId}/likes")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void likeComment(@AuthenticationPrincipal Jwt jwt,
+                            @PathVariable UUID postId,
+                            @PathVariable UUID commentId) {
+        postsService.likeComment(jwt.getSubject(), postId, commentId);
+    }
+
+    /** Removes the caller's like from a comment (idempotent). */
+    @DeleteMapping("/{postId}/comments/{commentId}/likes")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unlikeComment(@AuthenticationPrincipal Jwt jwt,
+                              @PathVariable UUID postId,
+                              @PathVariable UUID commentId) {
+        postsService.unlikeComment(jwt.getSubject(), postId, commentId);
     }
 }

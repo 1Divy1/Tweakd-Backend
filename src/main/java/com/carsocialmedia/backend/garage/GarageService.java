@@ -72,16 +72,14 @@ public interface GarageService {
     GarageDto getMyGarage(String currentUserId);
 
     /**
-     * Gets another user's garage by username. Privacy rules mirror the profile / follow
-     * social-graph: private profiles' garages are visible only to the owner or accepted followers.
+     * Gets another user's garage by username. All accounts are public, so any user's garage is
+     * visible to any authenticated viewer.
      *
      * @param currentUserId the current user's UUID from the JWT subject
      * @param username the username of the garage owner
      * @return the garage with a list of car summaries
      * @throws ProfileNotFoundException if the user does not exist
      * @throws GarageNotFoundException if the user has no garage (should be auto-created)
-     * @throws PrivateGarageException if the garage owner is private and the current user
-     *         has not been accepted as a follower
      */
     GarageDto getGarageByUsername(String currentUserId, String username);
 
@@ -123,14 +121,13 @@ public interface GarageService {
     void deleteCar(String currentUserId, UUID carId);
 
     /**
-     * Retrieves a single car with full details and all modifications. If the viewer is
-     * not the owner, visibility is subject to the owner's garage privacy settings.
+     * Retrieves a single car with full details and all modifications. All accounts are public, so
+     * any car is viewable by any authenticated user.
      *
      * @param currentUserId the current user's UUID from the JWT subject
      * @param carId the car ID
-     * @return the car with all details and modifications (prices may be hidden based on privacy)
+     * @return the car with all details and modifications
      * @throws CarNotFoundException if the car does not exist
-     * @throws PrivateGarageException if the garage is private and the viewer is not allowed
      */
     CarDto getCar(String currentUserId, UUID carId);
 

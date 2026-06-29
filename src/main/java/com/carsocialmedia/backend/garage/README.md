@@ -74,7 +74,6 @@ users' garages.
 | `CarImageNotFoundException` | 404 | Gallery image id doesn't exist or doesn't belong to the path's car id |
 | `NotCarOwnerException` | 403 | Caller is not the owner of the car they're trying to mutate |
 | `DreamCarNotFoundException` | 404 | Dream car id doesn't exist or isn't owned by the caller (queries are owner-scoped) |
-| `PrivateGarageException` | 403 | Caller is viewing a private user's garage without being an accepted follower |
 | `InvalidReferenceException` | 400 | Request references an unknown brand / model / drivetrain / color / unit / category, or a model that doesn't belong to the brand id provided |
 | `InvalidStoragePathException` | 400 | `storagePath` in a download-url request doesn't match the canonical `car-photos/{ownerId}/{carId}/...` format |
 
@@ -212,28 +211,19 @@ in Supabase.
 | `car_images_car_id_fkey ON DELETE CASCADE` | FK on `car_images` | Deleting a car drops its gallery rows |
 | `car_modifications_price_visibility_check` | CHECK | `is_price_public = true` requires `price IS NOT NULL` |
 
-## Privacy rules
+## Visibility
 
-`getGarageByUsername` and `getCar` (when viewer ≠ owner) enforce the same rule used
-by the follow module's social-graph endpoints:
+All accounts are public, so any garage and any car is viewable by any authenticated user;
+there is no privacy gate.
 
-1. Owner viewing themselves → always allowed.
-2. Owner is a **public** profile → allowed.
-3. Owner is **private** AND viewer is an accepted follower → allowed.
-4. Otherwise → `PrivateGarageException` (403).
-
-Modification prices have an additional check: when the viewer is not the owner and
-the mod's `isPricePublic` is false, `price` is returned as `null` regardless of the
-stored value.
+Modification prices have a per-mod check: when the viewer is not the owner and the mod's
+`isPricePublic` is false, `price` is returned as `null` regardless of the stored value.
 
 ## Cross-module dependencies
 
-- **`profile.ProfileService`** — `findIdByUsername` for username resolution and
-  `isPrivate(UUID)` to apply the privacy gate.
+- **`profile.ProfileService`** — `findIdByUsername` for username resolution.
 - **`profile.exception.ProfileNotFoundException`** — thrown when a target username
   cannot be resolved.
-- **`follow.FollowService.isAcceptedFollower(viewerId, targetId)`** — used to grant
-  access to private users' garages.
 - **`storage.StorageService`** — `createUploadUrl(path)` and `createDownloadUrl(path)` to
   generate presigned Supabase Storage URLs. The garage module owns path construction and
   ownership validation; the storage module only handles the HTTP calls.

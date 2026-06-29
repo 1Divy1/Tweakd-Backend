@@ -16,11 +16,9 @@ the junctions `profile_car_categories_junction` / `profile_community_roles_junct
 |---|---|
 | `getProfile(userId)` | Returns the authenticated user's own profile |
 | `completeOnboarding(userId, request)` | Saves username (required) and bio (optional) after first sign-in |
-| `setPrivacy(userId, isPrivate)` | Toggles the account between public and private |
 | `getPublicProfileByUsername(username)` | Returns a public view of any profile by username |
 | `searchByUsername(prefix)` | Prefix search across all usernames |
 | `findIdByUsername(username)` | Lookup helper for sibling modules — resolves a username to its UUID |
-| `isPrivate(userId)` | Lookup helper for sibling modules — checks privacy flag without exposing the entity |
 | `findByIds(ids)` | Lookup helper for sibling modules — bulk hydrate a list of UUIDs to search result DTOs |
 | `listCountries()` / `listCities(countryId)` | Read-only onboarding reference lists |
 | `listCommunityRoles()` / `listCarCategories()` | Read-only onboarding reference lists |
@@ -34,11 +32,10 @@ the junctions `profile_car_categories_junction` / `profile_community_roles_junct
 
 | Type | Fields | Used for |
 |---|---|---|
-| `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, isPrivate, requiresOnboarding | Own-profile responses |
-| `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, isPrivate | Public profile view (no `requiresOnboarding`) |
+| `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding | Own-profile responses |
+| `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness | Public profile view (no `requiresOnboarding`) |
 | `ProfileSearchResultDto` | id, username, avatarUrl | Search results and cross-module hydration |
 | `OnboardingRequest` | username (required), bio, cityId, discoveryRadiusKm, categoryIds, roleIds (all optional) | POST /onboarding body |
-| `PrivacyRequest` | isPrivate | PATCH /me/privacy body |
 | `LocationRequest` | cityId, discoveryRadiusKm (all optional) | PATCH /me/location body |
 | `RealtimeLocationRequest` | lat, lng (required) | PATCH /me/realtime-location body |
 | `CategorySelectionRequest` | categoryIds | PUT /me/car-categories body (replace-all) |
@@ -49,12 +46,6 @@ the junctions `profile_car_categories_junction` / `profile_community_roles_junct
 | `NotificationPreferencesDto` | 6 boolean toggles | notification reads/writes |
 
 `ProfileDto` additionally carries `cityId` and `discoveryRadiusKm`.
-
-### Domain events
-
-| Event | Published when | Consumer |
-|---|---|---|
-| `ProfileBecamePublicEvent(userId)` | A private account switches to public | `follow` module auto-accepts all pending requests |
 
 ### Exceptions
 
@@ -71,7 +62,6 @@ Base path: `/api/v1/profile`
 |---|---|---|---|
 | GET | `/me` | required | Own profile |
 | POST | `/onboarding` | required | Complete onboarding (set username / bio) |
-| PATCH | `/me/privacy` | required | Toggle public / private |
 | GET | `/by-username/{username}` | required | Public view of any profile |
 | GET | `/search?q={prefix}` | required | Username prefix search |
 | PATCH | `/me/location` | required | Update city / radius |
@@ -104,7 +94,6 @@ Reference reads (base path `/api/v1/profile/reference`):
 | followingCount | int | Managed by Supabase triggers |
 | isVerified | boolean | |
 | isBusiness | boolean | |
-| isPrivate | boolean | |
 | requiresOnboarding | boolean | |
 | city | CityEntity | `@ManyToOne` on `city_id`, nullable |
 | discoveryRadiusKm | Integer | nullable, DB check 1–100 |

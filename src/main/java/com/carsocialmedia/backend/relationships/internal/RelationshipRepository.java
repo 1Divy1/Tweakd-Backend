@@ -1,27 +1,13 @@
 package com.carsocialmedia.backend.relationships.internal;
 
-import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 interface RelationshipRepository extends JpaRepository<RelationshipEntity, RelationshipId> {
-
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select f from RelationshipEntity f where f.id.followerId = :followerId and f.id.followingId = :followingId")
-    Optional<RelationshipEntity> findForUpdate(@Param("followerId") UUID followerId,
-                                               @Param("followingId") UUID followingId);
-
-    @Query("select f.id.followerId from RelationshipEntity f " +
-            "where f.id.followingId = :followingId and f.status = 'pending' " +
-            "order by f.createdAt desc")
-    List<UUID> findPendingFollowerIds(@Param("followingId") UUID followingId);
 
     @Query("select f.id.followerId from RelationshipEntity f " +
             "where f.id.followingId = :followingId and f.status = 'accepted' " +
@@ -43,18 +29,4 @@ interface RelationshipRepository extends JpaRepository<RelationshipEntity, Relat
             "and f.id.followingId in :candidateIds")
     List<UUID> findAcceptedFollowingIdsIn(@Param("followerId") UUID followerId,
                                           @Param("candidateIds") List<UUID> candidateIds);
-
-    boolean existsByIdFollowerIdAndIdFollowingIdAndStatus(UUID followerId,
-                                                         UUID followingId,
-                                                         String status);
-
-    /**
-     * Bulk transition pending → accepted for all requests targeted at {@code followingId}.
-     * The {@code handle_follow_change} trigger increments the counters per-row, so we
-     * intentionally do NOT touch counters from the application side.
-     */
-    @Modifying
-    @Query("update RelationshipEntity f set f.status = 'accepted' " +
-            "where f.id.followingId = :followingId and f.status = 'pending'")
-    int acceptAllPendingFor(@Param("followingId") UUID followingId);
 }

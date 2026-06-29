@@ -12,6 +12,5 @@ public record PublicProfileDto(
         int followersCount,
         int followingCount,
         boolean isVerified,
-        boolean isBusiness,
-        boolean isPrivate
+        boolean isBusiness
 ) {}

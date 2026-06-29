@@ -29,7 +29,6 @@ public interface ProfileService {
      */
     Optional<UUID> findIdByUsername(String username);
     boolean existsByUsername(String username);
-    boolean isPrivate(UUID userId);
     List<ProfileSearchResultDto> findByIds(Collection<UUID> ids);
 
     // TODO: Add docs for the below methods.
@@ -37,8 +36,6 @@ public interface ProfileService {
     ProfileDto getProfile(String userId);
 
     ProfileDto completeOnboarding(String userId, OnboardingRequest request);
-
-    ProfileDto setPrivacy(String userId, boolean isPrivate);
 
     PublicProfileDto getPublicProfileByUsername(String username);
 

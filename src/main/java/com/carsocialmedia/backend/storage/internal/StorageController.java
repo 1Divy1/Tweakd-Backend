@@ -19,6 +19,8 @@ public class StorageController {
 
     private final StorageService storageService;
 
+    // ----- CARS -----
+
     @GetMapping("/cars/{carId}/cover")
     public UploadUrlResponse cover(@PathVariable UUID carId) {
         return storageService.coverUploadUrlRequest(carId);
@@ -27,14 +29,6 @@ public class StorageController {
     @GetMapping("/cars/{carId}/gallery")
     public UploadUrlResponse gallery(@PathVariable UUID carId) {
         return storageService.galleryUploadUrlRequest(carId);
-    }
-
-    @PostMapping("/posts/{postId}/upload-urls")
-    public PostImagesUploadUrlsResponse postImages(
-            @PathVariable UUID postId,
-            @Valid @RequestBody PostImagesUploadRequest request
-    ) {
-        return storageService.postImagesUploadUrlRequest(postId, request.count());
     }
 
     @GetMapping("/cars/{carId}/modifications/{modId}")
@@ -54,5 +48,15 @@ public class StorageController {
             @Valid @RequestBody ModificationUploadRequest request
     ) {
         return storageService.modificationBatchUploadUrlRequest(carId, modId, request.files());
+    }
+
+    // ----- POSTS -----
+
+    @PostMapping("/posts/{postId}/upload-urls")
+    public PostImagesUploadUrlsResponse postImages(
+            @PathVariable UUID postId,
+            @Valid @RequestBody PostImagesUploadRequest request
+    ) {
+        return storageService.postImagesUploadUrlRequest(postId, request.count());
     }
 }
