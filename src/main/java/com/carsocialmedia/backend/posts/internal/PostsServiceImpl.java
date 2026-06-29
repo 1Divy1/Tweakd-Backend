@@ -477,7 +477,8 @@ public class PostsServiceImpl implements PostsService {
                         c.isDeleted(),
                         c.getLikesCount(),
                         likedByViewer.contains(c.getId()),
-                        c.getCreatedAt()))
+                        c.getCreatedAt(),
+                        c.getReplyCount()))
                 .toList();
 
         String nextCursor = hasMore ? lastCommentCursor(page) : null;
@@ -632,7 +633,8 @@ public class PostsServiceImpl implements PostsService {
                 hydrated.isDeleted(),
                 hydrated.getLikesCount(),
                 false,
-                hydrated.getCreatedAt());
+                hydrated.getCreatedAt(),
+                hydrated.getReplyCount());
     }
 
     @Override

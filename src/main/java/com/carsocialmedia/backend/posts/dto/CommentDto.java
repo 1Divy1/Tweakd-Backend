@@ -20,6 +20,7 @@ import java.util.UUID;
  * @param likeCount how many users liked this comment
  * @param viewerHasLiked whether the requesting user liked this comment
  * @param createdAt when the comment was created
+ * @param replyCount the number of child comments having the current comment as their parent
  */
 public record CommentDto(
         UUID id,
@@ -29,5 +30,6 @@ public record CommentDto(
         boolean deleted,
         long likeCount,
         boolean viewerHasLiked,
-        Instant createdAt
+        Instant createdAt,
+        int replyCount
 ) {}
