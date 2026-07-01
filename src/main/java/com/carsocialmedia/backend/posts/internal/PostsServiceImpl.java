@@ -12,6 +12,7 @@ import com.carsocialmedia.backend.posts.dto.PostPageDto;
 import com.carsocialmedia.backend.posts.dto.request.CreateCommentRequest;
 import com.carsocialmedia.backend.posts.dto.request.CreatePostRequest;
 import com.carsocialmedia.backend.posts.dto.request.UpdatePostRequest;
+import com.carsocialmedia.backend.posts.exception.CannotReportOwnContentException;
 import com.carsocialmedia.backend.posts.exception.CarOwnerNotTaggedException;
 import com.carsocialmedia.backend.posts.exception.CommentNotFoundException;
 import com.carsocialmedia.backend.posts.exception.InvalidReferenceException;
@@ -45,6 +46,7 @@ import com.carsocialmedia.backend.posts.internal.repositories.TaggedPersonReposi
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
+import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
@@ -89,6 +91,7 @@ public class PostsServiceImpl implements PostsService {
     private final ProfileService profileService;
     private final GarageService garageService;
     private final StorageService storageService;
+    private final ReportService reportService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -104,7 +107,8 @@ public class PostsServiceImpl implements PostsService {
                             PostShareRepository postShareRepository,
                             ProfileService profileService,
                             GarageService garageService,
-                            StorageService storageService) {
+                            StorageService storageService,
+                            ReportService reportService) {
         this.postRepository = postRepository;
         this.postImageRepository = postImageRepository;
         this.taggedPersonRepository = taggedPersonRepository;
@@ -117,6 +121,7 @@ public class PostsServiceImpl implements PostsService {
         this.profileService = profileService;
         this.garageService = garageService;
         this.storageService = storageService;
+        this.reportService = reportService;
     }
 
     // -------------------------------------------------------------------
@@ -679,6 +684,33 @@ public class PostsServiceImpl implements PostsService {
     public void unlikeComment(String currentUserId, UUID postId, UUID commentId) {
         UUID userId = UUID.fromString(currentUserId);
         commentLikeRepository.deleteByIdCommentIdAndIdUserId(commentId, userId);
+    }
+
+    // -------------------------------------------------------------------
+    // REPORTING
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public void reportPost(String currentUserId, UUID postId, UUID reasonId) {
+        UUID reporterId = UUID.fromString(currentUserId);
+        PostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new PostNotFoundException(postId));
+        if (post.getUserId().equals(reporterId)) {
+            throw new CannotReportOwnContentException();
+        }
+        reportService.reportPost(reporterId, postId, reasonId);
+    }
+
+    @Override
+    @Transactional
+    public void reportComment(String currentUserId, UUID postId, UUID commentId, UUID reasonId) {
+        UUID reporterId = UUID.fromString(currentUserId);
+        CommentEntity comment = loadCommentOfPost(postId, commentId);
+        if (comment.getUserId().equals(reporterId)) {
+            throw new CannotReportOwnContentException();
+        }
+        reportService.reportComment(reporterId, commentId, reasonId);
     }
 
     // -------------------------------------------------------------------
