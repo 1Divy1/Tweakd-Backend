@@ -305,4 +305,45 @@ public interface PostsService {
      *         not exist or does not belong to the post
      */
     void unlikeComment(String currentUserId, UUID postId, UUID commentId);
+
+    // -------------------------------------------------------------------
+    // REPORTING
+    //
+    // The report rows themselves live in the report module; these methods perform the
+    // posts-side checks (the target exists, and the reporter is not reporting their own content)
+    // and then delegate the insert to report.ReportService. Listing the preset report reasons is a
+    // pure passthrough to the report module and is exposed directly by the controller.
+    // -------------------------------------------------------------------
+
+    /**
+     * Files a report against a post on behalf of the current user.
+     *
+     * @param currentUserId the reporting user's UUID from the JWT subject
+     * @param postId the post being reported
+     * @param reasonId an optional preset reason (a {@code post}-scoped {@code report_reasons} id), or {@code null}
+     * @throws com.carsocialmedia.backend.posts.exception.PostNotFoundException if the post does not exist
+     * @throws com.carsocialmedia.backend.posts.exception.CannotReportOwnContentException if the caller owns the post
+     * @throws com.carsocialmedia.backend.report.exception.InvalidReportReasonException if {@code reasonId}
+     *         is given but is not a valid {@code post} reason
+     * @throws com.carsocialmedia.backend.report.exception.DuplicateReportException if the caller already
+     *         reported this post
+     */
+    void reportPost(String currentUserId, UUID postId, UUID reasonId);
+
+    /**
+     * Files a report against a comment on behalf of the current user.
+     *
+     * @param currentUserId the reporting user's UUID from the JWT subject
+     * @param postId the post the comment belongs to (from the URL)
+     * @param commentId the comment being reported
+     * @param reasonId an optional preset reason (a {@code comment}-scoped {@code report_reasons} id), or {@code null}
+     * @throws com.carsocialmedia.backend.posts.exception.CommentNotFoundException if the comment does not
+     *         exist or does not belong to the post
+     * @throws com.carsocialmedia.backend.posts.exception.CannotReportOwnContentException if the caller authored the comment
+     * @throws com.carsocialmedia.backend.report.exception.InvalidReportReasonException if {@code reasonId}
+     *         is given but is not a valid {@code comment} reason
+     * @throws com.carsocialmedia.backend.report.exception.DuplicateReportException if the caller already
+     *         reported this comment
+     */
+    void reportComment(String currentUserId, UUID postId, UUID commentId, UUID reasonId);
 }
