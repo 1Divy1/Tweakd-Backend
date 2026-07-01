@@ -15,11 +15,13 @@ import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
 import com.carsocialmedia.backend.profile.dto.RoleSelectionRequest;
+import com.carsocialmedia.backend.profile.exception.CannotReportSelfException;
 import com.carsocialmedia.backend.profile.exception.InvalidReferenceException;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.profile.exception.UsernameAlreadyTakenException;
 import com.carsocialmedia.backend.profile.internal.entity.*;
 import com.carsocialmedia.backend.profile.internal.repository.*;
+import com.carsocialmedia.backend.report.ReportService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +43,7 @@ class ProfileServiceImpl implements ProfileService {
     private final NotificationPreferencesRepository notificationPreferencesRepository;
     private final ProfileCarCategoryRepository profileCarCategoryRepository;
     private final ProfileCommunityRoleRepository profileCommunityRoleRepository;
+    private final ReportService reportService;
 
     ProfileServiceImpl(ProfileRepository profileRepository,
                        CountryRepository countryRepository,
@@ -49,7 +52,8 @@ class ProfileServiceImpl implements ProfileService {
                        CarCategoryOptionRepository carCategoryOptionRepository,
                        NotificationPreferencesRepository notificationPreferencesRepository,
                        ProfileCarCategoryRepository profileCarCategoryRepository,
-                       ProfileCommunityRoleRepository profileCommunityRoleRepository) {
+                       ProfileCommunityRoleRepository profileCommunityRoleRepository,
+                       ReportService reportService) {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
         this.cityRepository = cityRepository;
@@ -58,6 +62,7 @@ class ProfileServiceImpl implements ProfileService {
         this.notificationPreferencesRepository = notificationPreferencesRepository;
         this.profileCarCategoryRepository = profileCarCategoryRepository;
         this.profileCommunityRoleRepository = profileCommunityRoleRepository;
+        this.reportService = reportService;
     }
 
     @Override
@@ -271,6 +276,21 @@ class ProfileServiceImpl implements ProfileService {
         prefs.setPriceDropsEnabled(request.priceDropsEnabled());
         prefs.setUpdatedAt(Instant.now());
         return notificationPreferencesRepository.save(prefs).toDto();
+    }
+
+    // ---- reporting ---------------------------------------------------------
+
+    @Override
+    @Transactional
+    public void reportProfile(String currentUserId, String username, UUID reasonId) {
+        UUID reporterId = UUID.fromString(currentUserId);
+        UUID reportedId = profileRepository.findByUsername(username)
+                .map(ProfileEntity::getId)
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
+        if (reportedId.equals(reporterId)) {
+            throw new CannotReportSelfException();
+        }
+        reportService.reportProfile(reporterId, reportedId, reasonId);
     }
 
     // ---- helpers -----------------------------------------------------------

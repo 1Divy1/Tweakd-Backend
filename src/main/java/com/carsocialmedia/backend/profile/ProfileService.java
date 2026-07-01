@@ -76,4 +76,23 @@ public interface ProfileService {
     NotificationPreferencesDto getNotificationPreferences(String userId);
 
     NotificationPreferencesDto updateNotificationPreferences(String userId, NotificationPreferencesRequest request);
+
+    // ---- reporting ---------------------------------------------------------
+
+    /**
+     * Files a report against the profile identified by {@code username}, on behalf of the current
+     * user. Resolves the username and blocks self-reports here (the profile-side checks); the report
+     * row itself is persisted by the {@code report} module.
+     *
+     * @param currentUserId the reporting user's UUID from the JWT subject
+     * @param username the reported user's username
+     * @param reasonId an optional preset reason (a {@code profile}-scoped {@code report_reasons} id), or {@code null}
+     * @throws com.carsocialmedia.backend.profile.exception.ProfileNotFoundException if the username does not resolve
+     * @throws com.carsocialmedia.backend.profile.exception.CannotReportSelfException if the caller reports their own profile
+     * @throws com.carsocialmedia.backend.report.exception.InvalidReportReasonException if {@code reasonId}
+     *         is given but is not a valid {@code profile} reason
+     * @throws com.carsocialmedia.backend.report.exception.DuplicateReportException if the caller already
+     *         reported this profile
+     */
+    void reportProfile(String currentUserId, String username, UUID reasonId);
 }
