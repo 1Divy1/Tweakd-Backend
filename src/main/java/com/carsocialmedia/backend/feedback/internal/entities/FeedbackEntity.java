@@ -42,6 +42,17 @@ public class FeedbackEntity {
     @Column(name = "reproduction_steps")
     private String reproductionSteps;
 
+    /** A moderator's reply to the feedback; nullable until one is written. */
+    @Column(name = "response")
+    private String response;
+
+    /**
+     * FK to {@code feedback_status_options.id}. Left out of inserts ({@code insertable = false}) so
+     * the column DEFAULT {@code 'submitted'} fires; moderators advance it afterwards.
+     */
+    @Column(name = "status", insertable = false)
+    private String status;
+
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

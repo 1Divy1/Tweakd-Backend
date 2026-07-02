@@ -1,7 +1,8 @@
 # feedback module
 
-Owns user-submitted app feedback — bug reports, feature requests, and general notes — plus the two
-reference tables that back the pickers (`feedback_type_options`, `feedback_feature_options`).
+Owns user-submitted app feedback — bug reports, feature requests, and general notes — plus the
+reference tables that back the pickers and the status lifecycle (`feedback_type_options`,
+`feedback_feature_options`, `feedback_status_options`).
 
 Unlike the `report` module, `feedback` is a **self-contained leaf**: a feedback row references its
 author only by a flat `profiles.id` UUID (the JWT subject) and needs no cross-module validation, so
@@ -29,7 +30,8 @@ backend accepts it for any type). Blank optional strings are normalized to `null
 | `FeedbackRequest(content, type, feature, reproductionSteps)` | Request body for `POST /feedback`; `content` + `type` are `@NotBlank` |
 | `FeedbackTypeDto(id, type)` | One feedback category for the type picker |
 | `FeedbackFeatureDto(id, name)` | One app feature for the feature picker |
-| `MyFeedbackDto(id, content, type, feature, reproductionSteps, createdAt)` | One entry in the user's own feedback feed (`type`/`feature` resolved to their labels) |
+| `FeedbackStatusDto(id, name, color)` | A feedback's lifecycle state, resolved for the chip |
+| `MyFeedbackDto(id, content, type, feature, reproductionSteps, response, status, createdAt)` | One entry in the user's own feedback feed (`type`/`feature` resolved to labels, `status` to a `FeedbackStatusDto`; `response` is the moderator reply, `null` until one exists) |
 
 ### Exceptions
 
@@ -56,10 +58,13 @@ All endpoints require authentication; `/mine` is always scoped to the JWT subjec
 
 | Entity → table | Notes |
 |---|---|
-| `FeedbackEntity` → `feedback` | `id` (app-generated UUID); `userId` / `type` / `feature` are flat references; `createdAt` DB-managed |
+| `FeedbackEntity` → `feedback` | `id` (app-generated UUID); `userId` / `type` / `feature` / `status` are flat references; `response` is the nullable moderator reply; `status` and `createdAt` DB-managed |
 | `FeedbackTypeOptionEntity` → `feedback_type_options` | Seeded reference data (text id) |
 | `FeedbackFeatureOptionEntity` → `feedback_feature_options` | Seeded reference data (text id) |
+| `FeedbackStatusOptionEntity` → `feedback_status_options` | Seeded lifecycle states (id, name, sort_order, color) |
 
-`created_at` is DB-managed (`insertable = false`). The `feedback.id` UUID is generated in Java
-(`UUID.randomUUID()`) before insert, matching the rest of the codebase (schema is owned by Supabase,
-not Hibernate).
+`created_at` is DB-managed (`insertable = false`). `status` is also DB-managed on insert
+(`insertable = false`) so its column DEFAULT `'submitted'` fires; moderators advance it (and write
+`response`) afterwards — the app has no endpoint to mutate either yet. The `feedback.id` UUID is
+generated in Java (`UUID.randomUUID()`) before insert, matching the rest of the codebase (schema is
+owned by Supabase, not Hibernate).
