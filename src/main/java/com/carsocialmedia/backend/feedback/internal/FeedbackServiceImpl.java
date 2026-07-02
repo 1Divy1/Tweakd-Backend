@@ -3,15 +3,18 @@ package com.carsocialmedia.backend.feedback.internal;
 import com.carsocialmedia.backend.feedback.FeedbackService;
 import com.carsocialmedia.backend.feedback.dto.FeedbackFeatureDto;
 import com.carsocialmedia.backend.feedback.dto.FeedbackRequest;
+import com.carsocialmedia.backend.feedback.dto.FeedbackStatusDto;
 import com.carsocialmedia.backend.feedback.dto.FeedbackTypeDto;
 import com.carsocialmedia.backend.feedback.dto.MyFeedbackDto;
 import com.carsocialmedia.backend.feedback.exception.InvalidFeedbackFeatureException;
 import com.carsocialmedia.backend.feedback.exception.InvalidFeedbackTypeException;
 import com.carsocialmedia.backend.feedback.internal.entities.FeedbackEntity;
 import com.carsocialmedia.backend.feedback.internal.entities.FeedbackFeatureOptionEntity;
+import com.carsocialmedia.backend.feedback.internal.entities.FeedbackStatusOptionEntity;
 import com.carsocialmedia.backend.feedback.internal.entities.FeedbackTypeOptionEntity;
 import com.carsocialmedia.backend.feedback.internal.repositories.FeedbackFeatureOptionRepository;
 import com.carsocialmedia.backend.feedback.internal.repositories.FeedbackRepository;
+import com.carsocialmedia.backend.feedback.internal.repositories.FeedbackStatusOptionRepository;
 import com.carsocialmedia.backend.feedback.internal.repositories.FeedbackTypeOptionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,13 +30,16 @@ public class FeedbackServiceImpl implements FeedbackService {
     private final FeedbackRepository feedbackRepository;
     private final FeedbackTypeOptionRepository typeOptionRepository;
     private final FeedbackFeatureOptionRepository featureOptionRepository;
+    private final FeedbackStatusOptionRepository statusOptionRepository;
 
     public FeedbackServiceImpl(FeedbackRepository feedbackRepository,
                                FeedbackTypeOptionRepository typeOptionRepository,
-                               FeedbackFeatureOptionRepository featureOptionRepository) {
+                               FeedbackFeatureOptionRepository featureOptionRepository,
+                               FeedbackStatusOptionRepository statusOptionRepository) {
         this.feedbackRepository = feedbackRepository;
         this.typeOptionRepository = typeOptionRepository;
         this.featureOptionRepository = featureOptionRepository;
+        this.statusOptionRepository = statusOptionRepository;
     }
 
     @Override
@@ -79,11 +85,14 @@ public class FeedbackServiceImpl implements FeedbackService {
     public List<MyFeedbackDto> listMyFeedback(UUID userId) {
         List<FeedbackEntity> feedback = feedbackRepository.findByUserIdOrderByCreatedAtDesc(userId);
 
-        // Resolve every referenced type/feature label in one batch each, to avoid an N+1 lookup.
+        // Resolve every referenced type/feature/status in one batch each, to avoid an N+1 lookup.
         Map<String, String> typeLabels = typeOptionRepository.findAll().stream()
                 .collect(Collectors.toMap(FeedbackTypeOptionEntity::getId, FeedbackTypeOptionEntity::getType));
         Map<String, String> featureLabels = featureOptionRepository.findAll().stream()
                 .collect(Collectors.toMap(FeedbackFeatureOptionEntity::getId, FeedbackFeatureOptionEntity::getName));
+        Map<String, FeedbackStatusDto> statuses = statusOptionRepository.findAll().stream()
+                .collect(Collectors.toMap(FeedbackStatusOptionEntity::getId,
+                        option -> new FeedbackStatusDto(option.getId(), option.getName(), option.getColor())));
 
         return feedback.stream()
                 .map(entity -> new MyFeedbackDto(
@@ -93,8 +102,22 @@ public class FeedbackServiceImpl implements FeedbackService {
                         entity.getFeature() == null ? null
                                 : featureLabels.getOrDefault(entity.getFeature(), entity.getFeature()),
                         entity.getReproductionSteps(),
+                        entity.getResponse(),
+                        resolveStatus(entity.getStatus(), statuses),
                         entity.getCreatedAt()))
                 .toList();
+    }
+
+    /**
+     * Maps a stored status id to its resolved {@link FeedbackStatusDto}. {@code status} is NOT NULL in
+     * the DB, but if an id somehow isn't in the options table we fall back to a label-less chip rather
+     * than dropping the field.
+     */
+    private FeedbackStatusDto resolveStatus(String statusId, Map<String, FeedbackStatusDto> statuses) {
+        if (statusId == null) {
+            return null;
+        }
+        return statuses.getOrDefault(statusId, new FeedbackStatusDto(statusId, statusId, null));
     }
 
     /** Treats blank optional text as absent, so an empty string doesn't become a stored value. */
