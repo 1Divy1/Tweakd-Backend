@@ -50,6 +50,26 @@ public interface GarageService {
     List<CarSummaryDto> findCarsByIds(Collection<UUID> ids);
 
     /**
+     * Batch lookup of car brands by ID for other modules that reference a brand by id and need its
+     * display name without per-row calls (e.g. the {@code forums} module rendering a thread's brand
+     * badge). Missing IDs are silently omitted; ordering is not guaranteed.
+     *
+     * @param ids the brand IDs to resolve
+     * @return the matching brands (may be smaller than {@code ids})
+     */
+    List<CarBrandDto> findBrandsByIds(Collection<UUID> ids);
+
+    /**
+     * Batch lookup of car models by ID for other modules that reference a model by id and need its
+     * display name (and owning brand) without per-row calls (e.g. the {@code forums} module rendering
+     * a thread's model badge). Missing IDs are silently omitted; ordering is not guaranteed.
+     *
+     * @param ids the model IDs to resolve
+     * @return the matching models (may be smaller than {@code ids})
+     */
+    List<CarModelDto> findModelsByIds(Collection<UUID> ids);
+
+    /**
      * Resolves each given car's owner (profile id), regardless of owning garage and without
      * privacy gating. Intended for other modules that must apply ownership-aware rules by id —
      * e.g. the posts module only allows a car to be tagged when its owner is also tagged.
