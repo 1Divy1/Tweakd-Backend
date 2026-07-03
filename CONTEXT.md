@@ -84,5 +84,6 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`profile` module](src/main/java/com/carsocialmedia/backend/profile/README.md)
 - [`follow` module](src/main/java/com/carsocialmedia/backend/relationships/README.md)
 - [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
+- [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
 - [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
 - [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)

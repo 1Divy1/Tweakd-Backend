@@ -806,6 +806,28 @@ class GarageServiceImpl implements GarageService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<CarBrandDto> findBrandsByIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return brandRepository.findAllById(ids).stream()
+                .map(b -> new CarBrandDto(b.getId(), b.getName()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CarModelDto> findModelsByIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return modelRepository.findAllById(ids).stream()
+                .map(m -> new CarModelDto(m.getId(), m.getBrand().getId(), m.getModel()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Map<UUID, UUID> findCarOwnerIds(Collection<UUID> carIds) {
         if (carIds == null || carIds.isEmpty()) {
             return Map.of();
