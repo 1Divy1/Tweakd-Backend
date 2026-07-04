@@ -7,6 +7,10 @@ import com.carsocialmedia.backend.report.exception.DuplicateReportException;
 import com.carsocialmedia.backend.report.exception.InvalidReportReasonException;
 import com.carsocialmedia.backend.report.internal.entities.CommentReportEntity;
 import com.carsocialmedia.backend.report.internal.entities.CommentReportId;
+import com.carsocialmedia.backend.report.internal.entities.ForumThreadReplyReportEntity;
+import com.carsocialmedia.backend.report.internal.entities.ForumThreadReplyReportId;
+import com.carsocialmedia.backend.report.internal.entities.ForumThreadReportEntity;
+import com.carsocialmedia.backend.report.internal.entities.ForumThreadReportId;
 import com.carsocialmedia.backend.report.internal.entities.PostReportEntity;
 import com.carsocialmedia.backend.report.internal.entities.PostReportId;
 import com.carsocialmedia.backend.report.internal.entities.ProfileReportEntity;
@@ -15,6 +19,8 @@ import com.carsocialmedia.backend.report.internal.entities.ReportReasonEntity;
 import com.carsocialmedia.backend.report.internal.enums.ReportStatus;
 import com.carsocialmedia.backend.report.internal.enums.ReportTarget;
 import com.carsocialmedia.backend.report.internal.repositories.CommentReportRepository;
+import com.carsocialmedia.backend.report.internal.repositories.ForumThreadReplyReportRepository;
+import com.carsocialmedia.backend.report.internal.repositories.ForumThreadReportRepository;
 import com.carsocialmedia.backend.report.internal.repositories.PostReportRepository;
 import com.carsocialmedia.backend.report.internal.repositories.ProfileReportRepository;
 import com.carsocialmedia.backend.report.internal.repositories.ReportReasonRepository;
@@ -37,15 +43,21 @@ public class ReportServiceImpl implements ReportService {
     private final PostReportRepository postReportRepository;
     private final CommentReportRepository commentReportRepository;
     private final ProfileReportRepository profileReportRepository;
+    private final ForumThreadReportRepository forumThreadReportRepository;
+    private final ForumThreadReplyReportRepository forumThreadReplyReportRepository;
     private final ReportReasonRepository reportReasonRepository;
 
     public ReportServiceImpl(PostReportRepository postReportRepository,
                              CommentReportRepository commentReportRepository,
                              ProfileReportRepository profileReportRepository,
+                             ForumThreadReportRepository forumThreadReportRepository,
+                             ForumThreadReplyReportRepository forumThreadReplyReportRepository,
                              ReportReasonRepository reportReasonRepository) {
         this.postReportRepository = postReportRepository;
         this.commentReportRepository = commentReportRepository;
         this.profileReportRepository = profileReportRepository;
+        this.forumThreadReportRepository = forumThreadReportRepository;
+        this.forumThreadReplyReportRepository = forumThreadReplyReportRepository;
         this.reportReasonRepository = reportReasonRepository;
     }
 
@@ -89,6 +101,32 @@ public class ReportServiceImpl implements ReportService {
     }
 
     @Override
+    @Transactional
+    public void reportForumThread(UUID reporterId, UUID threadId, UUID reasonId) {
+        validateReason(reasonId, ReportTarget.forum_thread);
+        if (forumThreadReportRepository.existsByIdThreadIdAndIdReporterId(threadId, reporterId)) {
+            throw new DuplicateReportException();
+        }
+        ForumThreadReportEntity report = new ForumThreadReportEntity();
+        report.setId(new ForumThreadReportId(threadId, reporterId));
+        report.setReasonId(reasonId);
+        forumThreadReportRepository.save(report);
+    }
+
+    @Override
+    @Transactional
+    public void reportForumReply(UUID reporterId, UUID replyId, UUID reasonId) {
+        validateReason(reasonId, ReportTarget.forum_thread_reply);
+        if (forumThreadReplyReportRepository.existsByIdReplyIdAndIdReporterId(replyId, reporterId)) {
+            throw new DuplicateReportException();
+        }
+        ForumThreadReplyReportEntity report = new ForumThreadReplyReportEntity();
+        report.setId(new ForumThreadReplyReportId(replyId, reporterId));
+        report.setReasonId(reasonId);
+        forumThreadReplyReportRepository.save(report);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public List<ReportReasonDto> listPostReportReasons() {
         return listReasons(ReportTarget.post);
@@ -108,16 +146,32 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<ReportReasonDto> listForumThreadReportReasons() {
+        return listReasons(ReportTarget.forum_thread);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReportReasonDto> listForumReplyReportReasons() {
+        return listReasons(ReportTarget.forum_thread_reply);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<MyReportDto> listMyReports(UUID reporterId) {
         List<PostReportEntity> postReports = postReportRepository.findByIdReporterId(reporterId);
         List<CommentReportEntity> commentReports = commentReportRepository.findByIdReporterId(reporterId);
         List<ProfileReportEntity> profileReports = profileReportRepository.findByIdReporterId(reporterId);
+        List<ForumThreadReportEntity> forumThreadReports = forumThreadReportRepository.findByIdReporterId(reporterId);
+        List<ForumThreadReplyReportEntity> forumReplyReports = forumThreadReplyReportRepository.findByIdReporterId(reporterId);
 
-        // Resolve all referenced reason texts in one batch to avoid an N+1 across the three lists.
+        // Resolve all referenced reason texts in one batch to avoid an N+1 across the lists.
         List<UUID> reasonIds = Stream.of(
                         postReports.stream().map(PostReportEntity::getReasonId),
                         commentReports.stream().map(CommentReportEntity::getReasonId),
-                        profileReports.stream().map(ProfileReportEntity::getReasonId))
+                        profileReports.stream().map(ProfileReportEntity::getReasonId),
+                        forumThreadReports.stream().map(ForumThreadReportEntity::getReasonId),
+                        forumReplyReports.stream().map(ForumThreadReplyReportEntity::getReasonId))
                 .flatMap(Function.identity())
                 .filter(id -> id != null)
                 .distinct()
@@ -125,7 +179,8 @@ public class ReportServiceImpl implements ReportService {
         Map<UUID, String> reasonText = reportReasonRepository.findAllById(reasonIds).stream()
                 .collect(Collectors.toMap(ReportReasonEntity::getId, ReportReasonEntity::getReason));
 
-        List<MyReportDto> reports = new ArrayList<>(postReports.size() + commentReports.size() + profileReports.size());
+        List<MyReportDto> reports = new ArrayList<>(postReports.size() + commentReports.size()
+                + profileReports.size() + forumThreadReports.size() + forumReplyReports.size());
         for (PostReportEntity report : postReports) {
             reports.add(toDto(ReportTarget.post, report.getId().getPostId(), report.getReasonId(),
                     report.getStatus(), report.getCreatedAt(), reasonText));
@@ -136,6 +191,14 @@ public class ReportServiceImpl implements ReportService {
         }
         for (ProfileReportEntity report : profileReports) {
             reports.add(toDto(ReportTarget.profile, report.getId().getProfileId(), report.getReasonId(),
+                    report.getStatus(), report.getCreatedAt(), reasonText));
+        }
+        for (ForumThreadReportEntity report : forumThreadReports) {
+            reports.add(toDto(ReportTarget.forum_thread, report.getId().getThreadId(), report.getReasonId(),
+                    report.getStatus(), report.getCreatedAt(), reasonText));
+        }
+        for (ForumThreadReplyReportEntity report : forumReplyReports) {
+            reports.add(toDto(ReportTarget.forum_thread_reply, report.getId().getReplyId(), report.getReasonId(),
                     report.getStatus(), report.getCreatedAt(), reasonText));
         }
 

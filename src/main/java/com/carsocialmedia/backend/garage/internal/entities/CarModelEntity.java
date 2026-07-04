@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.garage.internal.entities;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
@@ -34,4 +35,8 @@ public class CarModelEntity {
 
     /** The model name (e.g., "3 Series", "Civic"). */
     private String model;
+
+    /** Number of forum threads scoped to this model. Trigger-maintained by the forums feature; read-only. */
+    @Column(name = "thread_count", insertable = false, updatable = false)
+    private int threadCount;
 }

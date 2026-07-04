@@ -2,6 +2,7 @@ package com.carsocialmedia.backend.forums.internal;
 
 import com.carsocialmedia.backend.forums.ForumsService;
 import com.carsocialmedia.backend.forums.dto.CursorPage;
+import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
 import com.carsocialmedia.backend.forums.dto.ReplyDto;
 import com.carsocialmedia.backend.forums.dto.ShortcutDto;
 import com.carsocialmedia.backend.forums.dto.ThreadCardDto;
@@ -15,6 +16,7 @@ import com.carsocialmedia.backend.forums.dto.request.ReorderShortcutsRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateReplyRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateShortcutRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateThreadRequest;
+import com.carsocialmedia.backend.forums.exception.CannotReportOwnForumContentException;
 import com.carsocialmedia.backend.forums.exception.ForumPostDeletedException;
 import com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException;
 import com.carsocialmedia.backend.forums.exception.InvalidReferenceException;
@@ -27,6 +29,7 @@ import com.carsocialmedia.backend.forums.exception.ThreadNotFoundException;
 import com.carsocialmedia.backend.forums.internal.entities.ForumPostEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumShortcutEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadSaveEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicId;
 import com.carsocialmedia.backend.forums.internal.entities.ForumTopicEntity;
@@ -34,7 +37,9 @@ import com.carsocialmedia.backend.forums.internal.repositories.ForumPostLikeRepo
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumShortcutRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadLikeRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadReadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadSaveRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumTopicRepository;
 import com.carsocialmedia.backend.garage.GarageService;
@@ -42,6 +47,8 @@ import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
+import com.carsocialmedia.backend.report.ReportService;
+import com.carsocialmedia.backend.report.dto.ReportReasonDto;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.PageRequest;
@@ -51,6 +58,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,6 +75,8 @@ public class ForumsServiceImpl implements ForumsService {
     /** Hard cap on page size so a client can't request an unbounded page. */
     private static final int MAX_PAGE_SIZE = 50;
     private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int DEFAULT_SUGGESTIONS = 10;
+    private static final int MAX_SUGGESTIONS = 50;
 
     private final ForumTopicRepository topicRepository;
     private final ForumThreadRepository threadRepository;
@@ -74,9 +84,12 @@ public class ForumsServiceImpl implements ForumsService {
     private final ForumThreadTopicRepository threadTopicRepository;
     private final ForumThreadLikeRepository threadLikeRepository;
     private final ForumPostLikeRepository postLikeRepository;
+    private final ForumThreadSaveRepository threadSaveRepository;
+    private final ForumThreadReadRepository threadReadRepository;
     private final ForumShortcutRepository shortcutRepository;
     private final ProfileService profileService;
     private final GarageService garageService;
+    private final ReportService reportService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -87,18 +100,24 @@ public class ForumsServiceImpl implements ForumsService {
                              ForumThreadTopicRepository threadTopicRepository,
                              ForumThreadLikeRepository threadLikeRepository,
                              ForumPostLikeRepository postLikeRepository,
+                             ForumThreadSaveRepository threadSaveRepository,
+                             ForumThreadReadRepository threadReadRepository,
                              ForumShortcutRepository shortcutRepository,
                              ProfileService profileService,
-                             GarageService garageService) {
+                             GarageService garageService,
+                             ReportService reportService) {
         this.topicRepository = topicRepository;
         this.threadRepository = threadRepository;
         this.postRepository = postRepository;
         this.threadTopicRepository = threadTopicRepository;
         this.threadLikeRepository = threadLikeRepository;
         this.postLikeRepository = postLikeRepository;
+        this.threadSaveRepository = threadSaveRepository;
+        this.threadReadRepository = threadReadRepository;
         this.shortcutRepository = shortcutRepository;
         this.profileService = profileService;
         this.garageService = garageService;
+        this.reportService = reportService;
     }
 
     // -------------------------------------------------------------------
@@ -119,6 +138,41 @@ public class ForumsServiceImpl implements ForumsService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<ForumSuggestionDto> getSuggestions(int limit) {
+        int n = limit <= 0 ? DEFAULT_SUGGESTIONS : Math.min(limit, MAX_SUGGESTIONS);
+
+        // Pull the top candidates from each dimension (thread_count > 0), then merge and re-rank so
+        // the final list is the most active hubs overall, whatever their kind. No bespoke scoring —
+        // it reuses the denormalized thread counts.
+        List<CarBrandDto> brands = garageService.findTopBrandsByThreadCount(n);
+        List<CarModelDto> models = garageService.findTopModelsByThreadCount(n);
+        List<ForumTopicEntity> topics = topicRepository
+                .findByActiveTrueAndThreadCountGreaterThanOrderByThreadCountDesc(0, PageRequest.of(0, n));
+
+        // Resolve owning-brand names so a model reads as "BMW M4" (brand name = the model's subtitle).
+        Set<UUID> brandIds = models.stream().map(CarModelDto::brandId).collect(Collectors.toSet());
+        Map<UUID, String> brandNames = brandIds.isEmpty() ? Map.of()
+                : garageService.findBrandsByIds(brandIds).stream()
+                        .collect(Collectors.toMap(CarBrandDto::id, CarBrandDto::name));
+
+        List<ForumSuggestionDto> merged = new ArrayList<>(brands.size() + models.size() + topics.size());
+        for (CarBrandDto b : brands) {
+            merged.add(new ForumSuggestionDto("brand", b.id().toString(), b.name(), null, b.threadCount()));
+        }
+        for (CarModelDto m : models) {
+            merged.add(new ForumSuggestionDto("model", m.id().toString(), m.model(),
+                    brandNames.get(m.brandId()), m.threadCount()));
+        }
+        for (ForumTopicEntity t : topics) {
+            merged.add(new ForumSuggestionDto("topic", t.getId(), t.getName(), null, t.getThreadCount()));
+        }
+
+        merged.sort(Comparator.comparingInt(ForumSuggestionDto::threadCount).reversed());
+        return merged.stream().limit(n).toList();
+    }
+
     // -------------------------------------------------------------------
     // READ — feed & hubs
     // -------------------------------------------------------------------
@@ -126,25 +180,25 @@ public class ForumsServiceImpl implements ForumsService {
     @Override
     @Transactional(readOnly = true)
     public CursorPage<ThreadCardDto> getFeed(String currentUserId, String sort, String cursor, int size) {
-        return listThreads(null, null, null, sort, cursor, size);
+        return listThreads(UUID.fromString(currentUserId), null, null, null, sort, cursor, size);
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPage<ThreadCardDto> getBrandThreads(String currentUserId, UUID brandId, String sort, String cursor, int size) {
-        return listThreads(brandId, null, null, sort, cursor, size);
+        return listThreads(UUID.fromString(currentUserId), brandId, null, null, sort, cursor, size);
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPage<ThreadCardDto> getModelThreads(String currentUserId, UUID modelId, String sort, String topicId, String cursor, int size) {
-        return listThreads(null, modelId, blankToNull(topicId), sort, cursor, size);
+        return listThreads(UUID.fromString(currentUserId), null, modelId, blankToNull(topicId), sort, cursor, size);
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPage<ThreadCardDto> getTopicThreads(String currentUserId, String topicId, String sort, UUID brandId, UUID modelId, String cursor, int size) {
-        return listThreads(brandId, modelId, topicId, sort, cursor, size);
+        return listThreads(UUID.fromString(currentUserId), brandId, modelId, topicId, sort, cursor, size);
     }
 
     /**
@@ -152,7 +206,7 @@ public class ForumsServiceImpl implements ForumsService {
      * {@code modelId} / {@code topicId}, any of them null) and the active {@link ForumSort} pick the
      * repository query and the cursor key; assembly into cards is shared.
      */
-    private CursorPage<ThreadCardDto> listThreads(UUID brandId, UUID modelId, String topicId,
+    private CursorPage<ThreadCardDto> listThreads(UUID viewerId, UUID brandId, UUID modelId, String topicId,
                                                   String sortRaw, String cursor, int size) {
         int limit = clampSize(size);
         ForumSort sort = ForumSort.from(sortRaw);
@@ -188,7 +242,7 @@ public class ForumsServiceImpl implements ForumsService {
         boolean hasMore = rows.size() > limit;
         List<ForumThreadEntity> page = hasMore ? rows.subList(0, limit) : rows;
 
-        List<ThreadCardDto> items = toThreadCards(page);
+        List<ThreadCardDto> items = toThreadCards(page, viewerId);
         String nextCursor = hasMore ? nextCursor(sort, page.getLast()) : null;
         return new CursorPage<>(items, nextCursor);
     }
@@ -198,12 +252,15 @@ public class ForumsServiceImpl implements ForumsService {
     // -------------------------------------------------------------------
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public ThreadDetailDto getThread(String currentUserId, UUID threadId) {
         UUID viewerId = UUID.fromString(currentUserId);
         ForumThreadEntity thread = loadThread(threadId);
 
-        ThreadCardDto card = toThreadCards(List.of(thread)).getFirst();
+        // Opening a thread marks it "seen" for this viewer (drives shortcut unread badges).
+        threadReadRepository.insertIgnoringConflict(viewerId, threadId);
+
+        ThreadCardDto card = toThreadCards(List.of(thread), viewerId).getFirst();
         boolean viewerHasLiked = !threadRepository.findLikedThreadIds(viewerId, List.of(threadId)).isEmpty();
 
         return new ThreadDetailDto(
@@ -211,49 +268,54 @@ public class ForumsServiceImpl implements ForumsService {
                 card.author(), card.brand(), card.model(), card.topics(),
                 card.likesCount(), card.replyCount(),
                 thread.getCreatedAt(), card.lastActivityAt(),
-                card.pinned(), card.locked(), card.deleted(), viewerHasLiked);
+                card.pinned(), card.locked(), card.deleted(), viewerHasLiked, card.viewerHasSaved());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public CursorPage<ReplyDto> getReplies(String currentUserId, UUID threadId, String cursor, int size) {
+    public CursorPage<ReplyDto> getReplies(String currentUserId, UUID threadId, String sortRaw, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
-        loadThread(threadId); // 404 if the thread is missing
+        ForumThreadEntity thread = loadThread(threadId); // 404 if the thread is missing
+        UUID threadAuthorId = thread.getUserId();
 
+        ReplySort sort = ReplySort.from(sortRaw);
         int limit = clampSize(size);
         TimeCursor from = TimeCursor.decode(cursor);
+        Pageable pageable = PageRequest.of(0, limit + 1);
 
-        // One keyset page of top-level replies (oldest first), no subtrees — the client expands a
-        // reply's children on demand via getPostReplies.
-        List<ForumPostEntity> roots = postRepository.findRootReplyPage(
-                threadId,
-                from == null,
-                from == null ? null : from.timestamp(),
-                from == null ? null : from.id(),
-                PageRequest.of(0, limit + 1));
+        // One keyset page of top-level replies, no subtrees — the client expands a reply's children
+        // on demand via getPostReplies.
+        List<ForumPostEntity> roots = switch (sort) {
+            case OLD -> postRepository.findRootReplyPage(threadId, from == null,
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+            case NEW -> postRepository.findRootReplyPageDesc(threadId, from == null,
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+        };
 
-        return toReplyPage(roots, limit, viewerId);
+        return toReplyPage(roots, limit, viewerId, threadAuthorId);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String cursor, int size) {
+    public CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String sortRaw, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
-        if (!postRepository.existsById(postId)) {
-            throw new ForumPostNotFoundException(postId);
-        }
+        ForumPostEntity parent = postRepository.findById(postId)
+                .orElseThrow(() -> new ForumPostNotFoundException(postId));
+        UUID threadAuthorId = loadThread(parent.getThreadId()).getUserId();
 
+        ReplySort sort = ReplySort.from(sortRaw);
         int limit = clampSize(size);
         TimeCursor from = TimeCursor.decode(cursor);
+        Pageable pageable = PageRequest.of(0, limit + 1);
 
-        List<ForumPostEntity> children = postRepository.findChildReplyPage(
-                postId,
-                from == null,
-                from == null ? null : from.timestamp(),
-                from == null ? null : from.id(),
-                PageRequest.of(0, limit + 1));
+        List<ForumPostEntity> children = switch (sort) {
+            case OLD -> postRepository.findChildReplyPage(postId, from == null,
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+            case NEW -> postRepository.findChildReplyPageDesc(postId, from == null,
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+        };
 
-        return toReplyPage(children, limit, viewerId);
+        return toReplyPage(children, limit, viewerId, threadAuthorId);
     }
 
     // -------------------------------------------------------------------
@@ -370,7 +432,7 @@ public class ForumsServiceImpl implements ForumsService {
 
         ForumPostEntity hydrated = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
-        return toReplyDtos(List.of(hydrated), userId).getFirst();
+        return toReplyDtos(List.of(hydrated), userId, thread.getUserId()).getFirst();
     }
 
     @Override
@@ -395,7 +457,7 @@ public class ForumsServiceImpl implements ForumsService {
         post.setUpdatedAt(Instant.now());
         postRepository.save(post);
 
-        return toReplyDtos(List.of(post), userId).getFirst();
+        return toReplyDtos(List.of(post), userId, thread.getUserId()).getFirst();
     }
 
     // -------------------------------------------------------------------
@@ -436,6 +498,58 @@ public class ForumsServiceImpl implements ForumsService {
     public void unlikePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
         postLikeRepository.deleteByIdPostIdAndIdUserId(postId, userId);
+    }
+
+    // -------------------------------------------------------------------
+    // SAVES (bookmarks, owner-scoped; idempotent)
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public void saveThread(String currentUserId, UUID threadId) {
+        UUID userId = UUID.fromString(currentUserId);
+        loadThread(threadId); // 404 if the thread is missing
+        // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
+        threadSaveRepository.insertIgnoringConflict(threadId, userId);
+    }
+
+    @Override
+    @Transactional
+    public void unsaveThread(String currentUserId, UUID threadId) {
+        UUID userId = UUID.fromString(currentUserId);
+        threadSaveRepository.deleteByIdThreadIdAndIdUserId(threadId, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CursorPage<ThreadCardDto> getSavedThreads(String currentUserId, String cursor, int size) {
+        UUID viewerId = UUID.fromString(currentUserId);
+        int limit = clampSize(size);
+        TimeCursor from = TimeCursor.decode(cursor);
+
+        List<ForumThreadSaveEntity> saves = threadSaveRepository.findSavedPage(
+                viewerId,
+                from == null,
+                from == null ? null : from.timestamp(),
+                from == null ? null : from.id(),
+                PageRequest.of(0, limit + 1));
+
+        boolean hasMore = saves.size() > limit;
+        List<ForumThreadSaveEntity> page = hasMore ? saves.subList(0, limit) : saves;
+
+        // Load the threads and re-order them to match the (newest-save-first) order, since
+        // findAllById does not preserve order.
+        List<UUID> orderedIds = page.stream().map(s -> s.getId().getThreadId()).toList();
+        Map<UUID, ForumThreadEntity> byId = threadRepository.findAllById(orderedIds).stream()
+                .collect(Collectors.toMap(ForumThreadEntity::getId, Function.identity()));
+        List<ForumThreadEntity> threads = orderedIds.stream()
+                .map(byId::get).filter(Objects::nonNull).toList();
+
+        List<ThreadCardDto> items = toThreadCards(threads, viewerId);
+        String nextCursor = hasMore
+                ? new TimeCursor(page.getLast().getCreatedAt(), page.getLast().getId().getThreadId()).encode()
+                : null;
+        return new CursorPage<>(items, nextCursor);
     }
 
     // -------------------------------------------------------------------
@@ -621,6 +735,46 @@ public class ForumsServiceImpl implements ForumsService {
     }
 
     // -------------------------------------------------------------------
+    // REPORTING (this module validates the target + blocks self-reports;
+    // the report module owns reason/duplicate validation and persistence)
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public void reportThread(String currentUserId, UUID threadId, UUID reasonId) {
+        UUID reporterId = UUID.fromString(currentUserId);
+        ForumThreadEntity thread = loadThread(threadId);
+        if (thread.getUserId().equals(reporterId)) {
+            throw new CannotReportOwnForumContentException();
+        }
+        reportService.reportForumThread(reporterId, threadId, reasonId);
+    }
+
+    @Override
+    @Transactional
+    public void reportReply(String currentUserId, UUID postId, UUID reasonId) {
+        UUID reporterId = UUID.fromString(currentUserId);
+        ForumPostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new ForumPostNotFoundException(postId));
+        if (post.getUserId().equals(reporterId)) {
+            throw new CannotReportOwnForumContentException();
+        }
+        reportService.reportForumReply(reporterId, postId, reasonId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReportReasonDto> listThreadReportReasons() {
+        return reportService.listForumThreadReportReasons();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReportReasonDto> listReplyReportReasons() {
+        return reportService.listForumReplyReportReasons();
+    }
+
+    // -------------------------------------------------------------------
     // ASSEMBLY HELPERS
     // -------------------------------------------------------------------
 
@@ -632,12 +786,14 @@ public class ForumsServiceImpl implements ForumsService {
      * <p>A deleted (anonymized) thread keeps all its content but gets a {@code null} author — its
      * author id is excluded from the profile lookup so the identity never even leaves the DB layer.
      */
-    private List<ThreadCardDto> toThreadCards(List<ForumThreadEntity> threads) {
+    private List<ThreadCardDto> toThreadCards(List<ForumThreadEntity> threads, UUID viewerId) {
         if (threads.isEmpty()) {
             return List.of();
         }
 
         List<UUID> threadIds = threads.stream().map(ForumThreadEntity::getId).toList();
+
+        Set<UUID> saved = Set.copyOf(threadSaveRepository.findSavedThreadIds(viewerId, threadIds));
 
         Map<UUID, List<String>> topicIdsByThread = threadTopicRepository.findByIdThreadIdIn(threadIds).stream()
                 .collect(Collectors.groupingBy(tt -> tt.getId().getThreadId(),
@@ -681,7 +837,8 @@ public class ForumsServiceImpl implements ForumsService {
                         t.getLastActivityAt(),
                         t.isPinned(),
                         t.isLocked(),
-                        t.isDeleted()))
+                        t.isDeleted(),
+                        saved.contains(t.getId())))
                 .toList();
     }
 
@@ -690,11 +847,11 @@ public class ForumsServiceImpl implements ForumsService {
      * reply's children, oldest first) into a {@link CursorPage}, trimming the sentinel row and
      * encoding the next {@link TimeCursor} when there is a further page.
      */
-    private CursorPage<ReplyDto> toReplyPage(List<ForumPostEntity> rows, int limit, UUID viewerId) {
+    private CursorPage<ReplyDto> toReplyPage(List<ForumPostEntity> rows, int limit, UUID viewerId, UUID threadAuthorId) {
         boolean hasMore = rows.size() > limit;
         List<ForumPostEntity> page = hasMore ? rows.subList(0, limit) : rows;
 
-        List<ReplyDto> items = toReplyDtos(page, viewerId);
+        List<ReplyDto> items = toReplyDtos(page, viewerId, threadAuthorId);
         String nextCursor = hasMore
                 ? new TimeCursor(page.getLast().getCreatedAt(), page.getLast().getId()).encode()
                 : null;
@@ -704,9 +861,11 @@ public class ForumsServiceImpl implements ForumsService {
     /**
      * Assembles flat {@link ReplyDto}s (no nesting — children are fetched on demand) with one
      * profile batch and one like-flag batch for the whole page. A deleted reply is a "[deleted]"
-     * placeholder: author and content are nulled, and its author id is excluded from the lookup.
+     * placeholder: author and content are nulled, and its author id is excluded from the lookup. A
+     * reply whose author is {@code threadAuthorId} (the OP) is flagged {@code isAuthor} for the
+     * "Author" badge.
      */
-    private List<ReplyDto> toReplyDtos(List<ForumPostEntity> posts, UUID viewerId) {
+    private List<ReplyDto> toReplyDtos(List<ForumPostEntity> posts, UUID viewerId, UUID threadAuthorId) {
         if (posts.isEmpty()) {
             return List.of();
         }
@@ -728,6 +887,7 @@ public class ForumsServiceImpl implements ForumsService {
                         p.getLikesCount(),
                         p.getReplyCount(),
                         p.isDeleted(),
+                        !p.isDeleted() && p.getUserId().equals(threadAuthorId),
                         liked.contains(p.getId()),
                         p.getCreatedAt()))
                 .toList();
@@ -761,12 +921,25 @@ public class ForumsServiceImpl implements ForumsService {
                         s.getTopicId() == null ? null : topics.get(s.getTopicId()),
                         s.getSortOrder(),
                         s.isNotify(),
+                        unreadCountFor(s),
                         s.getCreatedAt()))
                 .toList();
     }
 
+    /**
+     * The unread-thread badge for a shortcut: threads matching its filter, created since the
+     * shortcut was saved, that the user has not opened yet. One bounded count query per shortcut
+     * (a user has only a handful). Clamped to {@code int} for the wire.
+     */
+    private int unreadCountFor(ForumShortcutEntity s) {
+        long unread = threadRepository.countUnreadForShortcut(
+                s.getUserId(), s.getBrandId(), s.getModelId(), s.getTopicId(), s.getCreatedAt());
+        return (int) Math.min(unread, Integer.MAX_VALUE);
+    }
+
     private TopicDto toTopicDto(ForumTopicEntity topic) {
-        return new TopicDto(topic.getId(), topic.getName(), topic.getKind(), topic.getSortOrder(), topic.getColor());
+        return new TopicDto(topic.getId(), topic.getName(), topic.getKind(), topic.getSortOrder(),
+                topic.getColor(), topic.getThreadCount());
     }
 
     /**

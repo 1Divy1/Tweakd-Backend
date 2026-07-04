@@ -12,4 +12,9 @@ public class InvalidSortException extends BadRequestException {
     public InvalidSortException(String raw) {
         super("Unknown sort: '" + raw + "' (expected one of: hot, new, active)");
     }
+
+    /** For contexts with a different set of valid sorts (e.g. reply lists: {@code old, new}). */
+    public InvalidSortException(String raw, String expected) {
+        super("Unknown sort: '" + raw + "' (expected one of: " + expected + ")");
+    }
 }

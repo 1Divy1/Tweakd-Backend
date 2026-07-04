@@ -42,6 +42,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -497,7 +498,7 @@ class GarageServiceImpl implements GarageService {
     @Transactional(readOnly = true)
     public List<CarBrandDto> listBrands() {
         return brandRepository.findAllByOrderByNameAsc().stream()
-                .map(b -> new CarBrandDto(b.getId(), b.getName()))
+                .map(b -> new CarBrandDto(b.getId(), b.getName(), b.getThreadCount()))
                 .toList();
     }
 
@@ -505,7 +506,7 @@ class GarageServiceImpl implements GarageService {
     @Transactional(readOnly = true)
     public List<CarModelDto> listModelsByBrand(UUID brandId) {
         return modelRepository.findByBrandIdOrderByModelAsc(brandId).stream()
-                .map(m -> new CarModelDto(m.getId(), m.getBrand().getId(), m.getModel()))
+                .map(m -> new CarModelDto(m.getId(), m.getBrand().getId(), m.getModel(), m.getThreadCount()))
                 .toList();
     }
 
@@ -811,7 +812,7 @@ class GarageServiceImpl implements GarageService {
             return List.of();
         }
         return brandRepository.findAllById(ids).stream()
-                .map(b -> new CarBrandDto(b.getId(), b.getName()))
+                .map(b -> new CarBrandDto(b.getId(), b.getName(), b.getThreadCount()))
                 .toList();
     }
 
@@ -822,7 +823,29 @@ class GarageServiceImpl implements GarageService {
             return List.of();
         }
         return modelRepository.findAllById(ids).stream()
-                .map(m -> new CarModelDto(m.getId(), m.getBrand().getId(), m.getModel()))
+                .map(m -> new CarModelDto(m.getId(), m.getBrand().getId(), m.getModel(), m.getThreadCount()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CarBrandDto> findTopBrandsByThreadCount(int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        return brandRepository.findByThreadCountGreaterThanOrderByThreadCountDescNameAsc(0, PageRequest.of(0, limit)).stream()
+                .map(b -> new CarBrandDto(b.getId(), b.getName(), b.getThreadCount()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CarModelDto> findTopModelsByThreadCount(int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        return modelRepository.findByThreadCountGreaterThanOrderByThreadCountDescModelAsc(0, PageRequest.of(0, limit)).stream()
+                .map(m -> new CarModelDto(m.getId(), m.getBrand().getId(), m.getModel(), m.getThreadCount()))
                 .toList();
     }
 

@@ -30,6 +30,7 @@ import java.util.UUID;
  * @param locked whether the thread is locked to new replies
  * @param deleted whether the author deleted (anonymized) the thread
  * @param viewerHasLiked whether the requesting user liked this thread
+ * @param viewerHasSaved whether the requesting user has saved (bookmarked) this thread
  */
 public record ThreadDetailDto(
         UUID id,
@@ -46,5 +47,6 @@ public record ThreadDetailDto(
         boolean pinned,
         boolean locked,
         boolean deleted,
-        boolean viewerHasLiked
+        boolean viewerHasLiked,
+        boolean viewerHasSaved
 ) {}

@@ -18,7 +18,7 @@ import java.util.UUID;
  * triggers and are read-only here.
  */
 @Entity
-@Table(name = "forum_posts")
+@Table(name = "forum_thread_replies")
 @Getter
 @Setter
 public class ForumPostEntity {

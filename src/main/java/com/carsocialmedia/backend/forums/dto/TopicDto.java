@@ -8,11 +8,13 @@ package com.carsocialmedia.backend.forums.dto;
  * @param kind {@code component} or {@code format} — how topics are grouped
  * @param sortOrder the curated position within its kind
  * @param color optional accent color (hex), or {@code null}
+ * @param threadCount number of threads tagged with this topic
  */
 public record TopicDto(
         String id,
         String name,
         String kind,
         int sortOrder,
-        String color
+        String color,
+        int threadCount
 ) {}
