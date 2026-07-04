@@ -1,7 +1,8 @@
-package com.carsocialmedia.backend.forums.internal;
+package com.carsocialmedia.backend.forums.internal.controllers;
 
 import com.carsocialmedia.backend.forums.ForumsService;
 import com.carsocialmedia.backend.forums.dto.CursorPage;
+import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
 import com.carsocialmedia.backend.forums.dto.ReplyDto;
 import com.carsocialmedia.backend.forums.dto.ThreadCardDto;
 import com.carsocialmedia.backend.forums.dto.ThreadDetailDto;
@@ -51,6 +52,15 @@ public class ForumController {
         return forumsService.listTopics();
     }
 
+    /**
+     * Popular-hub suggestions (brands, models, topics) for the discovery / empty state, ranked by
+     * thread count. {@code limit} is defaulted and capped by the service.
+     */
+    @GetMapping("/suggestions")
+    public List<ForumSuggestionDto> getSuggestions(@RequestParam(defaultValue = "10") int limit) {
+        return forumsService.getSuggestions(limit);
+    }
+
     // ---- feed & hubs -------------------------------------------------------
 
     /** The global thread feed. {@code sort} = {@code hot} (default) | {@code new} | {@code active}. */
@@ -97,28 +107,44 @@ public class ForumController {
 
     // ---- thread detail & replies -------------------------------------------
 
+    /** One keyset page of the caller's saved (bookmarked) threads, newest save first. */
+    @GetMapping("/threads/saved")
+    public CursorPage<ThreadCardDto> getSavedThreads(@AuthenticationPrincipal Jwt jwt,
+                                                     @RequestParam(required = false) String cursor,
+                                                     @RequestParam(defaultValue = "20") int size) {
+        return forumsService.getSavedThreads(jwt.getSubject(), cursor, size);
+    }
+
     @GetMapping("/threads/{threadId}")
     public ThreadDetailDto getThread(@AuthenticationPrincipal Jwt jwt,
                                      @PathVariable UUID threadId) {
         return forumsService.getThread(jwt.getSubject(), threadId);
     }
 
-    /** One keyset page of a thread's top-level replies (no children — expand on demand). */
+    /**
+     * One keyset page of a thread's top-level replies (no children — expand on demand).
+     * {@code sort} = {@code old} (default) | {@code new}.
+     */
     @GetMapping("/threads/{threadId}/replies")
     public CursorPage<ReplyDto> getReplies(@AuthenticationPrincipal Jwt jwt,
                                            @PathVariable UUID threadId,
+                                           @RequestParam(defaultValue = "old") String sort,
                                            @RequestParam(required = false) String cursor,
                                            @RequestParam(defaultValue = "20") int size) {
-        return forumsService.getReplies(jwt.getSubject(), threadId, cursor, size);
+        return forumsService.getReplies(jwt.getSubject(), threadId, sort, cursor, size);
     }
 
-    /** One keyset page of a reply's direct children — called when the user expands a reply. */
-    @GetMapping("/posts/{postId}/replies")
+    /**
+     * One keyset page of a reply's direct children — called when the user expands a reply.
+     * {@code sort} = {@code old} (default) | {@code new}.
+     */
+    @GetMapping("/replies/{replyId}/replies")
     public CursorPage<ReplyDto> getPostReplies(@AuthenticationPrincipal Jwt jwt,
-                                               @PathVariable UUID postId,
+                                               @PathVariable UUID replyId,
+                                               @RequestParam(defaultValue = "old") String sort,
                                                @RequestParam(required = false) String cursor,
                                                @RequestParam(defaultValue = "20") int size) {
-        return forumsService.getPostReplies(jwt.getSubject(), postId, cursor, size);
+        return forumsService.getPostReplies(jwt.getSubject(), replyId, sort, cursor, size);
     }
 
     // ---- writes ------------------------------------------------------------
@@ -147,11 +173,11 @@ public class ForumController {
     }
 
     /** Edits the text of a reply the caller authored. */
-    @PatchMapping("/posts/{postId}")
+    @PatchMapping("/replies/{replyId}")
     public ReplyDto updateReply(@AuthenticationPrincipal Jwt jwt,
-                                @PathVariable UUID postId,
+                                @PathVariable UUID replyId,
                                 @Valid @RequestBody UpdateReplyRequest request) {
-        return forumsService.updateReply(jwt.getSubject(), postId, request);
+        return forumsService.updateReply(jwt.getSubject(), replyId, request);
     }
 
     /** Likes a thread (idempotent). */
@@ -171,19 +197,35 @@ public class ForumController {
     }
 
     /** Likes a reply (idempotent). */
-    @PostMapping("/posts/{postId}/like")
+    @PostMapping("/replies/{replyId}/like")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void likePost(@AuthenticationPrincipal Jwt jwt,
-                         @PathVariable UUID postId) {
-        forumsService.likePost(jwt.getSubject(), postId);
+                         @PathVariable UUID replyId) {
+        forumsService.likePost(jwt.getSubject(), replyId);
     }
 
     /** Removes the caller's like from a reply (idempotent). */
-    @DeleteMapping("/posts/{postId}/like")
+    @DeleteMapping("/replies/{replyId}/like")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unlikePost(@AuthenticationPrincipal Jwt jwt,
-                           @PathVariable UUID postId) {
-        forumsService.unlikePost(jwt.getSubject(), postId);
+                           @PathVariable UUID replyId) {
+        forumsService.unlikePost(jwt.getSubject(), replyId);
+    }
+
+    /** Saves (bookmarks) a thread for the caller (idempotent). */
+    @PostMapping("/threads/{threadId}/save")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void saveThread(@AuthenticationPrincipal Jwt jwt,
+                           @PathVariable UUID threadId) {
+        forumsService.saveThread(jwt.getSubject(), threadId);
+    }
+
+    /** Removes the caller's save of a thread (idempotent). */
+    @DeleteMapping("/threads/{threadId}/save")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unsaveThread(@AuthenticationPrincipal Jwt jwt,
+                             @PathVariable UUID threadId) {
+        forumsService.unsaveThread(jwt.getSubject(), threadId);
     }
 
     /**
@@ -198,10 +240,10 @@ public class ForumController {
     }
 
     /** Deletes a reply the caller authored (soft if it has children, hard otherwise). */
-    @DeleteMapping("/posts/{postId}")
+    @DeleteMapping("/replies/{replyId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deletePost(@AuthenticationPrincipal Jwt jwt,
-                           @PathVariable UUID postId) {
-        forumsService.deletePost(jwt.getSubject(), postId);
+                           @PathVariable UUID replyId) {
+        forumsService.deletePost(jwt.getSubject(), replyId);
     }
 }

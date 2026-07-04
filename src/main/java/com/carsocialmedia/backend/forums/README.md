@@ -1,9 +1,11 @@
 # forums module
 
 Owns the **forums feature**: topic-and-car-scoped discussion threads with Reddit-style nested
-replies, likes, and user-saved filters ("shortcuts"). It owns writes (threads, replies, likes,
-deletes, shortcuts) as well as reads, and composes `profile` (author display) and `garage`
-(brand/model display) for cross-module data.
+replies, likes, saves, and user-saved filters ("shortcuts"). It owns writes (threads, replies,
+likes, saves, deletes, shortcuts) as well as reads, and composes `profile` (author display) and
+`garage` (brand/model display) for cross-module data. Filing a report against a thread or reply is
+handled by `ForumReportController` (see [Reporting](#reporting-delegates-to-report) below), next to
+`ForumController` (reads/writes) and `ForumShortcutController` (shortcuts CRUD).
 
 ## Information architecture
 
@@ -97,9 +99,22 @@ fetched on demand per level), `ShortcutDto`, `CursorPage<T>`. Authors reuse
 ### Reply loading model
 
 The reply tree loads **level by level**: `GET /threads/{id}/replies` pages the top-level replies
-only (no subtrees); when the user expands a reply, the client calls `GET /posts/{id}/replies` for
+only (no subtrees); when the user expands a reply, the client calls `GET /replies/{id}/replies` for
 one keyset page of its direct children, recursively for deeper levels. `ReplyDto.replyCount`
 (direct children) tells the client whether there is anything to expand.
+
+> **Naming note:** the `forum_posts` table was renamed to `forum_thread_replies` (the `ForumPostEntity`
+> Java name is unchanged pending a broader rename), and reply endpoints have since followed suit,
+> moving from `/posts/{id}` to `/replies/{id}`.
+
+## Reporting (delegates to `report`) {#reporting-delegates-to-report}
+
+`ForumReportController` lets a caller report a thread or a reply. `ForumsServiceImpl` validates the
+target exists and rejects a self-report (`CannotReportOwnForumContentException`, 400) before
+delegating the actual insert + reason/duplicate validation to `report.ReportService`
+(`reportForumThread` / `reportForumReply`), which owns the `forum_thread_reports` /
+`forum_thread_reply_reports` tables. See the [`report` module README](../report/README.md) for the
+shared reporting model.
 
 ## REST endpoints (`/api/v1/forums`)
 
@@ -110,17 +125,23 @@ one keyset page of its direct children, recursively for deeper levels. `ReplyDto
 | GET | `/brands/{brandId}/threads?sort=&cursor=` | brand hub |
 | GET | `/models/{modelId}/threads?sort=&topic=&cursor=` | model hub |
 | GET | `/topics/{topicId}/threads?sort=&brand=&model=&cursor=` | topic hub |
+| GET | `/threads/saved?cursor=` | caller's saved/bookmarked threads, newest save first |
 | GET | `/threads/{id}` | detail (incl. `viewerHasLiked`, `deleted`) |
 | GET | `/threads/{id}/replies?cursor=` | keyset page of root replies (no subtrees) |
-| GET | `/posts/{id}/replies?cursor=` | keyset page of a reply's direct children |
+| GET | `/replies/{id}/replies?cursor=` | keyset page of a reply's direct children |
 | POST | `/threads` | create (201) |
 | PATCH | `/threads/{id}` | author edits OP body (content only) |
 | POST | `/threads/{id}/replies` | reply (201) |
-| PATCH | `/posts/{id}` | author edits reply text |
+| PATCH | `/replies/{id}` | author edits reply text |
 | POST / DELETE | `/threads/{id}/like` | idempotent + race-safe (204) |
-| POST / DELETE | `/posts/{id}/like` | idempotent + race-safe (204); 409 on deleted reply |
+| POST / DELETE | `/replies/{id}/like` | idempotent + race-safe (204); 409 on deleted reply |
+| POST / DELETE | `/threads/{id}/save` | bookmark / un-bookmark (204), idempotent |
 | DELETE | `/threads/{id}` | author-only: anonymize, or hard-delete if replyless (204) |
-| DELETE | `/posts/{id}` | author-only, soft/hard (204) |
+| DELETE | `/replies/{id}` | author-only, soft/hard (204) |
+| GET | `/threads/report-reasons` | preset reasons for reporting a thread |
+| GET | `/replies/report-reasons` | preset reasons for reporting a reply |
+| POST | `/threads/{id}/report` | file a thread report (204); optional `{ "reasonId": "…" }` body |
+| POST | `/replies/{id}/report` | file a reply report (204); optional `{ "reasonId": "…" }` body |
 | GET / POST | `/shortcuts` | list / create |
 | PATCH | `/shortcuts/reorder` | full-set reorder (declared before `/{id}`) |
 | PATCH / DELETE | `/shortcuts/{id}` | update (name/notify) / delete |
@@ -128,13 +149,16 @@ one keyset page of its direct children, recursively for deeper levels. `ReplyDto
 ## Entities → tables
 
 `ForumTopicEntity`→`forum_topics` (text PK slug), `ForumThreadEntity`→`forum_threads`,
-`ForumPostEntity`→`forum_posts` (self-ref `parent_post_id`),
+`ForumPostEntity`→`forum_thread_replies` (self-ref `parent_post_id`),
 `ForumThreadTopicEntity`→`forum_thread_topics` (`@EmbeddedId` thread_id+topic_id),
 `ForumThreadLikeEntity`/`ForumPostLikeEntity` (composite-PK likes),
-`ForumShortcutEntity`→`forum_shortcuts`.
+`ForumThreadSaveEntity`→`forum_thread_saves` (composite PK thread_id+user_id, bookmarks),
+`ForumThreadReadEntity`→`forum_thread_reads` (composite PK thread_id+user_id; upserted on
+`getThread` to track per-user read state), `ForumShortcutEntity`→`forum_shortcuts`.
 
 ## Cross-module dependency
 
 `forums → profile` (author `findByIds`), `forums → garage` (added
-`findBrandsByIds` / `findModelsByIds` batch lookups, mirroring `findCarsByIds`), `forums → shared`.
-Nothing depends back on `forums`. Verified by `ModularityTests`.
+`findBrandsByIds` / `findModelsByIds` batch lookups, mirroring `findCarsByIds`), `forums → report`
+(`ForumReportController` delegates report filing/reason-listing to `ReportService`), `forums →
+shared`. Nothing depends back on `forums`. Verified by `ModularityTests`.

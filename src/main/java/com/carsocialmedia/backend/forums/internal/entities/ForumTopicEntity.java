@@ -43,6 +43,10 @@ public class ForumTopicEntity {
     @Column(name = "is_active", nullable = false)
     private boolean active;
 
+    /** Number of threads tagged with this topic. Trigger-maintained; read-only. */
+    @Column(name = "thread_count", insertable = false, updatable = false)
+    private int threadCount;
+
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

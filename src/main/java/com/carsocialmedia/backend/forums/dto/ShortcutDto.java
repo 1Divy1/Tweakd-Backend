@@ -18,6 +18,8 @@ import java.util.UUID;
  * @param topic the topic filter, or {@code null}
  * @param sortOrder the pinned position in the user's list
  * @param notifyEnabled whether the user opted into notifications for this filter (wire name {@code notify})
+ * @param unreadCount how many threads matching this filter, created since the shortcut was saved,
+ *        the user has not yet opened (drives the card's unread badge)
  * @param createdAt when the shortcut was created
  */
 public record ShortcutDto(
@@ -28,5 +30,6 @@ public record ShortcutDto(
         TopicDto topic,
         int sortOrder,
         @JsonProperty("notify") boolean notifyEnabled,
+        int unreadCount,
         Instant createdAt
 ) {}

@@ -40,6 +40,27 @@ public interface ForumPostRepository extends JpaRepository<ForumPostEntity, UUID
                                             Pageable pageable);
 
     /**
+     * Newest-first counterpart of {@link #findRootReplyPage} ({@code created_at DESC, id DESC}). Same
+     * {@code (createdAt, id)} cursor and {@code size + 1} semantics; only the comparison direction is
+     * reversed.
+     */
+    @Query("""
+            select p
+              from ForumPostEntity p
+             where p.threadId = :threadId
+               and p.parentPostId is null
+               and (:firstPage = true
+                    or p.createdAt < :cursorTs
+                    or (p.createdAt = :cursorTs and p.id < :cursorId))
+             order by p.createdAt desc, p.id desc
+            """)
+    List<ForumPostEntity> findRootReplyPageDesc(@Param("threadId") UUID threadId,
+                                                @Param("firstPage") boolean firstPage,
+                                                @Param("cursorTs") Instant cursorTs,
+                                                @Param("cursorId") UUID cursorId,
+                                                Pageable pageable);
+
+    /**
      * One keyset page of a reply's <em>direct children</em>, oldest first — the expand-on-demand
      * counterpart of {@link #findRootReplyPage}: the client fetches a level of the tree only when
      * the user expands its parent. Same cursor and {@code size + 1} semantics.
@@ -58,6 +79,24 @@ public interface ForumPostRepository extends JpaRepository<ForumPostEntity, UUID
                                              @Param("cursorTs") Instant cursorTs,
                                              @Param("cursorId") UUID cursorId,
                                              Pageable pageable);
+
+    /**
+     * Newest-first counterpart of {@link #findChildReplyPage} ({@code created_at DESC, id DESC}).
+     */
+    @Query("""
+            select p
+              from ForumPostEntity p
+             where p.parentPostId = :parentId
+               and (:firstPage = true
+                    or p.createdAt < :cursorTs
+                    or (p.createdAt = :cursorTs and p.id < :cursorId))
+             order by p.createdAt desc, p.id desc
+            """)
+    List<ForumPostEntity> findChildReplyPageDesc(@Param("parentId") UUID parentId,
+                                                 @Param("firstPage") boolean firstPage,
+                                                 @Param("cursorTs") Instant cursorTs,
+                                                 @Param("cursorId") UUID cursorId,
+                                                 Pageable pageable);
 
     /** Whether the given reply still has any direct child — used to collapse deleted leaf chains. */
     boolean existsByParentPostId(UUID parentPostId);
