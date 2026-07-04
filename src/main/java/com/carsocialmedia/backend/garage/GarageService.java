@@ -70,6 +70,22 @@ public interface GarageService {
     List<CarModelDto> findModelsByIds(Collection<UUID> ids);
 
     /**
+     * The most-discussed brands (highest forum {@code thread_count} first, name as a tiebreaker),
+     * excluding brands with no threads. Backs the forums "popular hubs" suggestions.
+     *
+     * @param limit the maximum number of brands to return
+     */
+    List<CarBrandDto> findTopBrandsByThreadCount(int limit);
+
+    /**
+     * The most-discussed models (highest forum {@code thread_count} first, model name as a
+     * tiebreaker), excluding models with no threads. Backs the forums "popular hubs" suggestions.
+     *
+     * @param limit the maximum number of models to return
+     */
+    List<CarModelDto> findTopModelsByThreadCount(int limit);
+
+    /**
      * Resolves each given car's owner (profile id), regardless of owning garage and without
      * privacy gating. Intended for other modules that must apply ownership-aware rules by id —
      * e.g. the posts module only allows a car to be tagged when its owner is also tagged.

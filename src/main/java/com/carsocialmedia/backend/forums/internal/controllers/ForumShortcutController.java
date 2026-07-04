@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.forums.internal;
+package com.carsocialmedia.backend.forums.internal.controllers;
 
 import com.carsocialmedia.backend.forums.ForumsService;
 import com.carsocialmedia.backend.forums.dto.ShortcutDto;

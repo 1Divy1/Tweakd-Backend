@@ -108,4 +108,29 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
              where l.id.userId = :userId and l.id.threadId in :threadIds
             """)
     List<UUID> findLikedThreadIds(@Param("userId") UUID userId, @Param("threadIds") Collection<UUID> threadIds);
+
+    /**
+     * The unread-thread count for a shortcut's badge: threads matching the shortcut's
+     * brand/model/topic filter (same nullable-filter + topic-EXISTS pattern as the list queries),
+     * created after {@code baseline} (the shortcut's own creation time, so its pre-existing backlog
+     * is not counted), that the user has not yet opened (no {@code forum_thread_reads} row).
+     */
+    @Query("""
+            select count(t)
+              from ForumThreadEntity t
+             where (:brandId is null or t.brandId = :brandId)
+               and (:modelId is null or t.modelId = :modelId)
+               and (:topicId is null or exists (
+                        select 1 from ForumThreadTopicEntity tt
+                         where tt.id.threadId = t.id and tt.id.topicId = :topicId))
+               and t.createdAt > :baseline
+               and not exists (
+                        select 1 from ForumThreadReadEntity r
+                         where r.id.threadId = t.id and r.id.userId = :userId)
+            """)
+    long countUnreadForShortcut(@Param("userId") UUID userId,
+                                @Param("brandId") UUID brandId,
+                                @Param("modelId") UUID modelId,
+                                @Param("topicId") String topicId,
+                                @Param("baseline") Instant baseline);
 }

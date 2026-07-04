@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.garage.internal.entities;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -25,4 +26,8 @@ public class CarBrandEntity {
 
     /** The brand name (e.g., "BMW", "Honda"). */
     private String name;
+
+    /** Number of forum threads scoped to this brand. Trigger-maintained by the forums feature; read-only. */
+    @Column(name = "thread_count", insertable = false, updatable = false)
+    private int threadCount;
 }

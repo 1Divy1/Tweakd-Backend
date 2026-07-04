@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.forums;
 
 import com.carsocialmedia.backend.forums.dto.CursorPage;
+import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
 import com.carsocialmedia.backend.forums.dto.ReplyDto;
 import com.carsocialmedia.backend.forums.dto.ShortcutDto;
 import com.carsocialmedia.backend.forums.dto.ThreadCardDto;
@@ -13,6 +14,7 @@ import com.carsocialmedia.backend.forums.dto.request.ReorderShortcutsRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateReplyRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateShortcutRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateThreadRequest;
+import com.carsocialmedia.backend.report.dto.ReportReasonDto;
 
 import java.util.List;
 import java.util.UUID;
@@ -35,6 +37,14 @@ public interface ForumsService {
 
     /** The active topics, grouped by kind ({@code component} / {@code format}) for the picker. */
     List<TopicGroupDto> listTopics();
+
+    /**
+     * Popular-hub suggestions for the forums discovery / empty state — the most active brands,
+     * models, and topics merged into one list, ranked by thread count.
+     *
+     * @param limit the maximum number of suggestions to return (defaulted/capped by the service)
+     */
+    List<ForumSuggestionDto> getSuggestions(int limit);
 
     // ---- read: feed & hubs (keyset pages of thread cards) ------------------
 
@@ -59,14 +69,18 @@ public interface ForumsService {
      * One keyset page of a thread's <em>top-level</em> replies, without children. The client
      * expands a reply's subtree on demand via {@link #getPostReplies}. Deleted replies are returned
      * as "[deleted]" placeholders (they may still anchor children).
+     *
+     * @param sort {@code old} (default, oldest first) or {@code new} (newest first)
      */
-    CursorPage<ReplyDto> getReplies(String currentUserId, UUID threadId, String cursor, int size);
+    CursorPage<ReplyDto> getReplies(String currentUserId, UUID threadId, String sort, String cursor, int size);
 
     /**
      * One keyset page of a reply's <em>direct children</em> — the expand-on-demand counterpart of
      * {@link #getReplies}, applied recursively for deeper levels.
+     *
+     * @param sort {@code old} (default, oldest first) or {@code new} (newest first)
      */
-    CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String cursor, int size);
+    CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String sort, String cursor, int size);
 
     // ---- write: threads & replies ------------------------------------------
 
@@ -98,6 +112,17 @@ public interface ForumsService {
 
     void unlikePost(String currentUserId, UUID postId);
 
+    // ---- saves (bookmarks, owner-scoped) -----------------------------------
+
+    /** Saves (bookmarks) a thread for the current user. Idempotent. */
+    void saveThread(String currentUserId, UUID threadId);
+
+    /** Removes the current user's save of a thread. Idempotent. */
+    void unsaveThread(String currentUserId, UUID threadId);
+
+    /** One keyset page of the threads the current user has saved, newest save first. */
+    CursorPage<ThreadCardDto> getSavedThreads(String currentUserId, String cursor, int size);
+
     // ---- write: delete (author-only) ----------------------------------------
 
     /**
@@ -121,4 +146,25 @@ public interface ForumsService {
 
     /** Reorders the user's shortcuts to match the given id order; returns the reordered list. */
     List<ShortcutDto> reorderShortcuts(String currentUserId, ReorderShortcutsRequest request);
+
+    // ---- reporting (delegates to the report module) ------------------------
+
+    /**
+     * Reports a thread. Validates the thread exists and rejects a self-report
+     * ({@code CannotReportOwnForumContentException}); reason and duplicate validation are delegated
+     * to the report module.
+     */
+    void reportThread(String currentUserId, UUID threadId, UUID reasonId);
+
+    /**
+     * Reports a reply. Validates the reply exists and rejects a self-report; reason and duplicate
+     * validation are delegated to the report module.
+     */
+    void reportReply(String currentUserId, UUID postId, UUID reasonId);
+
+    /** The preset reasons a user may pick from when reporting a thread. */
+    List<ReportReasonDto> listThreadReportReasons();
+
+    /** The preset reasons a user may pick from when reporting a reply. */
+    List<ReportReasonDto> listReplyReportReasons();
 }

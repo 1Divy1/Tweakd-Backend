@@ -29,6 +29,7 @@ import java.util.UUID;
  * @param pinned whether a moderator pinned the thread
  * @param locked whether the thread is locked to new replies
  * @param deleted whether the author deleted (anonymized) the thread
+ * @param viewerHasSaved whether the requesting user has saved (bookmarked) this thread
  */
 public record ThreadCardDto(
         UUID id,
@@ -42,5 +43,6 @@ public record ThreadCardDto(
         Instant lastActivityAt,
         boolean pinned,
         boolean locked,
-        boolean deleted
+        boolean deleted,
+        boolean viewerHasSaved
 ) {}

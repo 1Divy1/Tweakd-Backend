@@ -11,5 +11,7 @@ package com.carsocialmedia.backend.report.internal.enums;
 public enum ReportTarget {
     post,
     comment,
-    profile
+    profile,
+    forum_thread,
+    forum_thread_reply
 }

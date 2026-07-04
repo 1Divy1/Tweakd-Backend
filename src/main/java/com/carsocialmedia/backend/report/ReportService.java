@@ -49,6 +49,18 @@ public interface ReportService {
      */
     void reportProfile(UUID reporterId, UUID profileId, UUID reasonId);
 
+    /**
+     * Files a report against a forum thread. See {@link #reportPost} for the parameter and exception
+     * semantics ({@code reasonId} must be a {@code forum_thread} reason).
+     */
+    void reportForumThread(UUID reporterId, UUID threadId, UUID reasonId);
+
+    /**
+     * Files a report against a forum thread reply. See {@link #reportPost} for the parameter and
+     * exception semantics ({@code reasonId} must be a {@code forum_thread_reply} reason).
+     */
+    void reportForumReply(UUID reporterId, UUID replyId, UUID reasonId);
+
     /** The preset reasons a user may pick from when reporting a post. */
     List<ReportReasonDto> listPostReportReasons();
 
@@ -57,6 +69,12 @@ public interface ReportService {
 
     /** The preset reasons a user may pick from when reporting a profile. */
     List<ReportReasonDto> listProfileReportReasons();
+
+    /** The preset reasons a user may pick from when reporting a forum thread. */
+    List<ReportReasonDto> listForumThreadReportReasons();
+
+    /** The preset reasons a user may pick from when reporting a forum thread reply. */
+    List<ReportReasonDto> listForumReplyReportReasons();
 
     /**
      * Lists every report filed by the given reporter — post, comment, and profile reports merged
