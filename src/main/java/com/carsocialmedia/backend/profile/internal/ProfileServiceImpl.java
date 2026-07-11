@@ -11,6 +11,7 @@ import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesRequest;
 import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
 import com.carsocialmedia.backend.profile.dto.ProfileDto;
+import com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
@@ -44,6 +45,7 @@ class ProfileServiceImpl implements ProfileService {
     private final ProfileCarCategoryRepository profileCarCategoryRepository;
     private final ProfileCommunityRoleRepository profileCommunityRoleRepository;
     private final ReportService reportService;
+    private final BanCache banCache;
 
     ProfileServiceImpl(ProfileRepository profileRepository,
                        CountryRepository countryRepository,
@@ -53,7 +55,8 @@ class ProfileServiceImpl implements ProfileService {
                        NotificationPreferencesRepository notificationPreferencesRepository,
                        ProfileCarCategoryRepository profileCarCategoryRepository,
                        ProfileCommunityRoleRepository profileCommunityRoleRepository,
-                       ReportService reportService) {
+                       ReportService reportService,
+                       BanCache banCache) {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
         this.cityRepository = cityRepository;
@@ -63,6 +66,7 @@ class ProfileServiceImpl implements ProfileService {
         this.profileCarCategoryRepository = profileCarCategoryRepository;
         this.profileCommunityRoleRepository = profileCommunityRoleRepository;
         this.reportService = reportService;
+        this.banCache = banCache;
     }
 
     @Override
@@ -149,6 +153,54 @@ class ProfileServiceImpl implements ProfileService {
                 .stream()
                 .map(ProfileEntity::toSearchResultDto)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findBusinessProfileIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return profileRepository.findBusinessIds(ids);
+    }
+
+    // ---- moderation ----------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public ProfileModerationSnapshotDto getModerationSnapshot(UUID profileId) {
+        ProfileEntity profile = profileRepository.findById(profileId)
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(profileId.toString()));
+        return new ProfileModerationSnapshotDto(
+                profile.getId(),
+                profile.getUsername(),
+                profile.getName(),
+                profile.getAvatarUrl(),
+                profile.getFollowersCount(),
+                profile.isBusiness(),
+                profile.isBanned(),
+                profile.getBannedUntil(),
+                profile.getCreatedAt());
+    }
+
+    @Override
+    @Transactional
+    public void banUser(UUID profileId, Instant until) {
+        ProfileEntity profile = profileRepository.findById(profileId)
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(profileId.toString()));
+        profile.setBanned(true);
+        profile.setBannedUntil(until);
+        banCache.evict(profileId);
+    }
+
+    @Override
+    @Transactional
+    public void unbanUser(UUID profileId) {
+        ProfileEntity profile = profileRepository.findById(profileId)
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(profileId.toString()));
+        profile.setBanned(false);
+        profile.setBannedUntil(null);
+        banCache.evict(profileId);
     }
 
     // ---- onboarding reference data -----------------------------------------

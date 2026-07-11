@@ -49,6 +49,7 @@ import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.report.dto.ReportReasonDto;
+import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.PageRequest;
@@ -565,19 +566,7 @@ public class ForumsServiceImpl implements ForumsService {
         if (!thread.getUserId().equals(userId)) {
             throw new NotContentOwnerException();
         }
-        if (thread.isDeleted()) {
-            return;
-        }
-        // With replies, only anonymize: the thread stays fully visible and repliable, but the
-        // author is hidden from every DTO. With no replies, remove it outright (the DB cascades
-        // topics / likes).
-        if (thread.getReplyCount() > 0) {
-            thread.setDeleted(true);
-            thread.setUpdatedAt(Instant.now());
-            threadRepository.save(thread);
-        } else {
-            threadRepository.delete(thread);
-        }
+        removeThread(thread);
     }
 
     @Override
@@ -589,10 +578,35 @@ public class ForumsServiceImpl implements ForumsService {
         if (!post.getUserId().equals(userId)) {
             throw new NotContentOwnerException();
         }
+        removeReply(post);
+    }
+
+    /**
+     * The delete semantics shared by the author and moderator paths. With replies, only anonymize:
+     * the thread stays fully visible and repliable, but the author is hidden from every DTO. With
+     * no replies, remove it outright (the DB cascades topics / likes).
+     */
+    private void removeThread(ForumThreadEntity thread) {
+        if (thread.isDeleted()) {
+            return;
+        }
+        if (thread.getReplyCount() > 0) {
+            thread.setDeleted(true);
+            thread.setUpdatedAt(Instant.now());
+            threadRepository.save(thread);
+        } else {
+            threadRepository.delete(thread);
+        }
+    }
+
+    /**
+     * The delete semantics shared by the author and moderator paths. Direct children present →
+     * soft delete so descendants survive; otherwise hard delete.
+     */
+    private void removeReply(ForumPostEntity post) {
         if (post.isDeleted()) {
             return;
         }
-        // Direct children present → soft delete so descendants survive; otherwise hard delete.
         if (post.getReplyCount() > 0) {
             post.setDeleted(true);
             post.setUpdatedAt(Instant.now());
@@ -602,6 +616,48 @@ public class ForumsServiceImpl implements ForumsService {
             postRepository.delete(post);
             collapseDeletedAncestors(parentId);
         }
+    }
+
+    // -------------------------------------------------------------------
+    // MODERATION — called by the admin module (which does the auth)
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public ModerationContentDto getThreadModerationSnapshot(UUID threadId) {
+        ForumThreadEntity thread = threadRepository.findById(threadId)
+                .orElseThrow(() -> new ThreadNotFoundException(threadId));
+        String body = thread.getContent();
+        String content = body == null || body.isBlank()
+                ? thread.getTitle()
+                : thread.getTitle() + "\n\n" + body;
+        return new ModerationContentDto(
+                thread.getId(), thread.getUserId(), content, List.of(), thread.getCreatedAt());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ModerationContentDto getReplyModerationSnapshot(UUID postId) {
+        ForumPostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new ForumPostNotFoundException(postId));
+        return new ModerationContentDto(
+                post.getId(), post.getUserId(), post.getContent(), List.of(), post.getCreatedAt());
+    }
+
+    @Override
+    @Transactional
+    public void deleteThreadAsModerator(UUID threadId) {
+        ForumThreadEntity thread = threadRepository.findById(threadId)
+                .orElseThrow(() -> new ThreadNotFoundException(threadId));
+        removeThread(thread);
+    }
+
+    @Override
+    @Transactional
+    public void deleteReplyAsModerator(UUID postId) {
+        ForumPostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new ForumPostNotFoundException(postId));
+        removeReply(post);
     }
 
     /**

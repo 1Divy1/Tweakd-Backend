@@ -13,4 +13,7 @@ public interface CommentReportRepository extends JpaRepository<CommentReportEnti
 
     /** All comment reports filed by the given reporter (for their "my reports" feed). */
     List<CommentReportEntity> findByIdReporterId(UUID reporterId);
+
+    /** All reports filed against the given comment (for the admin moderation view). */
+    List<CommentReportEntity> findByIdCommentId(UUID commentId);
 }

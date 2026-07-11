@@ -73,6 +73,18 @@ public class ProfileEntity {
     @Column(name = "realtime_location", columnDefinition = "geography")
     private Point realtimeLocation;
 
+    /** Set by a moderator ban; enforced by {@code BannedUserInterceptor}. */
+    @Column(name = "is_banned")
+    private boolean isBanned;
+
+    /** Temp-ban expiry; {@code null} while banned means permanent. */
+    @Column(name = "banned_until")
+    private java.time.Instant bannedUntil;
+
+    /** DB-managed: backfilled from auth signup; DEFAULT now() for new rows. */
+    @Column(name = "created_at", insertable = false, updatable = false)
+    private java.time.Instant createdAt;
+
     public ProfileDto toDto() {
         return new ProfileDto(
                 id, role, name, username, avatarUrl, bio,

@@ -47,6 +47,7 @@ import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.report.ReportService;
+import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
@@ -711,6 +712,57 @@ public class PostsServiceImpl implements PostsService {
             throw new CannotReportOwnContentException();
         }
         reportService.reportComment(reporterId, commentId, reasonId);
+    }
+
+    // -------------------------------------------------------------------
+    // MODERATION — called by the admin module (which does the auth)
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public ModerationContentDto getPostModerationSnapshot(UUID postId) {
+        PostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new PostNotFoundException(postId));
+        List<String> imageUrls = postImageRepository.findAllByPostIdOrderByDisplayOrderAsc(postId).stream()
+                .map(img -> storageService.publicUrl(StorageBucket.POSTS, img.getImageKey()))
+                .toList();
+        return new ModerationContentDto(
+                post.getId(), post.getUserId(), post.getDescription(), imageUrls, post.getCreatedAt());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ModerationContentDto getCommentModerationSnapshot(UUID commentId) {
+        CommentEntity comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new CommentNotFoundException(commentId));
+        return new ModerationContentDto(
+                comment.getId(), comment.getUserId(), comment.getContent(), List.of(), comment.getCreatedAt());
+    }
+
+    @Override
+    @Transactional
+    public void deletePostAsModerator(UUID postId) {
+        PostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new PostNotFoundException(postId));
+        // Same as deletePost, minus the ownership check: collect R2 keys before the cascade
+        // removes the image rows, then clean up R2 after commit.
+        List<String> imageKeys = postImageRepository.findAllByPostIdOrderByDisplayOrderAsc(postId).stream()
+                .map(PostImageEntity::getImageKey)
+                .toList();
+        postRepository.delete(post);
+        deleteR2ObjectsAfterCommit(imageKeys, postId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteCommentAsModerator(UUID commentId) {
+        CommentEntity comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new CommentNotFoundException(commentId));
+        if (comment.isDeleted()) {
+            return;
+        }
+        comment.setDeleted(true);
+        commentRepository.save(comment);
     }
 
     // -------------------------------------------------------------------
