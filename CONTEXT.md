@@ -56,7 +56,10 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
 `shared/security/SecurityConfig.java` configures stateless JWT authentication using Supabase as an OAuth2 resource server.
 
 - All endpoints require authentication unless under `/public/**`.
-- `/admin/**` requires `ROLE_ADMIN`.
+- `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
+  module then applies fine-grained team-role capability checks (`admin_team_members`).
+- Banned users (`profiles.is_banned`) are rejected with 403 on every request by the profile
+  module's `BannedUserInterceptor` (60s cache).
 - Roles come from the JWT claim `app_metadata.role`, prefixed with `ROLE_`. Missing claim defaults to `ROLE_USER`.
 - In controllers, retrieve the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the primary key of the `profiles` table.
 - `@EnableMethodSecurity` is active — `@PreAuthorize` works on service and controller methods.
@@ -84,6 +87,16 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`profile` module](src/main/java/com/carsocialmedia/backend/profile/README.md)
 - [`follow` module](src/main/java/com/carsocialmedia/backend/relationships/README.md)
 - [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
+- [`posts` module](src/main/java/com/carsocialmedia/backend/posts/README.md)
+- [`feed` module](src/main/java/com/carsocialmedia/backend/feed/README.md)
 - [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
+- [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
+- [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)
+- [`notification` module](src/main/java/com/carsocialmedia/backend/notification/README.md)
+- [`support` module](src/main/java/com/carsocialmedia/backend/support/README.md)
+- [`admin` module](src/main/java/com/carsocialmedia/backend/admin/README.md)
 - [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
 - [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)
+
+The admin-dashboard build-out (modules `notification` / `support` / `admin`, feedback board,
+moderation, bans) is documented end-to-end in [`ADMIN_DASHBOARD_PROGRESS.md`](ADMIN_DASHBOARD_PROGRESS.md).

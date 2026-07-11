@@ -128,3 +128,13 @@ Counter columns (`followersCount`, `followingCount`) are maintained by triggers 
 `notification_preferences` flags default to `true` at the DB level; the service also
 inserts a default row during onboarding (and lazily on first read) so the app always
 has a row to read.
+
+## Moderation & bans (admin module)
+
+- `getModerationSnapshot(profileId)` → `ProfileModerationSnapshotDto` (identity, followers,
+  business flag, ban state, account age) — the case detail's author panel.
+- `banUser(profileId, until)` / `unbanUser(profileId)` — `until = null` means permanent.
+- Enforcement: `profiles.is_banned` + `banned_until`, checked on **every request** by
+  `BannedUserInterceptor` (an MVC interceptor, so it runs after the security chain) through
+  `BanCache` (60s TTL, evicted on ban/unban) → 403 "Your account has been banned". An expired temp
+  ban reads as not banned. `profiles.created_at` was backfilled from `auth.users` for account age.

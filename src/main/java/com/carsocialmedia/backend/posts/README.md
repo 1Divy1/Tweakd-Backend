@@ -149,3 +149,12 @@ A global feed endpoint is still pending, but it now only needs its own keyset qu
 - **`garage.GarageService.findCarOwnerIds`** — resolve each tagged car's owner to enforce the tagging rule.
 - **`storage.StorageService`** — `postImageUploadUrlRequest`, `publicUrl(POSTS, key)`, and
   `deleteByKeys(POSTS, …)`. The posts module owns key persistence; storage owns R2 I/O.
+
+## Moderation (admin module)
+
+`getPostModerationSnapshot` / `getCommentModerationSnapshot` return the uniform
+`shared.moderation.ModerationContentDto` (author, text, resolved image URLs);
+`deletePostAsModerator` / `deleteCommentAsModerator` bypass the ownership check but keep the
+delete semantics (post: hard delete + R2 cleanup after commit; comment: soft delete). The admin
+module snapshots content into `moderation_actions` **before** calling the hard delete, since
+report rows CASCADE away with the post. No auth here — the admin module gates these.

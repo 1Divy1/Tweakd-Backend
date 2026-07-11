@@ -3,6 +3,7 @@ package com.carsocialmedia.backend.report.internal;
 import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.report.dto.MyReportDto;
 import com.carsocialmedia.backend.report.dto.ReportReasonDto;
+import com.carsocialmedia.backend.report.dto.TargetReportDto;
 import com.carsocialmedia.backend.report.exception.DuplicateReportException;
 import com.carsocialmedia.backend.report.exception.InvalidReportReasonException;
 import com.carsocialmedia.backend.report.internal.entities.CommentReportEntity;
@@ -206,6 +207,78 @@ public class ReportServiceImpl implements ReportService {
         reports.sort(Comparator.comparing(MyReportDto::createdAt,
                 Comparator.nullsLast(Comparator.naturalOrder())).reversed());
         return reports;
+    }
+
+    // -------------------------------------------------------------------
+    // MODERATION — called by the admin module (which does the auth)
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TargetReportDto> listReportsForTarget(String targetType, UUID targetId) {
+        List<TargetReportDto> reports = switch (ReportTarget.valueOf(targetType)) {
+            case post -> postReportRepository.findByIdPostId(targetId).stream()
+                    .map(r -> new TargetReportDto(r.getId().getReporterId(), reasonIdToText(r.getReasonId()),
+                            statusName(r.getStatus()), r.getCreatedAt()))
+                    .toList();
+            case comment -> commentReportRepository.findByIdCommentId(targetId).stream()
+                    .map(r -> new TargetReportDto(r.getId().getReporterId(), reasonIdToText(r.getReasonId()),
+                            statusName(r.getStatus()), r.getCreatedAt()))
+                    .toList();
+            case profile -> profileReportRepository.findByIdProfileId(targetId).stream()
+                    .map(r -> new TargetReportDto(r.getId().getReporterId(), reasonIdToText(r.getReasonId()),
+                            statusName(r.getStatus()), r.getCreatedAt()))
+                    .toList();
+            case forum_thread -> forumThreadReportRepository.findByIdThreadId(targetId).stream()
+                    .map(r -> new TargetReportDto(r.getId().getReporterId(), reasonIdToText(r.getReasonId()),
+                            statusName(r.getStatus()), r.getCreatedAt()))
+                    .toList();
+            case forum_thread_reply -> forumThreadReplyReportRepository.findByIdReplyId(targetId).stream()
+                    .map(r -> new TargetReportDto(r.getId().getReporterId(), reasonIdToText(r.getReasonId()),
+                            statusName(r.getStatus()), r.getCreatedAt()))
+                    .toList();
+        };
+        return reports.stream()
+                .sorted(Comparator.comparing(TargetReportDto::createdAt,
+                        Comparator.nullsLast(Comparator.<Instant>naturalOrder())).reversed())
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void updateReportsStatusForTarget(String targetType, UUID targetId, String status) {
+        ReportStatus newStatus = ReportStatus.valueOf(status);
+        if (newStatus != ReportStatus.resolved && newStatus != ReportStatus.dismissed) {
+            throw new IllegalArgumentException("Reports can only be closed as resolved or dismissed, not " + status);
+        }
+        // A target has at most a handful of reports, so entity-level updates (dirty checking)
+        // are fine and sidestep binding the native enum in a bulk JPQL update.
+        switch (ReportTarget.valueOf(targetType)) {
+            case post -> postReportRepository.findByIdPostId(targetId)
+                    .forEach(r -> r.setStatus(newStatus));
+            case comment -> commentReportRepository.findByIdCommentId(targetId)
+                    .forEach(r -> r.setStatus(newStatus));
+            case profile -> profileReportRepository.findByIdProfileId(targetId)
+                    .forEach(r -> r.setStatus(newStatus));
+            case forum_thread -> forumThreadReportRepository.findByIdThreadId(targetId)
+                    .forEach(r -> r.setStatus(newStatus));
+            case forum_thread_reply -> forumThreadReplyReportRepository.findByIdReplyId(targetId)
+                    .forEach(r -> r.setStatus(newStatus));
+        }
+    }
+
+    /** Single-row reason lookup — target report lists are small (one target's reports only). */
+    private String reasonIdToText(UUID reasonId) {
+        if (reasonId == null) {
+            return null;
+        }
+        return reportReasonRepository.findById(reasonId)
+                .map(ReportReasonEntity::getReason)
+                .orElse(null);
+    }
+
+    private String statusName(ReportStatus status) {
+        return status == null ? null : status.name();
     }
 
     private MyReportDto toDto(ReportTarget targetType, UUID targetId, UUID reasonId,

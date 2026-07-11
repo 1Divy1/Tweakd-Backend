@@ -104,3 +104,12 @@ JWT subject, so a user only ever sees their own reports, never another user's.
 (`insertable = false`); moderators update `status` afterwards. All five report tables are
 `ON DELETE CASCADE` on their target and reporter, so deleting a post/comment/profile/thread/reply
 cleans up its reports.
+
+## Moderation (admin module)
+
+Two target-scoped methods back the dashboard's case view: `listReportsForTarget(targetType,
+targetId)` → `TargetReportDto(reporterId, reason, status, createdAt)` newest first, and
+`updateReportsStatusForTarget(targetType, targetId, "resolved"|"dismissed")` closing out every
+report on a decided case. Target types match `moderation_cases.target_type`: `post`, `comment`,
+`profile`, `forum_thread`, `forum_thread_reply`. The `moderation_cases` upsert itself is a DB
+trigger on the five report tables (owned by the admin module's tables, not this module).
