@@ -13,4 +13,7 @@ public interface PostReportRepository extends JpaRepository<PostReportEntity, Po
 
     /** All post reports filed by the given reporter (for their "my reports" feed). */
     List<PostReportEntity> findByIdReporterId(UUID reporterId);
+
+    /** All reports filed against the given post (for the admin moderation view). */
+    List<PostReportEntity> findByIdPostId(UUID postId);
 }

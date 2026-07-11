@@ -330,6 +330,44 @@ public interface PostsService {
      */
     void reportPost(String currentUserId, UUID postId, UUID reasonId);
 
+    // -------------------------------------------------------------------
+    // MODERATION — called by the admin module; no auth logic here
+    // -------------------------------------------------------------------
+
+    /**
+     * The reported post, in the uniform moderation shape (author, caption, resolved image URLs).
+     *
+     * @throws com.carsocialmedia.backend.posts.exception.PostNotFoundException if the post does not exist
+     */
+    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getPostModerationSnapshot(UUID postId);
+
+    /**
+     * The reported comment, in the uniform moderation shape. Unlike the user-facing comment
+     * endpoints there is no post id here — a report row only carries the comment id.
+     *
+     * @throws com.carsocialmedia.backend.posts.exception.CommentNotFoundException if the comment does not exist
+     */
+    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getCommentModerationSnapshot(UUID commentId);
+
+    /**
+     * Hard-deletes a post on a moderator's behalf, bypassing the ownership check but otherwise
+     * identical to {@link #deletePost} (DB cascade + R2 image cleanup after commit). The admin
+     * module is responsible for snapshotting the content into the audit log <em>before</em> calling
+     * this — the report rows cascade away with the post.
+     *
+     * @throws com.carsocialmedia.backend.posts.exception.PostNotFoundException if the post does not exist
+     */
+    void deletePostAsModerator(UUID postId);
+
+    /**
+     * Deletes a comment on a moderator's behalf, bypassing the ownership check but otherwise
+     * identical to {@link #deleteComment} (soft delete — the row may still anchor replies).
+     * Idempotent.
+     *
+     * @throws com.carsocialmedia.backend.posts.exception.CommentNotFoundException if the comment does not exist
+     */
+    void deleteCommentAsModerator(UUID commentId);
+
     /**
      * Files a report against a comment on behalf of the current user.
      *

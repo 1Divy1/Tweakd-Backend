@@ -13,4 +13,7 @@ public interface ForumThreadReplyReportRepository extends JpaRepository<ForumThr
 
     /** All forum-reply reports filed by the given reporter (for their "my reports" feed). */
     List<ForumThreadReplyReportEntity> findByIdReporterId(UUID reporterId);
+
+    /** All reports filed against the given reply (for the admin moderation view). */
+    List<ForumThreadReplyReportEntity> findByIdReplyId(UUID replyId);
 }

@@ -53,6 +53,14 @@ public class FeedbackEntity {
     @Column(name = "status", insertable = false)
     private String status;
 
+    /** Maintained by Supabase triggers on {@code feedback_votes}; never written by the app. */
+    @Column(name = "vote_count", insertable = false, updatable = false)
+    private int voteCount;
+
+    /** Maintained by Supabase triggers on {@code feedback_comments}; never written by the app. */
+    @Column(name = "comment_count", insertable = false, updatable = false)
+    private int commentCount;
+
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

@@ -31,6 +31,35 @@ public interface ProfileService {
     boolean existsByUsername(String username);
     List<ProfileSearchResultDto> findByIds(Collection<UUID> ids);
 
+    /** Which of the given profile ids are business accounts (e.g. for support-ticket badges). */
+    List<UUID> findBusinessProfileIds(Collection<UUID> ids);
+
+    // ---- moderation (called by the admin module; no auth logic here) --------
+
+    /**
+     * The author panel of a moderation case: identity, reach, account age, ban state.
+     *
+     * @throws com.carsocialmedia.backend.profile.exception.ProfileNotFoundException if no such profile
+     */
+    com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto getModerationSnapshot(UUID profileId);
+
+    /**
+     * Bans a user. Enforced by the profile module's request interceptor, which rejects every
+     * request from a banned user with 403 (subject to a short cache, so enforcement starts within
+     * ~a minute).
+     *
+     * @param until temp-ban expiry; {@code null} = permanent
+     * @throws com.carsocialmedia.backend.profile.exception.ProfileNotFoundException if no such profile
+     */
+    void banUser(UUID profileId, java.time.Instant until);
+
+    /**
+     * Lifts a ban.
+     *
+     * @throws com.carsocialmedia.backend.profile.exception.ProfileNotFoundException if no such profile
+     */
+    void unbanUser(UUID profileId);
+
     // TODO: Add docs for the below methods.
 
     ProfileDto getProfile(String userId);

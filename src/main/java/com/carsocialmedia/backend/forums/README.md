@@ -162,3 +162,11 @@ shared reporting model.
 `findBrandsByIds` / `findModelsByIds` batch lookups, mirroring `findCarsByIds`), `forums → report`
 (`ForumReportController` delegates report filing/reason-listing to `ReportService`), `forums →
 shared`. Nothing depends back on `forums`. Verified by `ModularityTests`.
+
+## Moderation (admin module)
+
+`getThreadModerationSnapshot` / `getReplyModerationSnapshot` return the uniform
+`shared.moderation.ModerationContentDto` (thread content = title + blank line + body);
+`deleteThreadAsModerator` / `deleteReplyAsModerator` bypass the ownership check but keep the
+author-delete semantics (anonymize thread with replies / soft-delete reply with children, hard
+delete otherwise). No auth here — the admin module gates these.

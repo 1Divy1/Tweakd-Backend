@@ -167,4 +167,37 @@ public interface ForumsService {
 
     /** The preset reasons a user may pick from when reporting a reply. */
     List<ReportReasonDto> listReplyReportReasons();
+
+    // ---- moderation (called by the admin module; no auth logic here) --------
+
+    /**
+     * The reported thread in the uniform moderation shape; {@code content} is the title and body
+     * joined with a blank line.
+     *
+     * @throws com.carsocialmedia.backend.forums.exception.ThreadNotFoundException if no such thread
+     */
+    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getThreadModerationSnapshot(UUID threadId);
+
+    /**
+     * The reported reply in the uniform moderation shape.
+     *
+     * @throws com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException if no such reply
+     */
+    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getReplyModerationSnapshot(UUID postId);
+
+    /**
+     * Deletes a thread on a moderator's behalf: same anonymize-with-replies / hard-delete-without
+     * semantics as {@link #deleteThread}, minus the ownership check. Idempotent.
+     *
+     * @throws com.carsocialmedia.backend.forums.exception.ThreadNotFoundException if no such thread
+     */
+    void deleteThreadAsModerator(UUID threadId);
+
+    /**
+     * Deletes a reply on a moderator's behalf: same soft-with-children / hard-without semantics as
+     * {@link #deletePost}, minus the ownership check. Idempotent.
+     *
+     * @throws com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException if no such reply
+     */
+    void deleteReplyAsModerator(UUID postId);
 }

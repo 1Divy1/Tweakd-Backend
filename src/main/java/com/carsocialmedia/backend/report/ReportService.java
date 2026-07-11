@@ -87,4 +87,30 @@ public interface ReportService {
      * @param reporterId the reporting user's profile UUID (the JWT subject)
      */
     List<MyReportDto> listMyReports(UUID reporterId);
+
+    // ---- moderation (called by the admin module; no auth logic here) --------
+
+    /**
+     * Every report filed against one target, newest first — the "who reported this and why" panel
+     * of a moderation case.
+     *
+     * @param targetType one of {@code post}, {@code comment}, {@code profile}, {@code forum_thread},
+     *        {@code forum_thread_reply} (the {@code moderation_cases.target_type} values)
+     * @param targetId the reported content / profile UUID
+     * @throws IllegalArgumentException if {@code targetType} is not one of the five types
+     */
+    List<com.carsocialmedia.backend.report.dto.TargetReportDto> listReportsForTarget(String targetType, UUID targetId);
+
+    /**
+     * Closes out every report filed against one target — called when a moderator decides a case, so
+     * the reporters' "my reports" feeds reflect the outcome. Must run <em>before</em> a content
+     * hard-delete only if the caller still needs the rows for anything else; the report rows
+     * themselves CASCADE away with the content, which is fine once the audit snapshot is written.
+     *
+     * @param targetType one of the five target types (see {@link #listReportsForTarget})
+     * @param targetId the reported content / profile UUID
+     * @param status the outcome: {@code "resolved"} or {@code "dismissed"}
+     * @throws IllegalArgumentException if {@code targetType} or {@code status} is invalid
+     */
+    void updateReportsStatusForTarget(String targetType, UUID targetId, String status);
 }
