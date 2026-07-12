@@ -2,6 +2,7 @@ package com.carsocialmedia.backend.admin.internal.dto;
 
 import com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
+import com.carsocialmedia.backend.shared.staff.StaffRefDto;
 
 import java.time.Instant;
 import java.util.List;
@@ -32,7 +33,7 @@ public record CaseDetailDto(
         Instant createdAt,
         Instant lastReportedAt,
         Instant resolvedAt,
-        ProfileSearchResultDto resolvedBy) {
+        StaffRefDto resolvedBy) {
 
     /** One report against the case's target, with the reporter's profile card resolved. */
     public record CaseReportDto(
@@ -42,10 +43,10 @@ public record CaseDetailDto(
             Instant createdAt) {
     }
 
-    /** One audit-log entry of the case. */
+    /** One audit-log entry of the case. The moderator is staff, not an app user. */
     public record CaseActionDto(
             String action,
-            ProfileSearchResultDto moderator,
+            StaffRefDto moderator,
             String note,
             Instant createdAt) {
     }

@@ -42,7 +42,7 @@ class AdminTeamController {
         return teamService.listTeam();
     }
 
-    /** Adds an existing app user to the team by username. */
+    /** Invites a new staff member by email (staff accounts are separate from app accounts). */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TeamMemberDto addMember(@AuthenticationPrincipal Jwt jwt,

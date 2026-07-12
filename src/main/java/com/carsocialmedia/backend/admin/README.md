@@ -8,15 +8,32 @@ Nothing depends on this module, so its whole surface (controllers, services, DTO
 `internal/` — it exposes no public API. It orchestrates the others:
 `admin → {report, posts, forums, profile, feedback, support, notification, shared}`.
 
+## Staff accounts — separate from app accounts
+
+Dashboard staff are **profile-less Supabase auth users**: same auth pool and JWT chain as the app,
+but the `handle_new_user` trigger skips the `profiles` insert for them, so they don't exist in the
+app (no search, no feed, no bans). Their identity — email, display name, avatar — lives on the
+`admin_team_members` row itself, exposed to other modules via `shared/staff/StaffDirectory`
+(implemented here). A person who is both an app user and staff has two logins with different
+emails.
+
+New members are **invited by email** (`POST /team`): `SupabaseAuthAdminClient` calls the GoTrue
+admin API with the service-role key (`supabase.secret-key` ← `SUPABASE_SECRET_KEY` in `.env`) —
+`POST /auth/v1/invite` carries `is_staff` in the user metadata (that is what the trigger keys on,
+since it fires before anything can be patched) and the follow-up `PUT /auth/v1/admin/users/{id}`
+sets `app_metadata.role = 'admin'`. Inviting an email that already has an auth user (app account
+or staff) 409s — `StaffEmailInUseException`. Removing a member deletes the row and the auth user
+(the team FK cascades from `auth.users`).
+
 ## Auth — two layers
 
 1. **Security chain:** `/api/v1/admin/**` requires `ROLE_ADMIN`, i.e. the Supabase user's
-   `app_metadata.role = 'admin'` (matcher in `shared/security/SecurityConfig`). Setting that claim
-   is currently a manual Supabase step when someone joins the team.
+   `app_metadata.role = 'admin'` (matcher in `shared/security/SecurityConfig`), set automatically
+   at invite time.
 2. **Capabilities:** every endpoint calls `AdminAccessService.require(userId, capability)`, which
    loads the caller's `admin_team_members` row (403 `NotTeamMemberException` if absent), checks the
    role→capability matrix (403 `MissingCapabilityException`), and touches `last_active_at`
-   (throttled to one write / 5 min).
+   (throttled to one write / 5 min). The first such touch flips an `invited` row to `active`.
 
 | Role | Capabilities |
 |---|---|
@@ -50,9 +67,9 @@ The overview page is gated on team membership only, so every member has a landin
 | Method | Path | Capability |
 |---|---|---|
 | GET | `/team` | member |
-| POST | `/team` `{username, role}` | MANAGE_TEAM |
+| POST | `/team` `{email, displayName, role}` (sends the Supabase invite mail) | MANAGE_TEAM |
 | PATCH | `/team/{userId}` `{role}` | MANAGE_TEAM |
-| DELETE | `/team/{userId}` | MANAGE_TEAM |
+| DELETE | `/team/{userId}` (also deletes the staff auth user) | MANAGE_TEAM |
 | GET | `/overview` | member |
 | GET | `/moderation/queue?status=&type=&cursor=&size=` | REVIEW_CONTENT |
 | GET | `/moderation/queue/counts` | REVIEW_CONTENT |
