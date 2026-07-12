@@ -1,5 +1,7 @@
 supabase:
   url: ${SUPABASE_URL}
+  # Service-role key; used only by the admin module's SupabaseAuthAdminClient (staff invites).
+  secret-key: ${SUPABASE_SECRET_KEY}
   auth:
     issuer: ${SUPABASE_URL}/auth/v1
 

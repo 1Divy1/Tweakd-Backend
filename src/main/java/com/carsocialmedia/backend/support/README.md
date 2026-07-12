@@ -2,7 +2,12 @@
 
 Support tickets from users and business accounts. Owns `support_tickets`,
 `support_ticket_messages`, and the seeded `support_ticket_categories`. Depends on `profile` (to
-hydrate requester/assignee cards and the business badge) and `shared`.
+hydrate the requester card and the business badge) and `shared`. Staff actors — the assignee and
+staff message senders — are **not app users** (staff accounts are separate, profile-less), so they
+are resolved through `shared/staff/StaffDirectory` into `StaffRefDto`s: `TicketDto.assignee` is a
+staff ref, and each `TicketMessageDto` carries either `sender` (profile, user messages) or
+`staffSender`, keyed by `staff`. Assigning validates the assignee against the directory
+(`InvalidAssigneeException`, 400) since the old profile FK is gone.
 
 **Status model:** `open` = waiting on staff, `awaiting_user` = staff replied last, `resolved` =
 closed. A user reply always moves the ticket (back) to `open` — replying to a resolved ticket
@@ -45,5 +50,5 @@ module does not depend on `notification`.
 | Entity → table | Notes |
 |---|---|
 | `SupportTicketEntity` → `support_tickets` | `priority`/`status` insertable=false (DB defaults `normal`/`open`); `resolved_at` set/cleared by the service; `created_at`/`updated_at`/`last_message_at` DB-managed |
-| `SupportTicketMessageEntity` → `support_ticket_messages` | `is_staff` marks staff replies |
+| `SupportTicketMessageEntity` → `support_ticket_messages` | `is_staff` marks staff replies (their `sender_id` is a staff UUID, not a profile) |
 | `TicketCategoryOptionEntity` → `support_ticket_categories` | Seeded: account, billing, technical, content, other |

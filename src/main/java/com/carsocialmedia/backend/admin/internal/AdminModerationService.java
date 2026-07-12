@@ -22,6 +22,8 @@ import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.report.dto.TargetReportDto;
 import com.carsocialmedia.backend.shared.exception.NotFoundException;
 import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
+import com.carsocialmedia.backend.shared.staff.StaffDirectory;
+import com.carsocialmedia.backend.shared.staff.StaffRefDto;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,6 +67,7 @@ public class AdminModerationService {
     private final ForumsService forumsService;
     private final ProfileService profileService;
     private final NotificationService notificationService;
+    private final StaffDirectory staffDirectory;
 
     AdminModerationService(ModerationCaseRepository caseRepository,
                            ModerationActionRepository actionRepository,
@@ -72,7 +75,8 @@ public class AdminModerationService {
                            PostsService postsService,
                            ForumsService forumsService,
                            ProfileService profileService,
-                           NotificationService notificationService) {
+                           NotificationService notificationService,
+                           StaffDirectory staffDirectory) {
         this.caseRepository = caseRepository;
         this.actionRepository = actionRepository;
         this.reportService = reportService;
@@ -80,6 +84,7 @@ public class AdminModerationService {
         this.forumsService = forumsService;
         this.profileService = profileService;
         this.notificationService = notificationService;
+        this.staffDirectory = staffDirectory;
     }
 
     // -------------------------------------------------------------------
@@ -146,18 +151,21 @@ public class AdminModerationService {
         List<ModerationActionEntity> actions =
                 actionRepository.findByCaseIdOrderByCreatedAtAsc(caseEntity.getId());
 
-        // One profile batch for reporters, moderators, and the resolver.
+        // Reporters are app users (one profile batch); moderators and the resolver are staff.
         Set<UUID> profileIds = new HashSet<>();
         reports.forEach(r -> profileIds.add(r.reporterId()));
+        Map<UUID, ProfileSearchResultDto> profiles = profilesById(profileIds);
+
+        Set<UUID> staffIds = new HashSet<>();
         actions.forEach(a -> {
             if (a.getModeratorId() != null) {
-                profileIds.add(a.getModeratorId());
+                staffIds.add(a.getModeratorId());
             }
         });
         if (caseEntity.getResolvedBy() != null) {
-            profileIds.add(caseEntity.getResolvedBy());
+            staffIds.add(caseEntity.getResolvedBy());
         }
-        Map<UUID, ProfileSearchResultDto> profiles = profilesById(profileIds);
+        Map<UUID, StaffRefDto> staff = staffDirectory.findByIds(staffIds);
 
         ProfileModerationSnapshotDto author = content == null ? null
                 : moderationSnapshotOrNull(content.authorId());
@@ -178,13 +186,13 @@ public class AdminModerationService {
                         .toList(),
                 actions.stream()
                         .map(a -> new CaseActionDto(a.getAction(),
-                                a.getModeratorId() == null ? null : profiles.get(a.getModeratorId()),
+                                a.getModeratorId() == null ? null : staff.get(a.getModeratorId()),
                                 a.getNote(), a.getCreatedAt()))
                         .toList(),
                 caseEntity.getCreatedAt(),
                 caseEntity.getLastReportedAt(),
                 caseEntity.getResolvedAt(),
-                caseEntity.getResolvedBy() == null ? null : profiles.get(caseEntity.getResolvedBy()));
+                caseEntity.getResolvedBy() == null ? null : staff.get(caseEntity.getResolvedBy()));
     }
 
     // -------------------------------------------------------------------

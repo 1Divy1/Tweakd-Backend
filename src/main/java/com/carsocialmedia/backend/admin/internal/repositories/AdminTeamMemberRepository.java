@@ -11,4 +11,6 @@ public interface AdminTeamMemberRepository extends JpaRepository<AdminTeamMember
     List<AdminTeamMemberEntity> findAllByOrderByCreatedAtAsc();
 
     boolean existsByRole(String role);
+
+    boolean existsByEmail(String email);
 }

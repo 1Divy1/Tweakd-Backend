@@ -10,7 +10,10 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.UUID;
 
-/** One message in a ticket's conversation. {@code staff} marks replies written from the dashboard. */
+/**
+ * One message in a ticket's conversation. {@code staff} marks replies written from the dashboard —
+ * for those, {@code senderId} is a staff UUID ({@code admin_team_members.user_id}), not a profile.
+ */
 @Entity
 @Table(name = "support_ticket_messages")
 @Getter

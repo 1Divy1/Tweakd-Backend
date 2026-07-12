@@ -40,7 +40,7 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: controllers, service impl, entities (garage / car / mod / images / reference), repositories
 ├── storage/          ← public API: StorageService (presigned URL generation)
 │   └── internal/     ← private: StorageServiceImpl, SupabaseStorageClient, StorageProperties
-└── shared/           ← OPEN module: security config, exception hierarchy, global handler
+└── shared/           ← OPEN module: security config, exception hierarchy, global handler, moderation + staff SPIs
 ```
 
 **Public root package** — what other modules may import: service interfaces, DTOs/records, domain events, exception types.
@@ -58,10 +58,15 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
 - All endpoints require authentication unless under `/public/**`.
 - `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
   module then applies fine-grained team-role capability checks (`admin_team_members`).
+- **Staff accounts are separate from app accounts**: dashboard staff are profile-less Supabase auth
+  users (the `handle_new_user` trigger skips them), invited by email through the admin module's
+  `SupabaseAuthAdminClient` (service-role key). Their identity lives on `admin_team_members`
+  (email / display name / avatar) and is resolved via `shared/staff/StaffDirectory`, never via
+  `profiles`. A person who is both an app user and staff has two logins.
 - Banned users (`profiles.is_banned`) are rejected with 403 on every request by the profile
-  module's `BannedUserInterceptor` (60s cache).
+  module's `BannedUserInterceptor` (60s cache; a missing profile — i.e. staff — reads as not banned).
 - Roles come from the JWT claim `app_metadata.role`, prefixed with `ROLE_`. Missing claim defaults to `ROLE_USER`.
-- In controllers, retrieve the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the primary key of the `profiles` table.
+- In controllers, retrieve the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the primary key of the `profiles` table (for app users; staff have no profile row).
 - `@EnableMethodSecurity` is active — `@PreAuthorize` works on service and controller methods.
 
 ## Persistence

@@ -12,12 +12,15 @@ import com.carsocialmedia.backend.support.dto.TicketMessageRequest;
 import com.carsocialmedia.backend.support.dto.TicketPageDto;
 import com.carsocialmedia.backend.support.dto.TicketStatsDto;
 import com.carsocialmedia.backend.support.dto.TicketSummaryDto;
+import com.carsocialmedia.backend.support.exception.InvalidAssigneeException;
 import com.carsocialmedia.backend.support.exception.InvalidTicketCategoryException;
 import com.carsocialmedia.backend.support.exception.InvalidTicketPriorityException;
 import com.carsocialmedia.backend.support.exception.InvalidTicketStatusException;
 import com.carsocialmedia.backend.support.exception.TicketNotFoundException;
 import com.carsocialmedia.backend.support.internal.entities.SupportTicketEntity;
 import com.carsocialmedia.backend.support.internal.entities.SupportTicketMessageEntity;
+import com.carsocialmedia.backend.shared.staff.StaffDirectory;
+import com.carsocialmedia.backend.shared.staff.StaffRefDto;
 import com.carsocialmedia.backend.support.internal.repositories.SupportTicketMessageRepository;
 import com.carsocialmedia.backend.support.internal.repositories.SupportTicketRepository;
 import com.carsocialmedia.backend.support.internal.repositories.TicketCategoryOptionRepository;
@@ -51,6 +54,7 @@ public class SupportServiceImpl implements SupportService {
     private final SupportTicketMessageRepository messageRepository;
     private final TicketCategoryOptionRepository categoryRepository;
     private final ProfileService profileService;
+    private final StaffDirectory staffDirectory;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -58,11 +62,13 @@ public class SupportServiceImpl implements SupportService {
     public SupportServiceImpl(SupportTicketRepository ticketRepository,
                               SupportTicketMessageRepository messageRepository,
                               TicketCategoryOptionRepository categoryRepository,
-                              ProfileService profileService) {
+                              ProfileService profileService,
+                              StaffDirectory staffDirectory) {
         this.ticketRepository = ticketRepository;
         this.messageRepository = messageRepository;
         this.categoryRepository = categoryRepository;
         this.profileService = profileService;
+        this.staffDirectory = staffDirectory;
     }
 
     @Override
@@ -191,6 +197,10 @@ public class SupportServiceImpl implements SupportService {
         if (Boolean.TRUE.equals(request.unassign())) {
             ticket.setAssignedTo(null);
         } else if (request.assigneeId() != null) {
+            // The FK to profiles is gone (staff aren't app users), so team membership is the check.
+            if (!staffDirectory.findByIds(Set.of(request.assigneeId())).containsKey(request.assigneeId())) {
+                throw new InvalidAssigneeException(request.assigneeId());
+            }
             ticket.setAssignedTo(request.assigneeId());
         }
 
@@ -236,20 +246,25 @@ public class SupportServiceImpl implements SupportService {
         List<SupportTicketMessageEntity> messages =
                 messageRepository.findByTicketIdOrderByCreatedAtAscIdAsc(ticket.getId());
 
+        // Two identity pools: requester + user messages are profiles; the assignee and staff
+        // message senders are dashboard staff, who have no profiles row.
         Set<UUID> profileIds = new HashSet<>();
         profileIds.add(ticket.getUserId());
+        Set<UUID> staffIds = new HashSet<>();
         if (ticket.getAssignedTo() != null) {
-            profileIds.add(ticket.getAssignedTo());
+            staffIds.add(ticket.getAssignedTo());
         }
-        messages.forEach(m -> profileIds.add(m.getSenderId()));
+        messages.forEach(m -> (m.isStaff() ? staffIds : profileIds).add(m.getSenderId()));
         Map<UUID, ProfileSearchResultDto> profiles = profilesByIds(profileIds);
+        Map<UUID, StaffRefDto> staff = staffDirectory.findByIds(staffIds);
         boolean business = profileService.findBusinessProfileIds(Set.of(ticket.getUserId()))
                 .contains(ticket.getUserId());
 
         List<TicketMessageDto> messageDtos = messages.stream()
                 .map(m -> new TicketMessageDto(
                         m.getId(),
-                        profiles.get(m.getSenderId()),
+                        m.isStaff() ? null : profiles.get(m.getSenderId()),
+                        m.isStaff() ? staff.get(m.getSenderId()) : null,
                         m.isStaff(),
                         m.getContent(),
                         m.getCreatedAt()))
@@ -263,7 +278,7 @@ public class SupportServiceImpl implements SupportService {
                 ticket.getStatus(),
                 profiles.get(ticket.getUserId()),
                 business,
-                ticket.getAssignedTo() == null ? null : profiles.get(ticket.getAssignedTo()),
+                ticket.getAssignedTo() == null ? null : staff.get(ticket.getAssignedTo()),
                 messageDtos,
                 ticket.getCreatedAt(),
                 ticket.getLastMessageAt());

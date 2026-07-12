@@ -99,16 +99,20 @@ notification, shared}`; `support/notification/feedback → {profile?, shared}`; 
 
 **STATUS: COMPLETE** (2026-07-11). All endpoints are implemented and the schema validates against
 the live Supabase DB; endpoints are not yet exercised end-to-end from the dashboard web app.
-Remember: dashboard users need `app_metadata.role = 'admin'` set on their Supabase auth user
-(manual step) *and* an `admin_team_members` row — seed the owner row for your own account:
-`insert into admin_team_members (user_id, role, status) values ('<your-uuid>', 'owner', 'active');`
+
+> **Superseded 2026-07-12** — staff accounts were decoupled from app accounts: staff are now
+> profile-less Supabase auth users invited **by email** (`POST /team {email, displayName, role}`),
+> their identity lives on `admin_team_members` (email / display_name / avatar_url), and the
+> `app_metadata.role = 'admin'` claim is set automatically at invite. See
+> [`STAFF_ACCOUNTS_PROGRESS.md`](STAFF_ACCOUNTS_PROGRESS.md) — including the new owner-seeding
+> steps (the SQL below no longer works as-is: email/display_name are NOT NULL now).
 
 ## Deferred / TODO later
 
 - DAU / WAU / MAU, avg session length, churn (needs activity/session tracking — decide approach later)
 - Push notifications (in-app only for now)
-- Email-based moderator invites via Supabase Auth admin API (currently: add existing user by username);
-  "invitee sets password + 2FA on first sign-in" flow
+- ~~Email-based moderator invites via Supabase Auth admin API~~ — DONE 2026-07-12 (staff-account
+  decoupling); the dashboard still needs an accept-invite page ("set password on first sign-in")
 - Ownership transfer endpoint
 - Auto-toxicity score on moderation cases (dashboard shows one — no ML scoring backend yet)
 - Refund processing (support "Refunds" scope is a capability flag only; no billing integration)
