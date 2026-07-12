@@ -11,13 +11,17 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * One dashboard team member. The primary key <em>is</em> the profile UUID — a user is on the team
- * at most once. {@code role} is the fine-grained dashboard role (owner / senior_admin /
- * content_moderator / support_agent / technical); what each role may do is decided in code by
- * {@code AdminAccessService}, not in the DB.
+ * One dashboard team member — the staff identity itself. Staff accounts are separate from app
+ * accounts: the primary key is a Supabase auth UUID that has <em>no</em> {@code profiles} row
+ * (the {@code handle_new_user} trigger skips staff), so {@code email} / {@code displayName} /
+ * {@code avatarUrl} live here rather than being joined from a profile. {@code role} is the
+ * fine-grained dashboard role (owner / senior_admin / content_moderator / support_agent /
+ * technical); what each role may do is decided in code by {@code AdminAccessService}, not in
+ * the DB.
  *
- * <p>Note the second auth layer: this row alone doesn't open the dashboard — the user's Supabase
- * {@code app_metadata.role} must also be {@code admin} to pass the {@code /api/v1/admin/**} gate.
+ * <p>Note the second auth layer: this row alone doesn't open the dashboard — the staff user's
+ * Supabase {@code app_metadata.role} must also be {@code admin} to pass the
+ * {@code /api/v1/admin/**} gate (set by {@code SupabaseAuthAdminClient} at invite time).
  */
 @Entity
 @Table(name = "admin_team_members")
@@ -32,9 +36,18 @@ public class AdminTeamMemberEntity {
     @Column(name = "role", nullable = false)
     private String role;
 
-    /** {@code invited} (default) or {@code active}; members added by username start {@code active}. */
+    /** {@code invited} (default) until the member's first admin API call flips it {@code active}. */
     @Column(name = "status")
     private String status;
+
+    @Column(name = "email", nullable = false)
+    private String email;
+
+    @Column(name = "display_name", nullable = false)
+    private String displayName;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl;
 
     @Column(name = "invited_by")
     private UUID invitedBy;

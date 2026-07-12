@@ -11,7 +11,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * One support ticket. {@code userId} / {@code assignedTo} are flat {@code profiles.id} references;
+ * One support ticket. {@code userId} is a flat {@code profiles.id} reference; {@code assignedTo}
+ * is a staff UUID ({@code admin_team_members.user_id} — staff are not app users, so no profile FK);
  * {@code status} and {@code priority} rely on the column DEFAULTs on insert ({@code open} /
  * {@code normal}) and are advanced by the service afterwards. {@code lastMessageAt} and
  * {@code updatedAt} are maintained by a Supabase trigger on {@code support_ticket_messages}.

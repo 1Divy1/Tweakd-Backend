@@ -16,6 +16,14 @@ Configures stateless JWT authentication using Supabase as an OAuth2 resource ser
   jwt.getSubject()  // UUID string, PK of the profiles table
   ```
 
+## Staff directory — `staff/StaffDirectory`
+
+Staff (admin-dashboard) accounts are separate from app accounts — profile-less Supabase auth users
+whose identity lives on `admin_team_members`. `StaffDirectory` (implemented by the `admin` module)
+resolves staff UUIDs to `StaffRefDto` (id, display name, avatar) so lower-level modules like
+`support` can render staff actors without depending on `admin` (which would be a cycle — `admin`
+orchestrates them).
+
 ## Exception hierarchy
 
 All domain exceptions extend `ApiException`, which carries an `HttpStatus`. `GlobalExceptionHandler` translates them to `ErrorResponse` JSON automatically.
