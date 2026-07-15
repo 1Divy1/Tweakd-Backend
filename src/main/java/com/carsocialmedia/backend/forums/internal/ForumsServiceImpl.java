@@ -65,6 +65,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -624,24 +625,24 @@ public class ForumsServiceImpl implements ForumsService {
 
     @Override
     @Transactional(readOnly = true)
-    public ModerationContentDto getThreadModerationSnapshot(UUID threadId) {
-        ForumThreadEntity thread = threadRepository.findById(threadId)
-                .orElseThrow(() -> new ThreadNotFoundException(threadId));
-        String body = thread.getContent();
-        String content = body == null || body.isBlank()
-                ? thread.getTitle()
-                : thread.getTitle() + "\n\n" + body;
-        return new ModerationContentDto(
-                thread.getId(), thread.getUserId(), content, List.of(), thread.getCreatedAt());
+    public Optional<ModerationContentDto> findThreadModerationSnapshot(UUID threadId) {
+        return threadRepository.findById(threadId).map(thread -> {
+            String body = thread.getContent();
+            String content = body == null || body.isBlank()
+                    ? thread.getTitle()
+                    : thread.getTitle() + "\n\n" + body;
+            return new ModerationContentDto(
+                    thread.getId(), thread.getUserId(), content, List.of(), thread.getCreatedAt());
+        });
     }
 
     @Override
     @Transactional(readOnly = true)
-    public ModerationContentDto getReplyModerationSnapshot(UUID postId) {
-        ForumPostEntity post = postRepository.findById(postId)
-                .orElseThrow(() -> new ForumPostNotFoundException(postId));
-        return new ModerationContentDto(
-                post.getId(), post.getUserId(), post.getContent(), List.of(), post.getCreatedAt());
+    public Optional<ModerationContentDto> findReplyModerationSnapshot(UUID postId) {
+        return postRepository.findById(postId)
+                .map(post -> new ModerationContentDto(
+                        post.getId(), post.getUserId(), post.getContent(),
+                        List.of(), post.getCreatedAt()));
     }
 
     @Override

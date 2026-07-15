@@ -37,11 +37,11 @@ public interface ProfileService {
     // ---- moderation (called by the admin module; no auth logic here) --------
 
     /**
-     * The author panel of a moderation case: identity, reach, account age, ban state.
-     *
-     * @throws com.carsocialmedia.backend.profile.exception.ProfileNotFoundException if no such profile
+     * The author panel of a moderation case (identity, reach, account age, ban state), or empty if
+     * the profile is gone. Empty rather than an exception on purpose: the caller runs inside its
+     * own transaction, and a not-found thrown across that boundary would mark it rollback-only.
      */
-    com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto getModerationSnapshot(UUID profileId);
+    Optional<com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto> findModerationSnapshot(UUID profileId);
 
     /**
      * Bans a user. Enforced by the profile module's request interceptor, which rejects every
