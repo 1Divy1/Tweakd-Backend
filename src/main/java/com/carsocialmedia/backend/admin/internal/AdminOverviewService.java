@@ -44,11 +44,15 @@ public class AdminOverviewService {
     }
 
     private PostVolumeDto postVolume() {
+        // The outer bound keeps the scan on idx_posts_created_at instead of the whole table. It is
+        // least() of the two candidates because the buckets are not nested: when a month starts
+        // mid-week, the current week begins before the current month.
         return jdbc.sql("""
                         select count(*) filter (where created_at >= date_trunc('day', now())) as today,
                                count(*) filter (where created_at >= date_trunc('week', now())) as week,
                                count(*) filter (where created_at >= date_trunc('month', now())) as month
                         from posts
+                        where created_at >= least(date_trunc('week', now()), date_trunc('month', now()))
                         """)
                 .query((rs, i) -> new PostVolumeDto(rs.getLong("today"), rs.getLong("week"), rs.getLong("month")))
                 .single();

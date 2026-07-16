@@ -66,6 +66,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -720,23 +721,23 @@ public class PostsServiceImpl implements PostsService {
 
     @Override
     @Transactional(readOnly = true)
-    public ModerationContentDto getPostModerationSnapshot(UUID postId) {
-        PostEntity post = postRepository.findById(postId)
-                .orElseThrow(() -> new PostNotFoundException(postId));
-        List<String> imageUrls = postImageRepository.findAllByPostIdOrderByDisplayOrderAsc(postId).stream()
-                .map(img -> storageService.publicUrl(StorageBucket.POSTS, img.getImageKey()))
-                .toList();
-        return new ModerationContentDto(
-                post.getId(), post.getUserId(), post.getDescription(), imageUrls, post.getCreatedAt());
+    public Optional<ModerationContentDto> findPostModerationSnapshot(UUID postId) {
+        return postRepository.findById(postId).map(post -> {
+            List<String> imageUrls = postImageRepository.findAllByPostIdOrderByDisplayOrderAsc(postId).stream()
+                    .map(img -> storageService.publicUrl(StorageBucket.POSTS, img.getImageKey()))
+                    .toList();
+            return new ModerationContentDto(
+                    post.getId(), post.getUserId(), post.getDescription(), imageUrls, post.getCreatedAt());
+        });
     }
 
     @Override
     @Transactional(readOnly = true)
-    public ModerationContentDto getCommentModerationSnapshot(UUID commentId) {
-        CommentEntity comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new CommentNotFoundException(commentId));
-        return new ModerationContentDto(
-                comment.getId(), comment.getUserId(), comment.getContent(), List.of(), comment.getCreatedAt());
+    public Optional<ModerationContentDto> findCommentModerationSnapshot(UUID commentId) {
+        return commentRepository.findById(commentId)
+                .map(comment -> new ModerationContentDto(
+                        comment.getId(), comment.getUserId(), comment.getContent(),
+                        List.of(), comment.getCreatedAt()));
     }
 
     @Override

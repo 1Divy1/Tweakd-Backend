@@ -15,10 +15,13 @@ public interface SupportTicketRepository extends JpaRepository<SupportTicketEnti
     // Both lists paginate on (last_message_at, id) desc — most recently active first. The service
     // loads size + 1 rows and trims the sentinel.
 
+    // The cast on the null check is required: a bare ":afterActivity is null" gives Postgres no way
+    // to infer the bind parameter's type, and it fails the statement with "could not determine data
+    // type of parameter".
     @Query("""
             select t from SupportTicketEntity t
             where t.userId = :userId
-              and (:afterActivity is null
+              and (cast(:afterActivity as timestamp) is null
                    or t.lastMessageAt < :afterActivity
                    or (t.lastMessageAt = :afterActivity and t.id < :afterId))
             order by t.lastMessageAt desc, t.id desc
@@ -31,7 +34,7 @@ public interface SupportTicketRepository extends JpaRepository<SupportTicketEnti
     @Query("""
             select t from SupportTicketEntity t
             where (:status is null or t.status = :status)
-              and (:afterActivity is null
+              and (cast(:afterActivity as timestamp) is null
                    or t.lastMessageAt < :afterActivity
                    or (t.lastMessageAt = :afterActivity and t.id < :afterId))
             order by t.lastMessageAt desc, t.id desc

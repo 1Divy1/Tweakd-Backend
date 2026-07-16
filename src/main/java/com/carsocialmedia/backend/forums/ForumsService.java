@@ -17,6 +17,7 @@ import com.carsocialmedia.backend.forums.dto.request.UpdateThreadRequest;
 import com.carsocialmedia.backend.report.dto.ReportReasonDto;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -171,19 +172,18 @@ public interface ForumsService {
     // ---- moderation (called by the admin module; no auth logic here) --------
 
     /**
-     * The reported thread in the uniform moderation shape; {@code content} is the title and body
-     * joined with a blank line.
-     *
-     * @throws com.carsocialmedia.backend.forums.exception.ThreadNotFoundException if no such thread
+     * The reported thread in the uniform moderation shape ({@code content} is the title and body
+     * joined with a blank line), or empty if the thread is gone. Empty rather than an exception on
+     * purpose: the caller runs inside its own transaction, and a not-found thrown across that
+     * boundary would mark it rollback-only.
      */
-    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getThreadModerationSnapshot(UUID threadId);
+    Optional<com.carsocialmedia.backend.shared.moderation.ModerationContentDto> findThreadModerationSnapshot(UUID threadId);
 
     /**
-     * The reported reply in the uniform moderation shape.
-     *
-     * @throws com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException if no such reply
+     * The reported reply in the uniform moderation shape, or empty if the reply is gone (see
+     * {@link #findThreadModerationSnapshot}).
      */
-    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getReplyModerationSnapshot(UUID postId);
+    Optional<com.carsocialmedia.backend.shared.moderation.ModerationContentDto> findReplyModerationSnapshot(UUID postId);
 
     /**
      * Deletes a thread on a moderator's behalf: same anonymize-with-replies / hard-delete-without

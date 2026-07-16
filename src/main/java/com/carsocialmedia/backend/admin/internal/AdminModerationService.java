@@ -20,7 +20,6 @@ import com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.report.dto.TargetReportDto;
-import com.carsocialmedia.backend.shared.exception.NotFoundException;
 import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
 import com.carsocialmedia.backend.shared.staff.StaffDirectory;
 import com.carsocialmedia.backend.shared.staff.StaffRefDto;
@@ -373,30 +372,21 @@ public class AdminModerationService {
      * handle, the author is the profile itself.
      */
     private ModerationContentDto snapshotOrNull(String targetType, UUID targetId) {
-        try {
-            return switch (targetType) {
-                case "post" -> postsService.getPostModerationSnapshot(targetId);
-                case "comment" -> postsService.getCommentModerationSnapshot(targetId);
-                case "forum_thread" -> forumsService.getThreadModerationSnapshot(targetId);
-                case "forum_thread_reply" -> forumsService.getReplyModerationSnapshot(targetId);
-                case "profile" -> {
-                    ProfileModerationSnapshotDto profile = profileService.getModerationSnapshot(targetId);
-                    yield new ModerationContentDto(targetId, targetId, "@" + profile.username(),
-                            List.of(), profile.createdAt());
-                }
-                default -> throw new IllegalStateException("Unknown moderation target type: " + targetType);
-            };
-        } catch (NotFoundException e) {
-            return null;
-        }
+        return switch (targetType) {
+            case "post" -> postsService.findPostModerationSnapshot(targetId).orElse(null);
+            case "comment" -> postsService.findCommentModerationSnapshot(targetId).orElse(null);
+            case "forum_thread" -> forumsService.findThreadModerationSnapshot(targetId).orElse(null);
+            case "forum_thread_reply" -> forumsService.findReplyModerationSnapshot(targetId).orElse(null);
+            case "profile" -> profileService.findModerationSnapshot(targetId)
+                    .map(profile -> new ModerationContentDto(targetId, targetId, "@" + profile.username(),
+                            List.of(), profile.createdAt()))
+                    .orElse(null);
+            default -> throw new IllegalStateException("Unknown moderation target type: " + targetType);
+        };
     }
 
     private ProfileModerationSnapshotDto moderationSnapshotOrNull(UUID profileId) {
-        try {
-            return profileService.getModerationSnapshot(profileId);
-        } catch (NotFoundException e) {
-            return null;
-        }
+        return profileService.findModerationSnapshot(profileId).orElse(null);
     }
 
     private void deleteContent(String targetType, UUID targetId) {

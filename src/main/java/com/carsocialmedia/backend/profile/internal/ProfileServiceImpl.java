@@ -168,19 +168,18 @@ class ProfileServiceImpl implements ProfileService {
 
     @Override
     @Transactional(readOnly = true)
-    public ProfileModerationSnapshotDto getModerationSnapshot(UUID profileId) {
-        ProfileEntity profile = profileRepository.findById(profileId)
-                .orElseThrow(() -> ProfileNotFoundException.byUserId(profileId.toString()));
-        return new ProfileModerationSnapshotDto(
-                profile.getId(),
-                profile.getUsername(),
-                profile.getName(),
-                profile.getAvatarUrl(),
-                profile.getFollowersCount(),
-                profile.isBusiness(),
-                profile.isBanned(),
-                profile.getBannedUntil(),
-                profile.getCreatedAt());
+    public Optional<ProfileModerationSnapshotDto> findModerationSnapshot(UUID profileId) {
+        return profileRepository.findById(profileId)
+                .map(profile -> new ProfileModerationSnapshotDto(
+                        profile.getId(),
+                        profile.getUsername(),
+                        profile.getName(),
+                        profile.getAvatarUrl(),
+                        profile.getFollowersCount(),
+                        profile.isBusiness(),
+                        profile.isBanned(),
+                        profile.getBannedUntil(),
+                        profile.getCreatedAt()));
     }
 
     @Override

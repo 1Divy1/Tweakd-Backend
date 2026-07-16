@@ -40,7 +40,11 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: controllers, service impl, entities (garage / car / mod / images / reference), repositories
 ├── storage/          ← public API: StorageService (presigned URL generation)
 │   └── internal/     ← private: StorageServiceImpl, SupabaseStorageClient, StorageProperties
-└── shared/           ← OPEN module: security config, exception hierarchy, global handler, moderation + staff SPIs
+├── dms/              ← public API: DmsService, DTOs (incl. the WebSocket event envelope), exceptions
+│   └── internal/     ← private: REST controller, typing STOMP controller, service impl, event pushers, entities, repositories
+├── presence/         ← public API: PresenceService, PresenceDto, UserPresenceChangedEvent
+│   └── internal/     ← private: in-memory session registry, WS lifecycle listeners, grace sweep + flush (@Scheduled), entity, repo, controller
+└── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
 ```
 
 **Public root package** — what other modules may import: service interfaces, DTOs/records, domain events, exception types.
@@ -55,7 +59,9 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
 
 `shared/security/SecurityConfig.java` configures stateless JWT authentication using Supabase as an OAuth2 resource server.
 
-- All endpoints require authentication unless under `/public/**`.
+- All endpoints require authentication unless under `/public/**`. The WebSocket handshake at
+  `/ws/**` is also `permitAll` — the real authentication happens at the STOMP CONNECT frame
+  (`shared/realtime/JwtChannelInterceptor`, same JWT validation as REST).
 - `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
   module then applies fine-grained team-role capability checks (`admin_team_members`).
 - **Staff accounts are separate from app accounts**: dashboard staff are profile-less Supabase auth
@@ -99,6 +105,8 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)
 - [`notification` module](src/main/java/com/carsocialmedia/backend/notification/README.md)
 - [`support` module](src/main/java/com/carsocialmedia/backend/support/README.md)
+- [`dms` module](src/main/java/com/carsocialmedia/backend/dms/README.md)
+- [`presence` module](src/main/java/com/carsocialmedia/backend/presence/README.md)
 - [`admin` module](src/main/java/com/carsocialmedia/backend/admin/README.md)
 - [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
 - [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)
