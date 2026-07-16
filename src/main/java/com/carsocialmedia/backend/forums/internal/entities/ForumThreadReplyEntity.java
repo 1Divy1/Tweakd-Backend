@@ -21,7 +21,7 @@ import java.util.UUID;
 @Table(name = "forum_thread_replies")
 @Getter
 @Setter
-public class ForumPostEntity {
+public class ForumThreadReplyEntity {
 
     @Id
     private UUID id;
