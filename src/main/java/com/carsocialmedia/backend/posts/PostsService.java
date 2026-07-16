@@ -10,6 +10,7 @@ import com.carsocialmedia.backend.posts.dto.request.CreatePostRequest;
 import com.carsocialmedia.backend.posts.dto.request.UpdatePostRequest;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface PostsService {
@@ -335,19 +336,18 @@ public interface PostsService {
     // -------------------------------------------------------------------
 
     /**
-     * The reported post, in the uniform moderation shape (author, caption, resolved image URLs).
-     *
-     * @throws com.carsocialmedia.backend.posts.exception.PostNotFoundException if the post does not exist
+     * The reported post, in the uniform moderation shape (author, caption, resolved image URLs), or
+     * empty if the post is gone. Empty rather than an exception on purpose: the caller runs inside
+     * its own transaction, and a not-found thrown across that boundary would mark it rollback-only.
      */
-    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getPostModerationSnapshot(UUID postId);
+    Optional<com.carsocialmedia.backend.shared.moderation.ModerationContentDto> findPostModerationSnapshot(UUID postId);
 
     /**
-     * The reported comment, in the uniform moderation shape. Unlike the user-facing comment
-     * endpoints there is no post id here — a report row only carries the comment id.
-     *
-     * @throws com.carsocialmedia.backend.posts.exception.CommentNotFoundException if the comment does not exist
+     * The reported comment, in the uniform moderation shape, or empty if the comment is gone (see
+     * {@link #findPostModerationSnapshot}). Unlike the user-facing comment endpoints there is no
+     * post id here — a report row only carries the comment id.
      */
-    com.carsocialmedia.backend.shared.moderation.ModerationContentDto getCommentModerationSnapshot(UUID commentId);
+    Optional<com.carsocialmedia.backend.shared.moderation.ModerationContentDto> findCommentModerationSnapshot(UUID commentId);
 
     /**
      * Hard-deletes a post on a moderator's behalf, bypassing the ownership check but otherwise
