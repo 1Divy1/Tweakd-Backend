@@ -26,7 +26,7 @@ import com.carsocialmedia.backend.forums.exception.ShortcutNotFoundException;
 import com.carsocialmedia.backend.forums.exception.ThreadDeletedException;
 import com.carsocialmedia.backend.forums.exception.ThreadLockedException;
 import com.carsocialmedia.backend.forums.exception.ThreadNotFoundException;
-import com.carsocialmedia.backend.forums.internal.entities.ForumPostEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadReplyEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumShortcutEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadSaveEntity;
@@ -287,7 +287,7 @@ public class ForumsServiceImpl implements ForumsService {
 
         // One keyset page of top-level replies, no subtrees — the client expands a reply's children
         // on demand via getPostReplies.
-        List<ForumPostEntity> roots = switch (sort) {
+        List<ForumThreadReplyEntity> roots = switch (sort) {
             case OLD -> postRepository.findRootReplyPage(threadId, from == null,
                     from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
             case NEW -> postRepository.findRootReplyPageDesc(threadId, from == null,
@@ -301,7 +301,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional(readOnly = true)
     public CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String sortRaw, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
-        ForumPostEntity parent = postRepository.findById(postId)
+        ForumThreadReplyEntity parent = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         UUID threadAuthorId = loadThread(parent.getThreadId()).getUserId();
 
@@ -310,7 +310,7 @@ public class ForumsServiceImpl implements ForumsService {
         TimeCursor from = TimeCursor.decode(cursor);
         Pageable pageable = PageRequest.of(0, limit + 1);
 
-        List<ForumPostEntity> children = switch (sort) {
+        List<ForumThreadReplyEntity> children = switch (sort) {
             case OLD -> postRepository.findChildReplyPage(postId, from == null,
                     from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
             case NEW -> postRepository.findChildReplyPageDesc(postId, from == null,
@@ -408,7 +408,7 @@ public class ForumsServiceImpl implements ForumsService {
 
         UUID parentId = request.parentPostId();
         if (parentId != null) {
-            ForumPostEntity parent = postRepository.findById(parentId)
+            ForumThreadReplyEntity parent = postRepository.findById(parentId)
                     .orElseThrow(() -> new ForumPostNotFoundException(parentId));
             if (!parent.getThreadId().equals(threadId)) {
                 throw new ForumPostNotFoundException(parentId);
@@ -419,7 +419,7 @@ public class ForumsServiceImpl implements ForumsService {
         }
 
         UUID postId = UUID.randomUUID();
-        ForumPostEntity post = new ForumPostEntity();
+        ForumThreadReplyEntity post = new ForumThreadReplyEntity();
         post.setId(postId);
         post.setThreadId(threadId);
         post.setUserId(userId);
@@ -429,10 +429,14 @@ public class ForumsServiceImpl implements ForumsService {
         post.setUpdatedAt(Instant.now());
         postRepository.save(post);
 
+        // TODO: BUG FIX - Exception thrown (line 435) - entityManager.flush();
+        //  - Message: "org.postgresql.util.PSQLException: ERROR: relation "public.forum_posts" does not exist"
+        //  - Reproduction: On an existing thread, when sending a reply to an existing reply,
+        //                  the backend crashes the moment I click the send button.
         entityManager.flush();
         entityManager.clear();
 
-        ForumPostEntity hydrated = postRepository.findById(postId)
+        ForumThreadReplyEntity hydrated = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         return toReplyDtos(List.of(hydrated), userId, thread.getUserId()).getFirst();
     }
@@ -442,7 +446,7 @@ public class ForumsServiceImpl implements ForumsService {
     public ReplyDto updateReply(String currentUserId, UUID postId, UpdateReplyRequest request) {
         UUID userId = UUID.fromString(currentUserId);
 
-        ForumPostEntity post = postRepository.findById(postId)
+        ForumThreadReplyEntity post = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         if (!post.getUserId().equals(userId)) {
             throw new NotContentOwnerException();
@@ -486,7 +490,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public void likePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
-        ForumPostEntity post = postRepository.findById(postId)
+        ForumThreadReplyEntity post = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         if (post.isDeleted()) {
             throw new ForumPostDeletedException(postId);
@@ -574,7 +578,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public void deletePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
-        ForumPostEntity post = postRepository.findById(postId)
+        ForumThreadReplyEntity post = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         if (!post.getUserId().equals(userId)) {
             throw new NotContentOwnerException();
@@ -604,7 +608,7 @@ public class ForumsServiceImpl implements ForumsService {
      * The delete semantics shared by the author and moderator paths. Direct children present →
      * soft delete so descendants survive; otherwise hard delete.
      */
-    private void removeReply(ForumPostEntity post) {
+    private void removeReply(ForumThreadReplyEntity post) {
         if (post.isDeleted()) {
             return;
         }
@@ -656,7 +660,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Override
     @Transactional
     public void deleteReplyAsModerator(UUID postId) {
-        ForumPostEntity post = postRepository.findById(postId)
+        ForumThreadReplyEntity post = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         removeReply(post);
     }
@@ -671,7 +675,7 @@ public class ForumsServiceImpl implements ForumsService {
      */
     private void collapseDeletedAncestors(UUID parentId) {
         while (parentId != null) {
-            ForumPostEntity parent = postRepository.findById(parentId).orElse(null);
+            ForumThreadReplyEntity parent = postRepository.findById(parentId).orElse(null);
             if (parent == null || !parent.isDeleted()) {
                 break;
             }
@@ -811,7 +815,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public void reportReply(String currentUserId, UUID postId, UUID reasonId) {
         UUID reporterId = UUID.fromString(currentUserId);
-        ForumPostEntity post = postRepository.findById(postId)
+        ForumThreadReplyEntity post = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         if (post.getUserId().equals(reporterId)) {
             throw new CannotReportOwnForumContentException();
@@ -904,9 +908,9 @@ public class ForumsServiceImpl implements ForumsService {
      * reply's children, oldest first) into a {@link CursorPage}, trimming the sentinel row and
      * encoding the next {@link TimeCursor} when there is a further page.
      */
-    private CursorPage<ReplyDto> toReplyPage(List<ForumPostEntity> rows, int limit, UUID viewerId, UUID threadAuthorId) {
+    private CursorPage<ReplyDto> toReplyPage(List<ForumThreadReplyEntity> rows, int limit, UUID viewerId, UUID threadAuthorId) {
         boolean hasMore = rows.size() > limit;
-        List<ForumPostEntity> page = hasMore ? rows.subList(0, limit) : rows;
+        List<ForumThreadReplyEntity> page = hasMore ? rows.subList(0, limit) : rows;
 
         List<ReplyDto> items = toReplyDtos(page, viewerId, threadAuthorId);
         String nextCursor = hasMore
@@ -922,15 +926,15 @@ public class ForumsServiceImpl implements ForumsService {
      * reply whose author is {@code threadAuthorId} (the OP) is flagged {@code isAuthor} for the
      * "Author" badge.
      */
-    private List<ReplyDto> toReplyDtos(List<ForumPostEntity> posts, UUID viewerId, UUID threadAuthorId) {
+    private List<ReplyDto> toReplyDtos(List<ForumThreadReplyEntity> posts, UUID viewerId, UUID threadAuthorId) {
         if (posts.isEmpty()) {
             return List.of();
         }
 
-        List<UUID> postIds = posts.stream().map(ForumPostEntity::getId).toList();
+        List<UUID> postIds = posts.stream().map(ForumThreadReplyEntity::getId).toList();
         Set<UUID> authorIds = posts.stream()
                 .filter(p -> !p.isDeleted())
-                .map(ForumPostEntity::getUserId).collect(Collectors.toSet());
+                .map(ForumThreadReplyEntity::getUserId).collect(Collectors.toSet());
         Map<UUID, ProfileSearchResultDto> authors = authorIds.isEmpty() ? Map.of()
                 : profileService.findByIds(authorIds).stream()
                         .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
