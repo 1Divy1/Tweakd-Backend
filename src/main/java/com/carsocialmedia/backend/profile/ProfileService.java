@@ -5,7 +5,9 @@ import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
 import com.carsocialmedia.backend.profile.dto.CityDto;
 import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.profile.dto.CountryDto;
+import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
+import com.carsocialmedia.backend.profile.dto.ProfileEditRequest;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesRequest;
 import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
@@ -66,6 +68,15 @@ public interface ProfileService {
 
     ProfileDto completeOnboarding(String userId, OnboardingRequest request);
 
+    /** Partial edit of the caller's own name/bio (absent fields left unchanged). Returns the updated profile. */
+    ProfileDto updateProfile(String userId, ProfileEditRequest request);
+
+    /**
+     * Persists a new avatar R2 object key to the caller's profile and deletes the previously stored
+     * R2 object (if any) after commit. Returns the updated profile.
+     */
+    ProfileDto updateAvatar(String userId, String key);
+
     PublicProfileDto getPublicProfileByUsername(String username);
 
     List<ProfileSearchResultDto> searchByUsername(String prefix);
@@ -79,6 +90,18 @@ public interface ProfileService {
     List<CommunityRoleDto> listCommunityRoles();
 
     List<CarCategoryDto> listCarCategories();
+
+    /** All selectable UI languages (reference data). */
+    List<LanguageOptionDto> listLanguageOptions();
+
+    /**
+     * Sets the caller's UI language.
+     *
+     * @param languageId a code from {@code app_language_options} (e.g. {@code "en"}, {@code "ro"})
+     * @throws com.carsocialmedia.backend.profile.exception.InvalidReferenceException if the code is unknown
+     * @throws com.carsocialmedia.backend.profile.exception.ProfileNotFoundException if no such profile
+     */
+    ProfileDto updateLanguage(String userId, String languageId);
 
     // ---- location ----------------------------------------------------------
 
@@ -105,6 +128,15 @@ public interface ProfileService {
     NotificationPreferencesDto getNotificationPreferences(String userId);
 
     NotificationPreferencesDto updateNotificationPreferences(String userId, NotificationPreferencesRequest request);
+
+    /**
+     * The given user's notification toggles, for gating outbound in-app notifications. Read-only and
+     * side-effect-free — unlike {@link #getNotificationPreferences(String)} it neither lazily creates
+     * the preferences row nor throws when the profile is gone: a missing preferences row (or a missing
+     * profile) reads as all-enabled, matching the module's default treatment. Safe to call from an
+     * asynchronous notification listener.
+     */
+    NotificationPreferencesDto getNotificationPreferencesOrDefault(UUID userId);
 
     // ---- reporting ---------------------------------------------------------
 

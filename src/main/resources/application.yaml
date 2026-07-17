@@ -17,6 +17,9 @@ cloudflare:
     posts:
       bucket: ${CLOUDFLARE_POSTS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_POSTS_BUCKET_URL}
+    avatars:
+      bucket: ${CLOUDFLARE_AVATARS_BUCKET_NAME}
+      public-url: ${CLOUDFLARE_AVATARS_BUCKET_URL}
 
 spring:
   application:

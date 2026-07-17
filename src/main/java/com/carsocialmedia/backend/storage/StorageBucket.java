@@ -10,5 +10,6 @@ package com.carsocialmedia.backend.storage;
  */
 public enum StorageBucket {
     GARAGE,
-    POSTS
+    POSTS,
+    AVATARS
 }

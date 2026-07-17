@@ -2,6 +2,9 @@ package com.carsocialmedia.backend.posts.internal;
 
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
+import com.carsocialmedia.backend.posts.PostCommentedEvent;
+import com.carsocialmedia.backend.posts.PostLikedEvent;
+import com.carsocialmedia.backend.posts.PostSharedEvent;
 import com.carsocialmedia.backend.posts.PostsService;
 import com.carsocialmedia.backend.posts.dto.CommentDto;
 import com.carsocialmedia.backend.posts.dto.CommentPageDto;
@@ -54,6 +57,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,6 +85,9 @@ public class PostsServiceImpl implements PostsService {
     private static final int MAX_PAGE_SIZE = 50;
     private static final int DEFAULT_PAGE_SIZE = 20;
 
+    /** Max length of the comment excerpt carried in a notification body. */
+    private static final int EXCERPT_MAX_LENGTH = 80;
+
     private final PostRepository postRepository;
     private final PostImageRepository postImageRepository;
     private final TaggedPersonRepository taggedPersonRepository;
@@ -94,6 +101,7 @@ public class PostsServiceImpl implements PostsService {
     private final GarageService garageService;
     private final StorageService storageService;
     private final ReportService reportService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -110,7 +118,8 @@ public class PostsServiceImpl implements PostsService {
                             ProfileService profileService,
                             GarageService garageService,
                             StorageService storageService,
-                            ReportService reportService) {
+                            ReportService reportService,
+                            ApplicationEventPublisher eventPublisher) {
         this.postRepository = postRepository;
         this.postImageRepository = postImageRepository;
         this.taggedPersonRepository = taggedPersonRepository;
@@ -124,6 +133,7 @@ public class PostsServiceImpl implements PostsService {
         this.garageService = garageService;
         this.storageService = storageService;
         this.reportService = reportService;
+        this.eventPublisher = eventPublisher;
     }
 
     // -------------------------------------------------------------------
@@ -535,13 +545,16 @@ public class PostsServiceImpl implements PostsService {
     @Transactional
     public void likePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
-        ensurePostExists(postId);
+        PostEntity post = postRepository.findById(postId)
+                .orElseThrow(() -> new PostNotFoundException(postId));
         if (postLikeRepository.existsByIdPostIdAndIdUserId(postId, userId)) {
             return;
         }
         PostLikeEntity like = new PostLikeEntity();
         like.setId(new PostLikeId(postId, userId));
         postLikeRepository.save(like);
+        // Only a real (first) like notifies; the early return above swallows re-likes.
+        publishSocialEvent(post.getUserId(), userId, new PostLikedEvent(postId, post.getUserId(), userId));
     }
 
     @Override
