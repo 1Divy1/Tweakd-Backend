@@ -11,15 +11,23 @@ import com.carsocialmedia.backend.dms.exception.CannotMessageSelfException;
 import com.carsocialmedia.backend.dms.exception.DmConversationNotFoundException;
 import com.carsocialmedia.backend.dms.exception.DmMessageNotFoundException;
 import com.carsocialmedia.backend.dms.exception.DmRecipientNotFoundException;
+import com.carsocialmedia.backend.dms.exception.EmptyMessageException;
+import com.carsocialmedia.backend.dms.exception.TaggedCarNotFoundException;
+import com.carsocialmedia.backend.dms.exception.TooManyTaggedCarsException;
 import com.carsocialmedia.backend.dms.internal.entities.DmConversationEntity;
+import com.carsocialmedia.backend.dms.internal.entities.DmMessageCarTagEntity;
+import com.carsocialmedia.backend.dms.internal.entities.DmMessageCarTagId;
 import com.carsocialmedia.backend.dms.internal.entities.DmMessageEntity;
 import com.carsocialmedia.backend.dms.internal.entities.DmParticipantStateEntity;
 import com.carsocialmedia.backend.dms.internal.events.DmConversationReadEvent;
 import com.carsocialmedia.backend.dms.internal.events.DmMessageCreatedEvent;
 import com.carsocialmedia.backend.dms.internal.events.DmMessageDeletedEvent;
 import com.carsocialmedia.backend.dms.internal.repositories.DmConversationRepository;
+import com.carsocialmedia.backend.dms.internal.repositories.DmMessageCarTagRepository;
 import com.carsocialmedia.backend.dms.internal.repositories.DmMessageRepository;
 import com.carsocialmedia.backend.dms.internal.repositories.DmParticipantStateRepository;
+import com.carsocialmedia.backend.garage.GarageService;
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.presence.PresenceService;
 import com.carsocialmedia.backend.presence.dto.PresenceDto;
 import com.carsocialmedia.backend.profile.ProfileService;
@@ -32,9 +40,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -44,11 +54,14 @@ public class DmsServiceImpl implements DmsService {
 
     private static final int MAX_PAGE_SIZE = 50;
     private static final int PREVIEW_LENGTH = 140;
+    private static final int MAX_TAGGED_CARS = 10;
 
     private final DmConversationRepository conversationRepository;
     private final DmParticipantStateRepository stateRepository;
     private final DmMessageRepository messageRepository;
+    private final DmMessageCarTagRepository carTagRepository;
     private final ProfileService profileService;
+    private final GarageService garageService;
     private final PresenceService presenceService;
     private final ApplicationEventPublisher eventPublisher;
     private final DmEventPusher eventPusher;
@@ -56,14 +69,18 @@ public class DmsServiceImpl implements DmsService {
     public DmsServiceImpl(DmConversationRepository conversationRepository,
                           DmParticipantStateRepository stateRepository,
                           DmMessageRepository messageRepository,
+                          DmMessageCarTagRepository carTagRepository,
                           ProfileService profileService,
+                          GarageService garageService,
                           PresenceService presenceService,
                           ApplicationEventPublisher eventPublisher,
                           DmEventPusher eventPusher) {
         this.conversationRepository = conversationRepository;
         this.stateRepository = stateRepository;
         this.messageRepository = messageRepository;
+        this.carTagRepository = carTagRepository;
         this.profileService = profileService;
+        this.garageService = garageService;
         this.presenceService = presenceService;
         this.eventPublisher = eventPublisher;
         this.eventPusher = eventPusher;
@@ -146,7 +163,7 @@ public class DmsServiceImpl implements DmsService {
                 .map(DmParticipantStateEntity::getLastReadMessageId)
                 .orElse(null);
 
-        return new DmMessagePageDto(page.stream().map(this::toDto).toList(), nextCursor, peerLastRead);
+        return new DmMessagePageDto(toDtos(page), nextCursor, peerLastRead);
     }
 
     @Override
@@ -156,9 +173,22 @@ public class DmsServiceImpl implements DmsService {
         if (senderId.equals(recipientId)) {
             throw new CannotMessageSelfException();
         }
+
+        // content is optional: a car-only message is valid, but an entirely empty one is not.
+        String content = request.content() == null ? "" : request.content().strip();
+        List<UUID> carIds = distinctIds(request.taggedCarIds());
+        if (carIds.size() > MAX_TAGGED_CARS) {
+            throw new TooManyTaggedCarsException(MAX_TAGGED_CARS);
+        }
+        if (content.isBlank() && carIds.isEmpty()) {
+            throw new EmptyMessageException();
+        }
+
         if (profileService.findByIds(List.of(recipientId)).isEmpty()) {
             throw new DmRecipientNotFoundException(recipientId);
         }
+        // Resolve (and validate the existence of) the tagged cars before touching the DB.
+        List<CarSummaryDto> taggedCars = resolveTaggedCars(carIds);
 
         DmConversationEntity conversation = findOrCreateConversation(senderId, recipientId);
 
@@ -166,18 +196,22 @@ public class DmsServiceImpl implements DmsService {
         message.setId(UUID.randomUUID());
         message.setConversationId(conversation.getId());
         message.setSenderId(senderId);
-        message.setContent(request.content().strip());
+        message.setContent(content); // dm_messages.content is NOT NULL; '' for a car-only message
         message.setCreatedAt(Instant.now());
         messageRepository.save(message);
 
+        insertTaggedCars(message.getId(), carIds);
+
         conversation.setLastMessageAt(message.getCreatedAt());
-        conversation.setLastMessagePreview(preview(message.getContent()));
+        // The stored preview is the raw content; a blank preview on a non-deleted latest message
+        // is the client's cue to render "shared cars".
+        conversation.setLastMessagePreview(preview(content));
         conversation.setLastMessageSenderId(senderId);
 
         stateRepository.registerIncomingMessage(conversation.getId(), recipientId);
         stateRepository.unhide(conversation.getId(), senderId);
 
-        DmMessageDto dto = toDto(message);
+        DmMessageDto dto = toDto(message, taggedCars);
         eventPublisher.publishEvent(new DmMessageCreatedEvent(dto, recipientId, senderId));
         return dto;
     }
@@ -291,14 +325,88 @@ public class DmsServiceImpl implements DmsService {
         return content.length() <= PREVIEW_LENGTH ? content : content.substring(0, PREVIEW_LENGTH);
     }
 
-    private DmMessageDto toDto(DmMessageEntity message) {
+    /**
+     * Assembles a whole page of messages with a fixed, small number of queries regardless of page
+     * size (no N+1): one batch load of the page's car-tag rows and one
+     * {@code garageService.findCarsByIds} covering every tagged car. Deleted messages carry no
+     * tags (same rule as their blanked content), so they never enter the lookup.
+     */
+    private List<DmMessageDto> toDtos(List<DmMessageEntity> messages) {
+        if (messages.isEmpty()) {
+            return List.of();
+        }
+
+        List<UUID> liveMessageIds = messages.stream()
+                .filter(m -> !m.isDeleted())
+                .map(DmMessageEntity::getId)
+                .toList();
+        Map<UUID, List<UUID>> carIdsByMessage = liveMessageIds.isEmpty()
+                ? Map.of()
+                : carTagRepository.findAllByIdMessageIdIn(liveMessageIds).stream()
+                        .collect(Collectors.groupingBy(t -> t.getId().getMessageId(),
+                                Collectors.mapping(t -> t.getId().getCarId(), Collectors.toList())));
+
+        Set<UUID> allCarIds = new HashSet<>();
+        carIdsByMessage.values().forEach(allCarIds::addAll);
+        Map<UUID, CarSummaryDto> cars = allCarIds.isEmpty()
+                ? Map.of()
+                : garageService.findCarsByIds(allCarIds).stream()
+                        .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
+
+        return messages.stream()
+                .map(m -> {
+                    List<CarSummaryDto> taggedCars = m.isDeleted()
+                            ? List.of()
+                            : carIdsByMessage.getOrDefault(m.getId(), List.of()).stream()
+                                    .map(cars::get)
+                                    .filter(Objects::nonNull)
+                                    .toList();
+                    return toDto(m, taggedCars);
+                })
+                .toList();
+    }
+
+    private DmMessageDto toDto(DmMessageEntity message, List<CarSummaryDto> taggedCars) {
         return new DmMessageDto(
                 message.getId(),
                 message.getConversationId(),
                 message.getSenderId(),
                 message.getContent(),
                 message.isDeleted(),
-                message.getCreatedAt());
+                message.getCreatedAt(),
+                taggedCars);
+    }
+
+    /**
+     * Resolves the tagged cars through the garage public API, preserving the requested order, and
+     * fails the whole send if any car id is unknown. Any user's car may be tagged (owners are
+     * neither tagged nor notified).
+     */
+    private List<CarSummaryDto> resolveTaggedCars(List<UUID> carIds) {
+        if (carIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, CarSummaryDto> byId = garageService.findCarsByIds(carIds).stream()
+                .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
+        if (byId.size() != carIds.size()) {
+            throw new TaggedCarNotFoundException();
+        }
+        return carIds.stream().map(byId::get).toList();
+    }
+
+    private void insertTaggedCars(UUID messageId, List<UUID> carIds) {
+        for (UUID carId : carIds) {
+            DmMessageCarTagEntity tag = new DmMessageCarTagEntity();
+            tag.setId(new DmMessageCarTagId(messageId, carId));
+            carTagRepository.save(tag);
+        }
+    }
+
+    private static List<UUID> distinctIds(List<UUID> ids) {
+        if (ids == null) {
+            return List.of();
+        }
+        return ids.stream().filter(Objects::nonNull).distinct().toList();
     }
 
     /**

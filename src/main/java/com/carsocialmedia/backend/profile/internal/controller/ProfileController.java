@@ -3,8 +3,12 @@ package com.carsocialmedia.backend.profile.internal.controller;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
 import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
+import com.carsocialmedia.backend.profile.dto.AvatarUpdateRequest;
 import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
+import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
+import com.carsocialmedia.backend.profile.dto.LanguageUpdateRequest;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
+import com.carsocialmedia.backend.profile.dto.ProfileEditRequest;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesRequest;
 import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
@@ -64,6 +68,35 @@ class ProfileController {
     @GetMapping("/me")
     public ProfileDto getProfile(@AuthenticationPrincipal Jwt jwt) {
         return profileService.getProfile(jwt.getSubject());
+    }
+
+    @PatchMapping("/me")
+    public ProfileDto updateProfile(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody ProfileEditRequest request
+    ) {
+        return profileService.updateProfile(jwt.getSubject(), request);
+    }
+
+    @PatchMapping("/me/avatar")
+    public ProfileDto updateAvatar(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody AvatarUpdateRequest request
+    ) {
+        return profileService.updateAvatar(jwt.getSubject(), request.key());
+    }
+
+    @GetMapping("/language-options")
+    public List<LanguageOptionDto> getLanguageOptions() {
+        return profileService.listLanguageOptions();
+    }
+
+    @PatchMapping("/me/language")
+    public ProfileDto updateLanguage(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody LanguageUpdateRequest request
+    ) {
+        return profileService.updateLanguage(jwt.getSubject(), request.languageId());
     }
 
     @PatchMapping("/me/location")

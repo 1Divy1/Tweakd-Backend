@@ -156,6 +156,25 @@ shared reporting model.
 `ForumThreadReadEntity`→`forum_thread_reads` (composite PK thread_id+user_id; upserted on
 `getThread` to track per-user read state), `ForumShortcutEntity`→`forum_shortcuts`.
 
+## Domain events published
+
+For in-app notifications, the service publishes small Spring events (in the forums public API root
+package) inside the `@Transactional` write methods; events carry ids only. Skipped at the **publish
+site** (so consumers never see them): self-actions, and actions whose recipient is an **anonymized**
+(soft-deleted) thread's hidden author. The `notification` module consumes these; nothing depends
+back on forums.
+
+| Event | Published by | When | Recipient |
+|---|---|---|---|
+| `ForumThreadRepliedEvent(threadId, replyId, recipientId, actorId, excerpt)` | `addReply` (root reply) | reply with no parent | thread author |
+| `ForumReplyRepliedEvent(threadId, parentReplyId, replyId, recipientId, actorId, excerpt)` | `addReply` (nested reply) | reply under a parent reply | **parent reply author only** (never the thread author too) |
+| `ForumThreadLikedEvent(threadId, recipientId, actorId)` | `likeThread` | only when the `ON CONFLICT` insert affected a row | thread author |
+| `ForumReplyLikedEvent(replyId, threadId, recipientId, actorId)` | `likePost` (reply like) | only when the `ON CONFLICT` insert affected a row | reply author |
+
+To make "only on a real like" observable, `ForumThreadLikeRepository.insertIgnoringConflict` and
+`ForumPostLikeRepository.insertIgnoringConflict` now **return `int`** (rows inserted: 1 = new like,
+0 = already liked) instead of `void`.
+
 ## Cross-module dependency
 
 `forums → profile` (author `findByIds`), `forums → garage` (added

@@ -15,6 +15,15 @@ public interface StorageService {
     UploadUrlResponse galleryUploadUrlRequest(UUID carId);
 
     /**
+     * Issues a presigned PUT URL for the given user's avatar image. Flutter uploads directly to R2
+     * and then sends the returned {@code key} back to the profile module to persist.
+     *
+     * @param userId the profile the avatar belongs to (used to namespace the R2 key)
+     * @return a {@code {key, uploadUrl}} slot
+     */
+    UploadUrlResponse avatarUploadUrlRequest(UUID userId);
+
+    /**
      * Issues a batch of presigned PUT URLs for a post's images in one call. Flutter uploads each
      * image directly to R2 and then sends the returned {@code key}s back to the posts module to
      * persist. Replaces N single-image round-trips for a multi-image post.

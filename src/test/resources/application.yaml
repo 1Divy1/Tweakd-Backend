@@ -1,0 +1,51 @@
+# Test configuration. Shadows src/main/resources/application.yaml on the test classpath,
+# so it must be self-contained: no .env import, no real credentials, no network.
+#
+# The datasource is intentionally absent — Testcontainers supplies it via @ServiceConnection
+# (see testsupport/AbstractPostgresIT). Tests must never touch the live Supabase DB.
+
+supabase:
+  # Dummy values; SupabaseAuthAdminClient is constructed but never called in tests.
+  url: http://localhost:54321
+  secret-key: test-secret-key
+  auth:
+    issuer: ${supabase.url}/auth/v1
+
+cloudflare:
+  r2:
+    account-id: test-account
+    access-key: test-access-key
+    secret-key: test-secret
+    presign-expiry-minutes: 15
+    garage:
+      bucket: test-garage-bucket
+      public-url: http://localhost:9000/test-garage-bucket
+    posts:
+      bucket: test-posts-bucket
+      public-url: http://localhost:9000/test-posts-bucket
+    avatars:
+      bucket: test-avatars-bucket
+      public-url: http://localhost:9000/test-avatars-bucket
+
+spring:
+  application:
+    name: backend
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Resolved lazily by Boot — never fetched because tests fabricate JWTs with
+          # spring-security-test instead of presenting real tokens.
+          issuer-uri: ${supabase.auth.issuer}
+
+  jpa:
+    show-sql: false
+    open-in-view: false
+    hibernate:
+      # Keep validate: booting the context against the schema.sql dump proves every
+      # JPA entity matches the real Supabase schema.
+      ddl-auto: validate

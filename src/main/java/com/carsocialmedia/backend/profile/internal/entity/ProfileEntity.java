@@ -1,8 +1,5 @@
 package com.carsocialmedia.backend.profile.internal.entity;
 
-import com.carsocialmedia.backend.profile.dto.ProfileDto;
-import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
-import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -41,7 +38,7 @@ public class ProfileEntity {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
-    @Column(name = "bio", length = 2000)
+    @Column(name = "bio", length = 500)
     private String bio;
 
     @Column(name = "external_link")
@@ -69,6 +66,10 @@ public class ProfileEntity {
     @Column(name = "discovery_radius_km")
     private Integer discoveryRadiusKm;
 
+    /** UI language code (e.g. {@code "en"}, {@code "ro"}); FK to {@code app_language_options.id}. */
+    @Column(name = "app_language")
+    private String appLanguage;
+
     @JdbcTypeCode(SqlTypes.GEOGRAPHY)
     @Column(name = "realtime_location", columnDefinition = "geography")
     private Point realtimeLocation;
@@ -84,26 +85,4 @@ public class ProfileEntity {
     /** DB-managed: backfilled from auth signup; DEFAULT now() for new rows. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private java.time.Instant createdAt;
-
-    public ProfileDto toDto() {
-        return new ProfileDto(
-                id, role, name, username, avatarUrl, bio,
-                externalLink, followersCount, followingCount,
-                isVerified, isBusiness, requiresOnboarding,
-                city.getId(),
-                discoveryRadiusKm
-        );
-    }
-
-    public ProfileSearchResultDto toSearchResultDto() {
-        return new ProfileSearchResultDto(id, username, avatarUrl);
-    }
-
-    public PublicProfileDto toPublicDto() {
-        return new PublicProfileDto(
-                id, name, username, avatarUrl, bio,
-                externalLink, followersCount, followingCount,
-                isVerified, isBusiness
-        );
-    }
 }
