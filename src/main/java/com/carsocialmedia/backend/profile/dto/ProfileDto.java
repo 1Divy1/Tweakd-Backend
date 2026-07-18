@@ -16,5 +16,6 @@ public record ProfileDto(
         boolean isBusiness,
         boolean requiresOnboarding,
         String cityId,
-        Integer discoveryRadiusKm
+        Integer discoveryRadiusKm,
+        String appLanguage
 ) {}

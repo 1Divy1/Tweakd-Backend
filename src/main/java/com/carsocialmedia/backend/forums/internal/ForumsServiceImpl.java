@@ -1,5 +1,9 @@
 package com.carsocialmedia.backend.forums.internal;
 
+import com.carsocialmedia.backend.forums.ForumReplyLikedEvent;
+import com.carsocialmedia.backend.forums.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.ForumThreadLikedEvent;
+import com.carsocialmedia.backend.forums.ForumThreadRepliedEvent;
 import com.carsocialmedia.backend.forums.ForumsService;
 import com.carsocialmedia.backend.forums.dto.CursorPage;
 import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
@@ -52,6 +56,7 @@ import com.carsocialmedia.backend.report.dto.ReportReasonDto;
 import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -92,6 +97,10 @@ public class ForumsServiceImpl implements ForumsService {
     private final ProfileService profileService;
     private final GarageService garageService;
     private final ReportService reportService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    /** Max length of the reply excerpt carried in a notification body. */
+    private static final int EXCERPT_MAX_LENGTH = 80;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -107,7 +116,8 @@ public class ForumsServiceImpl implements ForumsService {
                              ForumShortcutRepository shortcutRepository,
                              ProfileService profileService,
                              GarageService garageService,
-                             ReportService reportService) {
+                             ReportService reportService,
+                             ApplicationEventPublisher eventPublisher) {
         this.topicRepository = topicRepository;
         this.threadRepository = threadRepository;
         this.postRepository = postRepository;
@@ -120,6 +130,7 @@ public class ForumsServiceImpl implements ForumsService {
         this.profileService = profileService;
         this.garageService = garageService;
         this.reportService = reportService;
+        this.eventPublisher = eventPublisher;
     }
 
     // -------------------------------------------------------------------
@@ -407,6 +418,7 @@ public class ForumsServiceImpl implements ForumsService {
         }
 
         UUID parentId = request.parentPostId();
+        UUID parentAuthorId = null;
         if (parentId != null) {
             ForumThreadReplyEntity parent = postRepository.findById(parentId)
                     .orElseThrow(() -> new ForumPostNotFoundException(parentId));
@@ -416,6 +428,7 @@ public class ForumsServiceImpl implements ForumsService {
             if (parent.isDeleted()) {
                 throw new ForumPostDeletedException(parentId);
             }
+            parentAuthorId = parent.getUserId();
         }
 
         UUID postId = UUID.randomUUID();
@@ -438,6 +451,19 @@ public class ForumsServiceImpl implements ForumsService {
 
         ForumThreadReplyEntity hydrated = postRepository.findById(postId)
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
+
+        String excerpt = excerpt(request.content());
+        if (parentId == null) {
+            // Root reply -> notify the thread author (skipped if the thread is anonymized).
+            UUID recipient = thread.isDeleted() ? null : thread.getUserId();
+            publishSocialEvent(recipient, userId,
+                    new ForumThreadRepliedEvent(threadId, postId, recipient, userId, excerpt));
+        } else {
+            // Nested reply -> notify the PARENT reply's author only (never the thread author too).
+            publishSocialEvent(parentAuthorId, userId,
+                    new ForumReplyRepliedEvent(threadId, parentId, postId, parentAuthorId, userId, excerpt));
+        }
+
         return toReplyDtos(List.of(hydrated), userId, thread.getUserId()).getFirst();
     }
 
@@ -474,9 +500,14 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public void likeThread(String currentUserId, UUID threadId) {
         UUID userId = UUID.fromString(currentUserId);
-        loadThread(threadId);
+        ForumThreadEntity thread = loadThread(threadId);
         // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
-        threadLikeRepository.insertIgnoringConflict(threadId, userId);
+        int inserted = threadLikeRepository.insertIgnoringConflict(threadId, userId);
+        if (inserted == 1) {
+            // Only a real (first) like notifies; skipped if the thread is anonymized.
+            UUID recipient = thread.isDeleted() ? null : thread.getUserId();
+            publishSocialEvent(recipient, userId, new ForumThreadLikedEvent(threadId, recipient, userId));
+        }
     }
 
     @Override
@@ -496,7 +527,12 @@ public class ForumsServiceImpl implements ForumsService {
             throw new ForumPostDeletedException(postId);
         }
         // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
-        postLikeRepository.insertIgnoringConflict(postId, userId);
+        int inserted = postLikeRepository.insertIgnoringConflict(postId, userId);
+        if (inserted == 1) {
+            // Only a real (first) like notifies. A likeable reply is never deleted (checked above).
+            publishSocialEvent(post.getUserId(), userId,
+                    new ForumReplyLikedEvent(postId, post.getThreadId(), post.getUserId(), userId));
+        }
     }
 
     @Override
@@ -1051,6 +1087,29 @@ public class ForumsServiceImpl implements ForumsService {
 
     private static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.strip();
+    }
+
+    /**
+     * Publishes a social-notification event unless it would be a self-notification, or the recipient
+     * is absent (a {@code null} recipient means the target content is anonymized / its author hidden).
+     * The self-notify and null-recipient skips live here, one consistent place: the
+     * {@code notification} listener assumes any event it receives has a real, non-actor recipient.
+     */
+    private void publishSocialEvent(UUID recipientId, UUID actorId, Object event) {
+        if (recipientId != null && !recipientId.equals(actorId)) {
+            eventPublisher.publishEvent(event);
+        }
+    }
+
+    /** Trims reply text to a short notification-body excerpt, or {@code null} if blank. */
+    private static String excerpt(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String trimmed = text.strip();
+        return trimmed.length() <= EXCERPT_MAX_LENGTH
+                ? trimmed
+                : trimmed.substring(0, EXCERPT_MAX_LENGTH) + "…";
     }
 
     private static List<String> distinct(List<String> values) {

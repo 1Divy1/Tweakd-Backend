@@ -142,6 +142,23 @@ A global feed endpoint is still pending, but it now only needs its own keyset qu
 | `PostLikeEntity` / `SavedPostEntity` / `PostShareEntity` | Composite-PK engagement rows |
 | `CommentEntity` / `CommentLikeEntity` | Threaded comments (self-ref `parent_comment_id`) and their likes |
 
+## Domain events published
+
+For in-app notifications, the service publishes small Spring events (in the posts public API root
+package) at the point an engagement is known to have happened, inside the `@Transactional` method
+(so an after-commit listener never fires on a rollback). Events carry ids only — no DTOs/entities.
+The **self-notify skip** (actor == post author) lives at the publish site, so consumers never see a
+self-event. The `notification` module consumes these; nothing depends back on posts.
+
+| Event | Published by | When | Recipient |
+|---|---|---|---|
+| `PostLikedEvent(postId, recipientId, actorId)` | `likePost` | only on a real first like (not on a duplicate) | post author |
+| `PostCommentedEvent(postId, commentId, recipientId, actorId, excerpt)` | `addComment` | any comment or reply, whatever the nesting | post author |
+| `PostSharedEvent(postId, recipientId, actorId)` | `sharePost` | only on a real first share (plain or quote) | post author |
+
+Note: `likePost` / `sharePost` / `addComment` now load the post row (for the author id) instead of a
+bare existence check.
+
 ## Cross-module dependencies
 
 - **`profile.ProfileService.findByIds`** — resolve the author and tagged people.

@@ -51,6 +51,16 @@ public class StorageServiceImpl implements StorageService {
         return buildUploadUrlResponse(config.getGarage(), key, FileFormat.WEBP);
     }
 
+    // === AVATARS ===
+    // avatars/{userId}/{uuid}.webp
+    @Override
+    public UploadUrlResponse avatarUploadUrlRequest(UUID userId) {
+        String key = "avatars/" + userId +
+                "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
+
+        return buildUploadUrlResponse(config.getAvatars(), key, FileFormat.WEBP);
+    }
+
     // === POSTS ===
 
     // posts/{postId}/{uuid}.webp  (one per requested image)

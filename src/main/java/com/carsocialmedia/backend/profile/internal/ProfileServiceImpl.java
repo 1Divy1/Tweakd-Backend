@@ -6,7 +6,9 @@ import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
 import com.carsocialmedia.backend.profile.dto.CityDto;
 import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.profile.dto.CountryDto;
+import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
+import com.carsocialmedia.backend.profile.dto.ProfileEditRequest;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesRequest;
 import com.carsocialmedia.backend.profile.dto.OnboardingRequest;
@@ -23,9 +25,13 @@ import com.carsocialmedia.backend.profile.exception.UsernameAlreadyTakenExceptio
 import com.carsocialmedia.backend.profile.internal.entity.*;
 import com.carsocialmedia.backend.profile.internal.repository.*;
 import com.carsocialmedia.backend.report.ReportService;
+import com.carsocialmedia.backend.storage.StorageBucket;
+import com.carsocialmedia.backend.storage.StorageService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -44,7 +50,10 @@ class ProfileServiceImpl implements ProfileService {
     private final NotificationPreferencesRepository notificationPreferencesRepository;
     private final ProfileCarCategoryRepository profileCarCategoryRepository;
     private final ProfileCommunityRoleRepository profileCommunityRoleRepository;
+    private final LanguageOptionRepository languageOptionRepository;
     private final ReportService reportService;
+    private final StorageService storageService;
+    private final ProfileDtoMapper mapper;
     private final BanCache banCache;
 
     ProfileServiceImpl(ProfileRepository profileRepository,
@@ -55,7 +64,10 @@ class ProfileServiceImpl implements ProfileService {
                        NotificationPreferencesRepository notificationPreferencesRepository,
                        ProfileCarCategoryRepository profileCarCategoryRepository,
                        ProfileCommunityRoleRepository profileCommunityRoleRepository,
+                       LanguageOptionRepository languageOptionRepository,
                        ReportService reportService,
+                       StorageService storageService,
+                       ProfileDtoMapper mapper,
                        BanCache banCache) {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
@@ -65,17 +77,19 @@ class ProfileServiceImpl implements ProfileService {
         this.notificationPreferencesRepository = notificationPreferencesRepository;
         this.profileCarCategoryRepository = profileCarCategoryRepository;
         this.profileCommunityRoleRepository = profileCommunityRoleRepository;
+        this.languageOptionRepository = languageOptionRepository;
         this.reportService = reportService;
+        this.storageService = storageService;
+        this.mapper = mapper;
         this.banCache = banCache;
     }
 
     @Override
     @Transactional(readOnly = true)
     public ProfileDto getProfile(String userId) {
-        return profileRepository
+        return mapper.toDto(profileRepository
                 .findById(UUID.fromString(userId))
-                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId))
-                .toDto();
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId)));
     }
 
     @Override
@@ -112,16 +126,49 @@ class ProfileServiceImpl implements ProfileService {
         replaceCommunityRoles(id, request.roleIds());
         ensureDefaultNotificationPreferences(id);
 
-        return profile.toDto();
+        return mapper.toDto(profile);
+    }
+
+    @Override
+    @Transactional
+    public ProfileDto updateProfile(String userId, ProfileEditRequest request) {
+        ProfileEntity profile = profileRepository
+                .findById(UUID.fromString(userId))
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
+        if (request.name() != null) {
+            profile.setName(request.name());
+        }
+        if (request.bio() != null) {
+            profile.setBio(request.bio());
+        }
+        profileRepository.save(profile);
+        return mapper.toDto(profile);
+    }
+
+    @Override
+    @Transactional
+    public ProfileDto updateAvatar(String userId, String key) {
+        // Upload URLs namespace keys per user; accepting anything else would let a caller point
+        // their profile at (and later after-commit-delete) another user's object.
+        if (!key.startsWith("avatars/" + userId + "/")) {
+            throw new InvalidReferenceException("Avatar key does not belong to the caller");
+        }
+        ProfileEntity profile = profileRepository
+                .findById(UUID.fromString(userId))
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
+        String previous = profile.getAvatarUrl();
+        profile.setAvatarUrl(key);
+        profileRepository.save(profile);
+        deleteAvatarAfterCommit(previous);
+        return mapper.toDto(profile);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PublicProfileDto getPublicProfileByUsername(String username) {
-        return profileRepository
+        return mapper.toPublicDto(profileRepository
                 .findByUsername(username)
-                .orElseThrow(() -> ProfileNotFoundException.byUsername(username))
-                .toPublicDto();
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username)));
     }
 
     @Override
@@ -133,7 +180,7 @@ class ProfileServiceImpl implements ProfileService {
         return profileRepository
                 .findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc(prefix)
                 .stream()
-                .map(ProfileEntity::toSearchResultDto)
+                .map(mapper::toSearchResultDto)
                 .toList();
     }
 
@@ -151,7 +198,7 @@ class ProfileServiceImpl implements ProfileService {
         }
         return profileRepository.findAllByIdIn(ids)
                 .stream()
-                .map(ProfileEntity::toSearchResultDto)
+                .map(mapper::toSearchResultDto)
                 .toList();
     }
 
@@ -174,7 +221,7 @@ class ProfileServiceImpl implements ProfileService {
                         profile.getId(),
                         profile.getUsername(),
                         profile.getName(),
-                        profile.getAvatarUrl(),
+                        mapper.resolveAvatarUrl(profile.getAvatarUrl()),
                         profile.getFollowersCount(),
                         profile.isBusiness(),
                         profile.isBanned(),
@@ -232,6 +279,27 @@ class ProfileServiceImpl implements ProfileService {
                 .stream().map(CarCategoryOptionEntity::toDto).toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<LanguageOptionDto> listLanguageOptions() {
+        return languageOptionRepository.findAllByOrderByLanguageAsc()
+                .stream().map(LanguageOptionEntity::toDto).toList();
+    }
+
+    @Override
+    @Transactional
+    public ProfileDto updateLanguage(String userId, String languageId) {
+        ProfileEntity profile = profileRepository
+                .findById(UUID.fromString(userId))
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
+        if (!languageOptionRepository.existsById(languageId)) {
+            throw new InvalidReferenceException("Unknown language: " + languageId);
+        }
+        profile.setAppLanguage(languageId);
+        profileRepository.save(profile);
+        return mapper.toDto(profile);
+    }
+
     // ---- location ----------------------------------------------------------
 
     @Override
@@ -242,7 +310,7 @@ class ProfileServiceImpl implements ProfileService {
                 .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
         applyLocation(profile, request.cityId(), request.discoveryRadiusKm());
         profileRepository.save(profile);
-        return profile.toDto();
+        return mapper.toDto(profile);
     }
 
     @Override
@@ -329,6 +397,17 @@ class ProfileServiceImpl implements ProfileService {
         return notificationPreferencesRepository.save(prefs).toDto();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public NotificationPreferencesDto getNotificationPreferencesOrDefault(UUID userId) {
+        // Read-only, no lazy row creation and no 404: a missing preferences row — or a missing
+        // profile — reads as all-enabled (the module default), so an async notification listener
+        // never fails on a vanished recipient.
+        return notificationPreferencesRepository.findById(userId)
+                .map(NotificationPreferencesEntity::toDto)
+                .orElseGet(() -> new NotificationPreferencesDto(true, true, true, true, true, true, true));
+    }
+
     // ---- reporting ---------------------------------------------------------
 
     @Override
@@ -395,6 +474,23 @@ class ProfileServiceImpl implements ProfileService {
         prefs.setProfileId(profileId);
         prefs.setUpdatedAt(Instant.now());
         return prefs;
+    }
+
+    /**
+     * If {@code previous} was an R2 object key (non-blank and not a legacy {@code http} URL), registers
+     * an after-commit callback to delete it from R2. Mirrors the posts module: deletion runs only if the
+     * DB transaction commits, and a failed R2 delete just leaves an orphaned object (DB stays consistent).
+     */
+    private void deleteAvatarAfterCommit(String previous) {
+        if (previous == null || previous.isBlank() || previous.startsWith("http")) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                storageService.deleteByKeys(StorageBucket.AVATARS, List.of(previous));
+            }
+        });
     }
 
     private void requireProfile(UUID id, String userId) {

@@ -8,6 +8,8 @@ import com.carsocialmedia.backend.storage.internal.enums.FileFormat;
 import com.carsocialmedia.backend.storage.internal.enums.ModificationPhase;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -18,6 +20,13 @@ import java.util.UUID;
 public class StorageController {
 
     private final StorageService storageService;
+
+    // ----- AVATARS -----
+
+    @GetMapping("/avatar")
+    public UploadUrlResponse avatar(@AuthenticationPrincipal Jwt jwt) {
+        return storageService.avatarUploadUrlRequest(UUID.fromString(jwt.getSubject()));
+    }
 
     // ----- CARS -----
 
