@@ -586,6 +586,37 @@ class ProfileServiceImplTest {
     }
 
     @Test
+    void getNotificationPreferencesOrDefaultReturnsStoredRowWithoutWriting() {
+        NotificationPreferencesEntity prefs = new NotificationPreferencesEntity();
+        prefs.setProfileId(USER);
+        prefs.setLikesEnabled(false);
+        prefs.setSharesEnabled(false);
+        when(notificationPreferencesRepository.findById(USER)).thenReturn(Optional.of(prefs));
+
+        NotificationPreferencesDto dto = service.getNotificationPreferencesOrDefault(USER);
+
+        assertThat(dto.likesEnabled()).isFalse();
+        assertThat(dto.sharesEnabled()).isFalse();
+        assertThat(dto.commentsEnabled()).isTrue();
+        verify(notificationPreferencesRepository, never()).save(any());
+    }
+
+    @Test
+    void getNotificationPreferencesOrDefaultReadsAllEnabledWhenMissingRowWithoutWritingOrThrowing() {
+        // A missing preferences row must behave like the module default (all enabled) — and, unlike
+        // getNotificationPreferences, it must neither lazily create the row nor touch the profile.
+        when(notificationPreferencesRepository.findById(USER)).thenReturn(Optional.empty());
+
+        NotificationPreferencesDto dto = service.getNotificationPreferencesOrDefault(USER);
+
+        assertThat(dto.likesEnabled()).isTrue();
+        assertThat(dto.commentsEnabled()).isTrue();
+        assertThat(dto.sharesEnabled()).isTrue();
+        verify(notificationPreferencesRepository, never()).save(any());
+        verify(profileRepository, never()).existsById(any());
+    }
+
+    @Test
     void updateNotificationPreferencesReplacesEveryToggle() {
         NotificationPreferencesEntity prefs = new NotificationPreferencesEntity();
         prefs.setProfileId(USER);

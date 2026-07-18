@@ -16,6 +16,9 @@ public interface ForumThreadLikeRepository extends JpaRepository<ForumThreadLike
      * {@code ON CONFLICT DO NOTHING} makes concurrent double-taps race-safe — a plain
      * exists-then-insert can have both requests pass the check and the loser blow up on the
      * composite-PK constraint.
+     *
+     * @return the number of rows inserted: {@code 1} for a genuinely new like, {@code 0} when the
+     *         like already existed (so the caller can notify only on a real like).
      */
     @Modifying
     @Query(value = """
@@ -23,7 +26,7 @@ public interface ForumThreadLikeRepository extends JpaRepository<ForumThreadLike
             values (:threadId, :userId)
             on conflict do nothing
             """, nativeQuery = true)
-    void insertIgnoringConflict(@Param("threadId") UUID threadId, @Param("userId") UUID userId);
+    int insertIgnoringConflict(@Param("threadId") UUID threadId, @Param("userId") UUID userId);
 
     void deleteByIdThreadIdAndIdUserId(UUID threadId, UUID userId);
 }
