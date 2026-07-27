@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.forums;
+package com.carsocialmedia.backend.forums.events;
 
 import java.util.UUID;
 

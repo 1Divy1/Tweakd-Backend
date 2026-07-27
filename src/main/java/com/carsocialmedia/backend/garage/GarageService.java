@@ -55,7 +55,7 @@ public interface GarageService {
      * badge). Missing IDs are silently omitted; ordering is not guaranteed.
      *
      * @param ids the brand IDs to resolve
-     * @return the matching brands (may be smaller than {@code ids})
+     * @return the matching brands (could be smaller than {@code ids})
      */
     List<CarBrandDto> findBrandsByIds(Collection<UUID> ids);
 
@@ -65,7 +65,7 @@ public interface GarageService {
      * a thread's model badge). Missing IDs are silently omitted; ordering is not guaranteed.
      *
      * @param ids the model IDs to resolve
-     * @return the matching models (may be smaller than {@code ids})
+     * @return the matching models (could be smaller than {@code ids})
      */
     List<CarModelDto> findModelsByIds(Collection<UUID> ids);
 

@@ -1,9 +1,9 @@
 package com.carsocialmedia.backend.forums.internal;
 
-import com.carsocialmedia.backend.forums.ForumReplyLikedEvent;
-import com.carsocialmedia.backend.forums.ForumReplyRepliedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadLikedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadRepliedEvent;
 import com.carsocialmedia.backend.forums.dto.request.CreateReplyRequest;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadReplyEntity;
@@ -15,7 +15,7 @@ import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadReadRe
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadSaveRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicRepository;
-import com.carsocialmedia.backend.forums.internal.repositories.ForumTopicRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicOptionsRepository;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.report.ReportService;
@@ -90,7 +90,7 @@ class ForumsNotificationPublishingTest {
         eventPublisher = mock(ApplicationEventPublisher.class);
 
         service = new ForumsServiceImpl(
-                mock(ForumTopicRepository.class),
+                mock(ForumThreadTopicOptionsRepository.class),
                 threadRepository,
                 postRepository,
                 mock(ForumThreadTopicRepository.class),

@@ -1,9 +1,9 @@
 package com.carsocialmedia.backend.notification.internal;
 
-import com.carsocialmedia.backend.forums.ForumReplyLikedEvent;
-import com.carsocialmedia.backend.forums.ForumReplyRepliedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadLikedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadRepliedEvent;
 import com.carsocialmedia.backend.notification.NotificationService;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;

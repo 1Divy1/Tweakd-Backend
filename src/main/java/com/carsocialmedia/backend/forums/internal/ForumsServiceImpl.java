@@ -1,9 +1,9 @@
 package com.carsocialmedia.backend.forums.internal;
 
-import com.carsocialmedia.backend.forums.ForumReplyLikedEvent;
-import com.carsocialmedia.backend.forums.ForumReplyRepliedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadLikedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadRepliedEvent;
 import com.carsocialmedia.backend.forums.ForumsService;
 import com.carsocialmedia.backend.forums.dto.CursorPage;
 import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
@@ -12,7 +12,6 @@ import com.carsocialmedia.backend.forums.dto.ShortcutDto;
 import com.carsocialmedia.backend.forums.dto.ThreadCardDto;
 import com.carsocialmedia.backend.forums.dto.ThreadDetailDto;
 import com.carsocialmedia.backend.forums.dto.TopicDto;
-import com.carsocialmedia.backend.forums.dto.TopicGroupDto;
 import com.carsocialmedia.backend.forums.dto.request.CreateReplyRequest;
 import com.carsocialmedia.backend.forums.dto.request.CreateShortcutRequest;
 import com.carsocialmedia.backend.forums.dto.request.CreateThreadRequest;
@@ -36,7 +35,7 @@ import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadSaveEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicId;
-import com.carsocialmedia.backend.forums.internal.entities.ForumTopicEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicOptionsEntity;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostLikeRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumShortcutRepository;
@@ -45,7 +44,7 @@ import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadReadRe
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadSaveRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicRepository;
-import com.carsocialmedia.backend.forums.internal.repositories.ForumTopicRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicOptionsRepository;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
@@ -66,7 +65,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -85,7 +83,7 @@ public class ForumsServiceImpl implements ForumsService {
     private static final int DEFAULT_SUGGESTIONS = 10;
     private static final int MAX_SUGGESTIONS = 50;
 
-    private final ForumTopicRepository topicRepository;
+    private final ForumThreadTopicOptionsRepository topicRepository;
     private final ForumThreadRepository threadRepository;
     private final ForumPostRepository postRepository;
     private final ForumThreadTopicRepository threadTopicRepository;
@@ -105,7 +103,7 @@ public class ForumsServiceImpl implements ForumsService {
     @PersistenceContext
     private EntityManager entityManager;
 
-    public ForumsServiceImpl(ForumTopicRepository topicRepository,
+    public ForumsServiceImpl(ForumThreadTopicOptionsRepository topicRepository,
                              ForumThreadRepository threadRepository,
                              ForumPostRepository postRepository,
                              ForumThreadTopicRepository threadTopicRepository,
@@ -139,15 +137,11 @@ public class ForumsServiceImpl implements ForumsService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TopicGroupDto> listTopics() {
-        // Rows arrive ordered by kind then sort_order, so a LinkedHashMap preserves both the group
-        // order and the intra-group order without re-sorting.
-        Map<String, List<TopicDto>> byKind = new LinkedHashMap<>();
-        for (ForumTopicEntity topic : topicRepository.findByActiveTrueOrderByKindAscSortOrderAsc()) {
-            byKind.computeIfAbsent(topic.getKind(), k -> new ArrayList<>()).add(toTopicDto(topic));
-        }
-        return byKind.entrySet().stream()
-                .map(e -> new TopicGroupDto(e.getKey(), e.getValue()))
+    public List<TopicDto> listTopics() {
+        // A flat, curated-order list of the active topics — the client applies them as filters within
+        // a brand or brand+model hub.
+        return topicRepository.findByActiveTrueOrderBySortOrderAsc().stream()
+                .map(this::toTopicDto)
                 .toList();
     }
 
@@ -161,25 +155,21 @@ public class ForumsServiceImpl implements ForumsService {
         // it reuses the denormalized thread counts.
         List<CarBrandDto> brands = garageService.findTopBrandsByThreadCount(n);
         List<CarModelDto> models = garageService.findTopModelsByThreadCount(n);
-        List<ForumTopicEntity> topics = topicRepository
-                .findByActiveTrueAndThreadCountGreaterThanOrderByThreadCountDesc(0, PageRequest.of(0, n));
 
         // Resolve owning-brand names so a model reads as "BMW M4" (brand name = the model's subtitle).
+        // Extract brand IDs from the models, then fetch the names in one query (avoid N+1).
         Set<UUID> brandIds = models.stream().map(CarModelDto::brandId).collect(Collectors.toSet());
         Map<UUID, String> brandNames = brandIds.isEmpty() ? Map.of()
                 : garageService.findBrandsByIds(brandIds).stream()
                         .collect(Collectors.toMap(CarBrandDto::id, CarBrandDto::name));
 
-        List<ForumSuggestionDto> merged = new ArrayList<>(brands.size() + models.size() + topics.size());
+        List<ForumSuggestionDto> merged = new ArrayList<>(brands.size() + models.size());
         for (CarBrandDto b : brands) {
             merged.add(new ForumSuggestionDto("brand", b.id().toString(), b.name(), null, b.threadCount()));
         }
         for (CarModelDto m : models) {
             merged.add(new ForumSuggestionDto("model", m.id().toString(), m.model(),
                     brandNames.get(m.brandId()), m.threadCount()));
-        }
-        for (ForumTopicEntity t : topics) {
-            merged.add(new ForumSuggestionDto("topic", t.getId(), t.getName(), null, t.getThreadCount()));
         }
 
         merged.sort(Comparator.comparingInt(ForumSuggestionDto::threadCount).reversed());
@@ -198,20 +188,14 @@ public class ForumsServiceImpl implements ForumsService {
 
     @Override
     @Transactional(readOnly = true)
-    public CursorPage<ThreadCardDto> getBrandThreads(String currentUserId, UUID brandId, String sort, String cursor, int size) {
-        return listThreads(UUID.fromString(currentUserId), brandId, null, null, sort, cursor, size);
+    public CursorPage<ThreadCardDto> getBrandThreads(String currentUserId, UUID brandId, String sort, String topicId, String cursor, int size) {
+        return listThreads(UUID.fromString(currentUserId), brandId, null, blankToNull(topicId), sort, cursor, size);
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPage<ThreadCardDto> getModelThreads(String currentUserId, UUID modelId, String sort, String topicId, String cursor, int size) {
         return listThreads(UUID.fromString(currentUserId), null, modelId, blankToNull(topicId), sort, cursor, size);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public CursorPage<ThreadCardDto> getTopicThreads(String currentUserId, String topicId, String sort, UUID brandId, UUID modelId, String cursor, int size) {
-        return listThreads(UUID.fromString(currentUserId), brandId, modelId, topicId, sort, cursor, size);
     }
 
     /**
@@ -899,7 +883,7 @@ public class ForumsServiceImpl implements ForumsService {
         Set<String> allTopicIds = topicIdsByThread.values().stream()
                 .flatMap(List::stream).collect(Collectors.toSet());
         Map<String, TopicDto> topics = topicRepository.findAllById(allTopicIds).stream()
-                .collect(Collectors.toMap(ForumTopicEntity::getId, this::toTopicDto));
+                .collect(Collectors.toMap(ForumThreadTopicOptionsEntity::getId, this::toTopicDto));
 
         Set<UUID> authorIds = threads.stream()
                 .filter(t -> !t.isDeleted())
@@ -1007,7 +991,7 @@ public class ForumsServiceImpl implements ForumsService {
         Set<String> topicIds = shortcuts.stream().map(ForumShortcutEntity::getTopicId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
         Map<String, TopicDto> topics = topicRepository.findAllById(topicIds).stream()
-                .collect(Collectors.toMap(ForumTopicEntity::getId, this::toTopicDto));
+                .collect(Collectors.toMap(ForumThreadTopicOptionsEntity::getId, this::toTopicDto));
 
         return shortcuts.stream()
                 .map(s -> new ShortcutDto(
@@ -1034,8 +1018,8 @@ public class ForumsServiceImpl implements ForumsService {
         return (int) Math.min(unread, Integer.MAX_VALUE);
     }
 
-    private TopicDto toTopicDto(ForumTopicEntity topic) {
-        return new TopicDto(topic.getId(), topic.getName(), topic.getKind(), topic.getSortOrder(),
+    private TopicDto toTopicDto(ForumThreadTopicOptionsEntity topic) {
+        return new TopicDto(topic.getId(), topic.getName(), topic.getSortOrder(),
                 topic.getColor(), topic.getThreadCount());
     }
 
@@ -1052,7 +1036,7 @@ public class ForumsServiceImpl implements ForumsService {
         if (topicIds.isEmpty()) {
             return;
         }
-        List<ForumTopicEntity> found = topicRepository.findAllById(topicIds);
+        List<ForumThreadTopicOptionsEntity> found = topicRepository.findAllById(topicIds);
         if (found.size() != topicIds.size() || found.stream().anyMatch(t -> !t.isActive())) {
             throw new InvalidReferenceException("One or more topics do not exist or are inactive");
         }

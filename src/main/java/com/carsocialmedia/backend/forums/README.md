@@ -9,12 +9,14 @@ handled by `ForumReportController` (see [Reporting](#reporting-delegates-to-repo
 
 ## Information architecture
 
-Threads form **one pool** reached through two lenses that converge on the same intersection:
+Threads form **one pool** reached through a single primary lens, optionally refined by topic:
 
-- **By car:** brand → model (`brand_id`, then `model_id`).
-- **By topic:** via the `forum_thread_topics` junction (`topic_id`).
+- **By car (primary):** brand → model (`brand_id`, then `model_id`).
+- **By topic (refinement):** applied *within* a brand or brand+model hub via the
+  `forum_thread_topics` junction (`topic_id`). Topic is never a standalone lens — there is no
+  topic-only feed.
 
-Both combine (e.g. `model = M4 AND topic = tuning`). Every list supports three **sorts**:
+The two combine (e.g. `model = M4 AND topic = tuning`). Every list supports three **sorts**:
 
 | Sort | Order by | Cursor key |
 |---|---|---|
@@ -90,7 +92,7 @@ likes, deletes, and shortcuts CRUD. See the interface Javadoc.
 
 ### DTOs (`forums.dto`)
 
-`TopicDto`, `TopicGroupDto`, `ThreadCardDto`, `ThreadDetailDto`, `ReplyDto` (flat — children are
+`TopicDto`, `ThreadCardDto`, `ThreadDetailDto`, `ReplyDto` (flat — children are
 fetched on demand per level), `ShortcutDto`, `CursorPage<T>`. Authors reuse
 `profile.dto.ProfileSearchResultDto`; brand/model reuse `garage.dto.CarBrandDto` / `CarModelDto`.
 `notify` is exposed on the wire via `@JsonProperty` (the record component is `notifyEnabled`, since
@@ -120,11 +122,10 @@ shared reporting model.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/topics` | grouped by kind (`component`/`format`) |
+| GET | `/topics` | flat list, curated order |
 | GET | `/feed?sort=&cursor=&size=` | global |
-| GET | `/brands/{brandId}/threads?sort=&cursor=` | brand hub |
+| GET | `/brands/{brandId}/threads?sort=&topic=&cursor=` | brand hub |
 | GET | `/models/{modelId}/threads?sort=&topic=&cursor=` | model hub |
-| GET | `/topics/{topicId}/threads?sort=&brand=&model=&cursor=` | topic hub |
 | GET | `/threads/saved?cursor=` | caller's saved/bookmarked threads, newest save first |
 | GET | `/threads/{id}` | detail (incl. `viewerHasLiked`, `deleted`) |
 | GET | `/threads/{id}/replies?cursor=` | keyset page of root replies (no subtrees) |
