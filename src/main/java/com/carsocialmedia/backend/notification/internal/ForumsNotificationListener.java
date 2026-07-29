@@ -2,8 +2,10 @@ package com.carsocialmedia.backend.notification.internal;
 
 import com.carsocialmedia.backend.forums.events.ForumReplyLikedEvent;
 import com.carsocialmedia.backend.forums.events.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyTaggedEvent;
 import com.carsocialmedia.backend.forums.events.ForumThreadLikedEvent;
 import com.carsocialmedia.backend.forums.events.ForumThreadRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadTaggedEvent;
 import com.carsocialmedia.backend.notification.NotificationService;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
@@ -26,7 +28,8 @@ import java.util.UUID;
  * standard-Spring equivalent of Modulith's {@code @ApplicationModuleListener}, which isn't on the
  * classpath here), so a rolled-back reply/like never notifies. The self-notify and anonymized-author
  * skips already happened at the publish site; here we only gate on the recipient's preferences and
- * resolve the actor's username. Replies gate on {@code comments_enabled}; likes on {@code likes_enabled}.
+ * resolve the actor's username. Replies gate on {@code comments_enabled}; likes on
+ * {@code likes_enabled}; tags on {@code tags_enabled}.
  */
 @Component
 class ForumsNotificationListener {
@@ -115,6 +118,47 @@ class ForumsNotificationListener {
                 event.recipientId(),
                 "forum_reply_like",
                 username + " liked your reply",
+                null,
+                payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ForumThreadTaggedEvent event) {
+        NotificationPreferencesDto prefs = profileService.getNotificationPreferencesOrDefault(event.recipientId());
+        if (!prefs.tagsEnabled()) {
+            return;
+        }
+        String username = resolveUsername(event.actorId());
+        Map<String, Object> payload = basePayload(event.actorId(), username);
+        payload.put("thread_id", event.threadId().toString());
+        payload.put("car_tagged", event.carTagged());
+        notificationService.push(
+                event.recipientId(),
+                "forum_thread_tag",
+                username + (event.carTagged() ? " tagged your car in a thread" : " tagged you in a thread"),
+                null,
+                payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ForumReplyTaggedEvent event) {
+        NotificationPreferencesDto prefs = profileService.getNotificationPreferencesOrDefault(event.recipientId());
+        if (!prefs.tagsEnabled()) {
+            return;
+        }
+        String username = resolveUsername(event.actorId());
+        Map<String, Object> payload = basePayload(event.actorId(), username);
+        payload.put("thread_id", event.threadId().toString());
+        payload.put("reply_id", event.replyId().toString());
+        payload.put("car_tagged", event.carTagged());
+        notificationService.push(
+                event.recipientId(),
+                "forum_reply_tag",
+                username + (event.carTagged() ? " tagged your car in a reply" : " tagged you in a reply"),
                 null,
                 payload);
     }

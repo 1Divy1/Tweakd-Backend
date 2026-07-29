@@ -36,6 +36,13 @@ like→unlike→re-like makes a second row — accepted).
 | `forum_reply_reply` | someone replies to your reply | parent reply author only | `comments_enabled` | reply excerpt (≤80 chars) or `null` | `actor_id`, `actor_username`, `thread_id`, `parent_reply_id`, `reply_id` |
 | `forum_thread_like` | someone likes your thread | thread author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id` |
 | `forum_reply_like` | someone likes your reply | reply author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id` |
+| `forum_thread_tag` | you (or your car) get newly tagged in a thread | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `car_tagged` (boolean) |
+| `forum_reply_tag` | you (or your car) get newly tagged in a thread reply | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id`, `car_tagged` (boolean) |
+
+The two tag types fire on create **and** edit, but only for tags that are new (re-saving an
+unchanged tag set is silent). A tagged car's owner is always tagged as a person too, so one
+notification covers both; `car_tagged` picks the title ("… tagged your car in a thread" vs
+"… tagged you in a thread"). Posts tagging still sends no notification.
 
 `title` is a short English string embedding the actor username (e.g. `"marius_dev liked your post"`;
 falls back to `"Someone …"` if the actor profile can't be resolved). Payload keys are literal

@@ -2,6 +2,7 @@ package com.carsocialmedia.backend.forums.dto;
 
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 
 import java.time.Instant;
@@ -23,6 +24,9 @@ import java.util.UUID;
  * @param brand the car brand, or {@code null} for a general thread
  * @param model the car model, or {@code null} when the thread is brand-level or general
  * @param topics the thread's topics
+ * @param taggedPeople the profiles tagged in the thread (empty when none)
+ * @param taggedCars the cars tagged in the thread (empty when none); every car's owner is among
+ *        {@code taggedPeople} unless it belongs to the thread's author
  * @param likesCount how many users liked the thread
  * @param replyCount how many replies the thread has
  * @param lastActivityAt when the thread last saw activity (drives the "active" sort)
@@ -38,6 +42,8 @@ public record ThreadCardDto(
         CarBrandDto brand,
         CarModelDto model,
         List<TopicDto> topics,
+        List<ProfileSearchResultDto> taggedPeople,
+        List<CarSummaryDto> taggedCars,
         int likesCount,
         int replyCount,
         Instant lastActivityAt,

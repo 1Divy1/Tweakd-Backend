@@ -2,8 +2,10 @@ package com.carsocialmedia.backend.forums.internal;
 
 import com.carsocialmedia.backend.forums.events.ForumReplyLikedEvent;
 import com.carsocialmedia.backend.forums.events.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyTaggedEvent;
 import com.carsocialmedia.backend.forums.events.ForumThreadLikedEvent;
 import com.carsocialmedia.backend.forums.events.ForumThreadRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadTaggedEvent;
 import com.carsocialmedia.backend.forums.ForumsService;
 import com.carsocialmedia.backend.forums.dto.CursorPage;
 import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
@@ -20,6 +22,7 @@ import com.carsocialmedia.backend.forums.dto.request.UpdateReplyRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateShortcutRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateThreadRequest;
 import com.carsocialmedia.backend.forums.exception.CannotReportOwnForumContentException;
+import com.carsocialmedia.backend.forums.exception.CarOwnerNotTaggedException;
 import com.carsocialmedia.backend.forums.exception.ForumPostDeletedException;
 import com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException;
 import com.carsocialmedia.backend.forums.exception.InvalidReferenceException;
@@ -29,25 +32,38 @@ import com.carsocialmedia.backend.forums.exception.ShortcutNotFoundException;
 import com.carsocialmedia.backend.forums.exception.ThreadDeletedException;
 import com.carsocialmedia.backend.forums.exception.ThreadLockedException;
 import com.carsocialmedia.backend.forums.exception.ThreadNotFoundException;
+import com.carsocialmedia.backend.forums.internal.entities.ForumReplyTaggedCarEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumReplyTaggedCarId;
+import com.carsocialmedia.backend.forums.internal.entities.ForumReplyTaggedPersonEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumReplyTaggedPersonId;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadReplyEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumShortcutEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadSaveEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTaggedCarEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTaggedCarId;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTaggedPersonEntity;
+import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTaggedPersonId;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicId;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTopicOptionsEntity;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostLikeRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumReplyTaggedCarRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumReplyTaggedPersonRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumShortcutRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadLikeRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadReadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadSaveRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTaggedCarRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTaggedPersonRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicOptionsRepository;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
 import com.carsocialmedia.backend.garage.dto.CarModelDto;
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.report.ReportService;
@@ -65,6 +81,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -91,6 +108,10 @@ public class ForumsServiceImpl implements ForumsService {
     private final ForumPostLikeRepository postLikeRepository;
     private final ForumThreadSaveRepository threadSaveRepository;
     private final ForumThreadReadRepository threadReadRepository;
+    private final ForumThreadTaggedPersonRepository threadTaggedPersonRepository;
+    private final ForumThreadTaggedCarRepository threadTaggedCarRepository;
+    private final ForumReplyTaggedPersonRepository replyTaggedPersonRepository;
+    private final ForumReplyTaggedCarRepository replyTaggedCarRepository;
     private final ForumShortcutRepository shortcutRepository;
     private final ProfileService profileService;
     private final GarageService garageService;
@@ -111,6 +132,10 @@ public class ForumsServiceImpl implements ForumsService {
                              ForumPostLikeRepository postLikeRepository,
                              ForumThreadSaveRepository threadSaveRepository,
                              ForumThreadReadRepository threadReadRepository,
+                             ForumThreadTaggedPersonRepository threadTaggedPersonRepository,
+                             ForumThreadTaggedCarRepository threadTaggedCarRepository,
+                             ForumReplyTaggedPersonRepository replyTaggedPersonRepository,
+                             ForumReplyTaggedCarRepository replyTaggedCarRepository,
                              ForumShortcutRepository shortcutRepository,
                              ProfileService profileService,
                              GarageService garageService,
@@ -124,6 +149,10 @@ public class ForumsServiceImpl implements ForumsService {
         this.postLikeRepository = postLikeRepository;
         this.threadSaveRepository = threadSaveRepository;
         this.threadReadRepository = threadReadRepository;
+        this.threadTaggedPersonRepository = threadTaggedPersonRepository;
+        this.threadTaggedCarRepository = threadTaggedCarRepository;
+        this.replyTaggedPersonRepository = replyTaggedPersonRepository;
+        this.replyTaggedCarRepository = replyTaggedCarRepository;
         this.shortcutRepository = shortcutRepository;
         this.profileService = profileService;
         this.garageService = garageService;
@@ -263,6 +292,7 @@ public class ForumsServiceImpl implements ForumsService {
         return new ThreadDetailDto(
                 card.id(), card.title(), thread.getContent(),
                 card.author(), card.brand(), card.model(), card.topics(),
+                card.taggedPeople(), card.taggedCars(),
                 card.likesCount(), card.replyCount(),
                 thread.getCreatedAt(), card.lastActivityAt(),
                 card.pinned(), card.locked(), card.deleted(), viewerHasLiked, card.viewerHasSaved());
@@ -327,12 +357,17 @@ public class ForumsServiceImpl implements ForumsService {
         List<String> topicIds = distinct(request.topicIds());
         validateTopicsActive(topicIds);
 
+        List<UUID> personIds = distinctIds(request.taggedPeople());
+        List<UUID> carIds = distinctIds(request.taggedCars());
+        validateTaggedPeopleExist(personIds);
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
+
         UUID threadId = UUID.randomUUID();
         ForumThreadEntity thread = new ForumThreadEntity();
         thread.setId(threadId);
         thread.setUserId(userId);
         thread.setTitle(request.title().strip());
-        thread.setContent(blankToNull(request.content()));
+        thread.setContent(request.content());
 
         // Car scoping: a model wins (the trigger derives brand from it, so leave brandId null);
         // otherwise a bare brand for a brand-level thread; otherwise a general thread.
@@ -354,10 +389,16 @@ public class ForumsServiceImpl implements ForumsService {
             threadTopicRepository.save(tag);
         }
 
+        insertThreadTags(threadId, personIds, carIds);
+
         // Flush the INSERTs and clear the context so the re-fetch issues a real SELECT and picks up
         // the trigger-set columns (derived brand_id, ranking_score, created_at, last_activity_at).
         entityManager.flush();
         entityManager.clear();
+
+        // Everything tagged on create is new, so every tagged person (bar the author) is notified.
+        publishTagEvents(personIds, carIds, ownerByCar, userId,
+                recipient -> new ForumThreadTaggedEvent(threadId, recipient.userId(), userId, recipient.carTagged()));
 
         return getThread(currentUserId, threadId);
     }
@@ -379,14 +420,43 @@ public class ForumsServiceImpl implements ForumsService {
             throw new ThreadLockedException();
         }
 
+        // PATCH semantics: a null list leaves that tag set alone, a non-null list replaces it. The
+        // owner rule is validated against the RESULTING set, so dropping a person whose car stays
+        // tagged is rejected.
+        List<UUID> currentPersonIds = currentThreadTaggedPersonIds(threadId);
+        List<UUID> currentCarIds = currentThreadTaggedCarIds(threadId);
+        List<UUID> personIds = request.taggedPeople() != null ? distinctIds(request.taggedPeople()) : currentPersonIds;
+        List<UUID> carIds = request.taggedCars() != null ? distinctIds(request.taggedCars()) : currentCarIds;
+        if (request.taggedPeople() != null) {
+            validateTaggedPeopleExist(personIds);
+        }
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(thread.getUserId(), personIds, carIds);
+
         thread.setContent(blankToNull(request.content()));
         thread.setUpdatedAt(Instant.now());
         threadRepository.save(thread);
+
+        if (request.taggedPeople() != null) {
+            threadTaggedPersonRepository.deleteAllByIdThreadId(threadId);
+        }
+        if (request.taggedCars() != null) {
+            threadTaggedCarRepository.deleteAllByIdThreadId(threadId);
+        }
+        entityManager.flush(); // the deletes must hit the DB before the re-inserts
+        insertThreadTags(threadId,
+                request.taggedPeople() != null ? personIds : List.of(),
+                request.taggedCars() != null ? carIds : List.of());
 
         // The BEFORE UPDATE trigger recomputes ranking_score; flush + clear so the re-read below
         // returns the fresh row instead of the stale first-level-cache copy.
         entityManager.flush();
         entityManager.clear();
+
+        // Only newly added tags notify — re-saving an unchanged tag set is silent.
+        List<UUID> newPersonIds = added(currentPersonIds, personIds);
+        List<UUID> newCarIds = added(currentCarIds, carIds);
+        publishTagEvents(newPersonIds, newCarIds, ownerByCar, userId,
+                recipient -> new ForumThreadTaggedEvent(threadId, recipient.userId(), userId, recipient.carTagged()));
 
         return getThread(currentUserId, threadId);
     }
@@ -415,6 +485,11 @@ public class ForumsServiceImpl implements ForumsService {
             parentAuthorId = parent.getUserId();
         }
 
+        List<UUID> personIds = distinctIds(request.taggedPeople());
+        List<UUID> carIds = distinctIds(request.taggedCars());
+        validateTaggedPeopleExist(personIds);
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
+
         UUID postId = UUID.randomUUID();
         ForumThreadReplyEntity post = new ForumThreadReplyEntity();
         post.setId(postId);
@@ -425,6 +500,8 @@ public class ForumsServiceImpl implements ForumsService {
         post.setDeleted(false);
         post.setUpdatedAt(Instant.now());
         postRepository.save(post);
+
+        insertReplyTags(postId, personIds, carIds);
 
         // TODO: BUG FIX - Exception thrown (line 435) - entityManager.flush();
         //  - Message: "org.postgresql.util.PSQLException: ERROR: relation "public.forum_posts" does not exist"
@@ -448,6 +525,12 @@ public class ForumsServiceImpl implements ForumsService {
                     new ForumReplyRepliedEvent(threadId, parentId, postId, parentAuthorId, userId, excerpt));
         }
 
+        // Everything tagged on create is new, so every tagged person (bar the author) is notified.
+        // A tagged user who is also the parent/thread author gets both notifications — different
+        // events, different meanings.
+        publishTagEvents(personIds, carIds, ownerByCar, userId,
+                recipient -> new ForumReplyTaggedEvent(threadId, postId, recipient.userId(), userId, recipient.carTagged()));
+
         return toReplyDtos(List.of(hydrated), userId, thread.getUserId()).getFirst();
     }
 
@@ -469,9 +552,36 @@ public class ForumsServiceImpl implements ForumsService {
             throw new ThreadLockedException();
         }
 
+        // PATCH semantics, same as updateThread: null leaves a tag set alone, non-null replaces it,
+        // and the owner rule is validated against the resulting set.
+        List<UUID> currentPersonIds = currentReplyTaggedPersonIds(postId);
+        List<UUID> currentCarIds = currentReplyTaggedCarIds(postId);
+        List<UUID> personIds = request.taggedPeople() != null ? distinctIds(request.taggedPeople()) : currentPersonIds;
+        List<UUID> carIds = request.taggedCars() != null ? distinctIds(request.taggedCars()) : currentCarIds;
+        if (request.taggedPeople() != null) {
+            validateTaggedPeopleExist(personIds);
+        }
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(post.getUserId(), personIds, carIds);
+
         post.setContent(request.content().strip());
         post.setUpdatedAt(Instant.now());
         postRepository.save(post);
+
+        if (request.taggedPeople() != null) {
+            replyTaggedPersonRepository.deleteAllByIdReplyId(postId);
+        }
+        if (request.taggedCars() != null) {
+            replyTaggedCarRepository.deleteAllByIdReplyId(postId);
+        }
+        entityManager.flush(); // the deletes must hit the DB before the re-inserts
+        insertReplyTags(postId,
+                request.taggedPeople() != null ? personIds : List.of(),
+                request.taggedCars() != null ? carIds : List.of());
+        entityManager.flush();
+
+        // Only newly added tags notify — re-saving an unchanged tag set is silent.
+        publishTagEvents(added(currentPersonIds, personIds), added(currentCarIds, carIds), ownerByCar, userId,
+                recipient -> new ForumReplyTaggedEvent(post.getThreadId(), postId, recipient.userId(), userId, recipient.carTagged()));
 
         return toReplyDtos(List.of(post), userId, thread.getUserId()).getFirst();
     }
@@ -885,12 +995,29 @@ public class ForumsServiceImpl implements ForumsService {
         Map<String, TopicDto> topics = topicRepository.findAllById(allTopicIds).stream()
                 .collect(Collectors.toMap(ForumThreadTopicOptionsEntity::getId, this::toTopicDto));
 
+        // Tagged people/cars, batched for the whole page (one query each) and resolved together with
+        // the authors so a card page still costs a fixed number of queries.
+        Map<UUID, List<UUID>> taggedPersonIdsByThread = threadTaggedPersonRepository.findAllByIdThreadIdIn(threadIds).stream()
+                .collect(Collectors.groupingBy(tp -> tp.getId().getThreadId(),
+                        Collectors.mapping(tp -> tp.getId().getUserId(), Collectors.toList())));
+        Map<UUID, List<UUID>> taggedCarIdsByThread = threadTaggedCarRepository.findAllByIdThreadIdIn(threadIds).stream()
+                .collect(Collectors.groupingBy(tc -> tc.getId().getThreadId(),
+                        Collectors.mapping(tc -> tc.getId().getCarId(), Collectors.toList())));
+
         Set<UUID> authorIds = threads.stream()
                 .filter(t -> !t.isDeleted())
                 .map(ForumThreadEntity::getUserId).collect(Collectors.toSet());
-        Map<UUID, ProfileSearchResultDto> authors = authorIds.isEmpty() ? Map.of()
-                : profileService.findByIds(authorIds).stream()
+        Set<UUID> profileIds = new HashSet<>(authorIds);
+        taggedPersonIdsByThread.values().forEach(profileIds::addAll);
+        Map<UUID, ProfileSearchResultDto> authors = profileIds.isEmpty() ? Map.of()
+                : profileService.findByIds(profileIds).stream()
                         .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
+
+        Set<UUID> taggedCarIds = taggedCarIdsByThread.values().stream()
+                .flatMap(List::stream).collect(Collectors.toSet());
+        Map<UUID, CarSummaryDto> taggedCars = taggedCarIds.isEmpty() ? Map.of()
+                : garageService.findCarsByIds(taggedCarIds).stream()
+                        .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
 
         Set<UUID> brandIds = threads.stream().map(ForumThreadEntity::getBrandId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
@@ -913,6 +1040,8 @@ public class ForumsServiceImpl implements ForumsService {
                                 .map(topics::get)
                                 .filter(Objects::nonNull)
                                 .toList(),
+                        resolve(taggedPersonIdsByThread.get(t.getId()), authors),
+                        resolve(taggedCarIdsByThread.get(t.getId()), taggedCars),
                         t.getLikesCount(),
                         t.getReplyCount(),
                         t.getLastActivityAt(),
@@ -952,12 +1081,36 @@ public class ForumsServiceImpl implements ForumsService {
         }
 
         List<UUID> postIds = posts.stream().map(ForumThreadReplyEntity::getId).toList();
+
+        // A deleted reply is a placeholder: its tags are dropped from the DTO along with its author
+        // and content, so they are not even looked up.
+        List<UUID> visibleIds = posts.stream()
+                .filter(p -> !p.isDeleted())
+                .map(ForumThreadReplyEntity::getId).toList();
+        Map<UUID, List<UUID>> taggedPersonIdsByReply = visibleIds.isEmpty() ? Map.of()
+                : replyTaggedPersonRepository.findAllByIdReplyIdIn(visibleIds).stream()
+                        .collect(Collectors.groupingBy(tp -> tp.getId().getReplyId(),
+                                Collectors.mapping(tp -> tp.getId().getUserId(), Collectors.toList())));
+        Map<UUID, List<UUID>> taggedCarIdsByReply = visibleIds.isEmpty() ? Map.of()
+                : replyTaggedCarRepository.findAllByIdReplyIdIn(visibleIds).stream()
+                        .collect(Collectors.groupingBy(tc -> tc.getId().getReplyId(),
+                                Collectors.mapping(tc -> tc.getId().getCarId(), Collectors.toList())));
+
         Set<UUID> authorIds = posts.stream()
                 .filter(p -> !p.isDeleted())
                 .map(ForumThreadReplyEntity::getUserId).collect(Collectors.toSet());
-        Map<UUID, ProfileSearchResultDto> authors = authorIds.isEmpty() ? Map.of()
-                : profileService.findByIds(authorIds).stream()
+        Set<UUID> profileIds = new HashSet<>(authorIds);
+        taggedPersonIdsByReply.values().forEach(profileIds::addAll);
+        Map<UUID, ProfileSearchResultDto> authors = profileIds.isEmpty() ? Map.of()
+                : profileService.findByIds(profileIds).stream()
                         .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
+
+        Set<UUID> taggedCarIds = taggedCarIdsByReply.values().stream()
+                .flatMap(List::stream).collect(Collectors.toSet());
+        Map<UUID, CarSummaryDto> taggedCars = taggedCarIds.isEmpty() ? Map.of()
+                : garageService.findCarsByIds(taggedCarIds).stream()
+                        .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
+
         Set<UUID> liked = Set.copyOf(postRepository.findLikedPostIds(viewerId, postIds));
 
         return posts.stream()
@@ -965,6 +1118,8 @@ public class ForumsServiceImpl implements ForumsService {
                         p.getId(),
                         p.isDeleted() ? null : authors.get(p.getUserId()),
                         p.isDeleted() ? null : p.getContent(),
+                        resolve(taggedPersonIdsByReply.get(p.getId()), authors),
+                        resolve(taggedCarIdsByReply.get(p.getId()), taggedCars),
                         p.getLikesCount(),
                         p.getReplyCount(),
                         p.isDeleted(),
@@ -1054,6 +1209,137 @@ public class ForumsServiceImpl implements ForumsService {
         }
     }
 
+    // -------------------------------------------------------------------
+    // TAGGED PEOPLE & CARS (mirrors the posts module's tagging rules)
+    // -------------------------------------------------------------------
+
+    private void insertThreadTags(UUID threadId, List<UUID> personIds, List<UUID> carIds) {
+        for (UUID personId : personIds) {
+            ForumThreadTaggedPersonEntity tagged = new ForumThreadTaggedPersonEntity();
+            tagged.setId(new ForumThreadTaggedPersonId(threadId, personId));
+            threadTaggedPersonRepository.save(tagged);
+        }
+        for (UUID carId : carIds) {
+            ForumThreadTaggedCarEntity tagged = new ForumThreadTaggedCarEntity();
+            tagged.setId(new ForumThreadTaggedCarId(threadId, carId));
+            threadTaggedCarRepository.save(tagged);
+        }
+    }
+
+    private void insertReplyTags(UUID replyId, List<UUID> personIds, List<UUID> carIds) {
+        for (UUID personId : personIds) {
+            ForumReplyTaggedPersonEntity tagged = new ForumReplyTaggedPersonEntity();
+            tagged.setId(new ForumReplyTaggedPersonId(replyId, personId));
+            replyTaggedPersonRepository.save(tagged);
+        }
+        for (UUID carId : carIds) {
+            ForumReplyTaggedCarEntity tagged = new ForumReplyTaggedCarEntity();
+            tagged.setId(new ForumReplyTaggedCarId(replyId, carId));
+            replyTaggedCarRepository.save(tagged);
+        }
+    }
+
+    private List<UUID> currentThreadTaggedPersonIds(UUID threadId) {
+        return threadTaggedPersonRepository.findAllByIdThreadId(threadId).stream()
+                .map(tp -> tp.getId().getUserId())
+                .toList();
+    }
+
+    private List<UUID> currentThreadTaggedCarIds(UUID threadId) {
+        return threadTaggedCarRepository.findAllByIdThreadId(threadId).stream()
+                .map(tc -> tc.getId().getCarId())
+                .toList();
+    }
+
+    private List<UUID> currentReplyTaggedPersonIds(UUID replyId) {
+        return replyTaggedPersonRepository.findAllByIdReplyId(replyId).stream()
+                .map(tp -> tp.getId().getUserId())
+                .toList();
+    }
+
+    private List<UUID> currentReplyTaggedCarIds(UUID replyId) {
+        return replyTaggedCarRepository.findAllByIdReplyId(replyId).stream()
+                .map(tc -> tc.getId().getCarId())
+                .toList();
+    }
+
+    private void validateTaggedPeopleExist(List<UUID> personIds) {
+        if (personIds.isEmpty()) {
+            return;
+        }
+        if (profileService.findByIds(personIds).size() != personIds.size()) {
+            throw new InvalidReferenceException("One or more tagged people do not exist");
+        }
+    }
+
+    /**
+     * Validates the tagged cars against the tagged people: every car must exist, and its owner must
+     * be tagged in the same thread/reply — unless the owner is the author, who may tag their own
+     * cars without self-tagging. This is what makes the "tag a user, then pick from their garage"
+     * flow enforceable server-side (same rule as the posts module).
+     *
+     * @return each tagged car's owner id, reused by the caller to work out who to notify
+     */
+    private Map<UUID, UUID> validateTaggedCars(UUID authorId, List<UUID> personIds, List<UUID> carIds) {
+        if (carIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, UUID> ownerByCar = garageService.findCarOwnerIds(carIds);
+        if (ownerByCar.size() != carIds.size()) {
+            throw new InvalidReferenceException("One or more tagged cars do not exist");
+        }
+
+        Set<UUID> allowedOwners = new HashSet<>(personIds);
+        allowedOwners.add(authorId);
+        for (UUID carId : carIds) {
+            if (!allowedOwners.contains(ownerByCar.get(carId))) {
+                throw new CarOwnerNotTaggedException(carId);
+            }
+        }
+        return ownerByCar;
+    }
+
+    /**
+     * Publishes one tag event per user who is <em>newly</em> tagged — either directly or by having
+     * one of their cars tagged (a car's owner is always tagged as a person too, so the two collapse
+     * into a single notification carrying {@code carTagged}). Self-tags are dropped by
+     * {@link #publishSocialEvent}.
+     */
+    private void publishTagEvents(List<UUID> newPersonIds, List<UUID> newCarIds, Map<UUID, UUID> ownerByCar,
+                                  UUID actorId, Function<TagRecipient, Object> eventFactory) {
+        Set<UUID> ownersOfNewCars = newCarIds.stream()
+                .map(ownerByCar::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Set<UUID> recipients = new LinkedHashSet<>(newPersonIds);
+        recipients.addAll(ownersOfNewCars);
+        for (UUID recipientId : recipients) {
+            Object event = eventFactory.apply(new TagRecipient(recipientId, ownersOfNewCars.contains(recipientId)));
+            publishSocialEvent(recipientId, actorId, event);
+        }
+    }
+
+    /** One notification target of a tagging action, and whether it was (also) one of their cars. */
+    private record TagRecipient(UUID userId, boolean carTagged) {}
+
+    /** The ids in {@code next} that were not already in {@code current}, in {@code next}'s order. */
+    private static List<UUID> added(List<UUID> current, List<UUID> next) {
+        Set<UUID> before = Set.copyOf(current);
+        return next.stream().filter(id -> !before.contains(id)).toList();
+    }
+
+    /**
+     * Maps a thread's / reply's tag id list onto the batch-resolved DTOs, dropping ids that no
+     * longer resolve (a profile or car removed between the two queries).
+     */
+    private static <T> List<T> resolve(List<UUID> ids, Map<UUID, T> byId) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return ids.stream().map(byId::get).filter(Objects::nonNull).toList();
+    }
+
     private String nextCursor(ForumSort sort, ForumThreadEntity last) {
         return switch (sort) {
             case HOT -> new RankCursor(last.getRankingScore(), last.getId()).encode();
@@ -1101,5 +1387,12 @@ public class ForumsServiceImpl implements ForumsService {
             return List.of();
         }
         return values.stream().filter(Objects::nonNull).distinct().toList();
+    }
+
+    private static List<UUID> distinctIds(List<UUID> ids) {
+        if (ids == null) {
+            return List.of();
+        }
+        return ids.stream().filter(Objects::nonNull).distinct().toList();
     }
 }

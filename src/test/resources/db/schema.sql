@@ -159,10 +159,10 @@ CREATE FUNCTION public.fn_forum_post_likes_count() RETURNS trigger
     AS $$
 begin
     if tg_op = 'INSERT' then
-        update public.forum_posts set likes_count = likes_count + 1 where id = new.post_id;
+        update public.forum_thread_replies set likes_count = likes_count + 1 where id = new.post_id;
         return new;
     elsif tg_op = 'DELETE' then
-        update public.forum_posts set likes_count = greatest(likes_count - 1, 0) where id = old.post_id;
+        update public.forum_thread_replies set likes_count = greatest(likes_count - 1, 0) where id = old.post_id;
         return old;
     end if;
     return null;
@@ -183,7 +183,7 @@ begin
             set reply_count = reply_count + 1, last_activity_at = now()
             where id = new.thread_id;
         if new.parent_post_id is not null then
-            update public.forum_posts set reply_count = reply_count + 1 where id = new.parent_post_id;
+            update public.forum_thread_replies set reply_count = reply_count + 1 where id = new.parent_post_id;
         end if;
         return new;
     elsif tg_op = 'DELETE' then
@@ -191,7 +191,7 @@ begin
             set reply_count = greatest(reply_count - 1, 0)
             where id = old.thread_id;
         if old.parent_post_id is not null then
-            update public.forum_posts set reply_count = greatest(reply_count - 1, 0) where id = old.parent_post_id;
+            update public.forum_thread_replies set reply_count = greatest(reply_count - 1, 0) where id = old.parent_post_id;
         end if;
         return old;
     end if;
@@ -266,9 +266,9 @@ CREATE FUNCTION public.forum_thread_topics_count() RETURNS trigger
     AS $$
 begin
   if tg_op = 'INSERT' then
-    update forum_topics set thread_count = thread_count + 1 where id = new.topic_id;
+    update public.forum_thread_topic_options set thread_count = thread_count + 1 where id = new.topic_id;
   elsif tg_op = 'DELETE' then
-    update forum_topics set thread_count = thread_count - 1 where id = old.topic_id;
+    update public.forum_thread_topic_options set thread_count = greatest(thread_count - 1, 0) where id = old.topic_id;
   end if;
   return null;
 end;
@@ -1599,6 +1599,42 @@ CREATE TABLE public.forum_thread_reply_reports (
 
 
 --
+-- Name: forum_thread_reply_tagged_cars; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_thread_reply_tagged_cars (
+    reply_id uuid NOT NULL,
+    car_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_thread_reply_tagged_cars; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_thread_reply_tagged_cars IS 'Cars tagged in a forum thread reply. Deleting a car silently removes its reply tags.';
+
+
+--
+-- Name: forum_thread_reply_tagged_people; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_thread_reply_tagged_people (
+    reply_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_thread_reply_tagged_people; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_thread_reply_tagged_people IS 'Profiles tagged in a forum thread reply. A tagged car''s owner must be tagged here.';
+
+
+--
 -- Name: forum_thread_reports; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1620,6 +1656,64 @@ CREATE TABLE public.forum_thread_saves (
     user_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: forum_thread_tagged_cars; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_thread_tagged_cars (
+    thread_id uuid NOT NULL,
+    car_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_thread_tagged_cars; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_thread_tagged_cars IS 'Cars tagged in a forum thread (the OP). Deleting a car silently removes its thread tags.';
+
+
+--
+-- Name: forum_thread_tagged_people; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_thread_tagged_people (
+    thread_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_thread_tagged_people; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_thread_tagged_people IS 'Profiles tagged in a forum thread (the OP). A tagged car''s owner must be tagged here.';
+
+
+--
+-- Name: forum_thread_topic_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_thread_topic_options (
+    id text NOT NULL,
+    name text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    color text,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    thread_count integer DEFAULT 0 NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_thread_topic_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_thread_topic_options IS 'Stores predefined topics for forum threads + thread_count to keep track of the most popular forums';
 
 
 --
@@ -1648,7 +1742,7 @@ CREATE TABLE public.forum_threads (
     user_id uuid NOT NULL,
     title text NOT NULL,
     content text,
-    brand_id uuid,
+    brand_id uuid NOT NULL,
     model_id uuid,
     likes_count integer DEFAULT 0 NOT NULL,
     reply_count integer DEFAULT 0 NOT NULL,
@@ -1677,30 +1771,6 @@ COMMENT ON TABLE public.forum_threads IS 'Single pool of forum threads. Reachabl
 --
 
 COMMENT ON COLUMN public.forum_threads.brand_id IS 'Auto-filled from model_id when a model is set (trg_forum_threads_set_brand). Set directly for brand-level threads.';
-
-
---
--- Name: forum_topics; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.forum_topics (
-    id text NOT NULL,
-    name text NOT NULL,
-    kind text DEFAULT 'format'::text NOT NULL,
-    sort_order integer DEFAULT 0 NOT NULL,
-    color text,
-    is_active boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    thread_count integer DEFAULT 0 NOT NULL,
-    CONSTRAINT forum_topics_kind_check CHECK ((kind = ANY (ARRAY['component'::text, 'format'::text])))
-);
-
-
---
--- Name: TABLE forum_topics; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.forum_topics IS 'Topic axis for forums (tuning, suspension, DIY...). kind groups the UI: component vs format.';
 
 
 --
@@ -1802,7 +1872,8 @@ CREATE TABLE public.notification_preferences (
     flash_meets_enabled boolean DEFAULT true NOT NULL,
     price_drops_enabled boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
-    organized_events_enabled boolean NOT NULL
+    organized_events_enabled boolean NOT NULL,
+    tags_enabled boolean DEFAULT true NOT NULL
 );
 
 
@@ -1825,6 +1896,13 @@ COMMENT ON COLUMN public.notification_preferences.flash_meets_enabled IS 'Whethe
 --
 
 COMMENT ON COLUMN public.notification_preferences.organized_events_enabled IS 'Wether the user receives notifications about organized events.';
+
+
+--
+-- Name: COLUMN notification_preferences.tags_enabled; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.notification_preferences.tags_enabled IS 'Whether the user receives notification if they or their cars get tagged in the app (eg: forums, thread replies, traditional posts, etc)';
 
 
 --
@@ -2720,6 +2798,22 @@ ALTER TABLE ONLY public.forum_thread_reply_reports
 
 
 --
+-- Name: forum_thread_reply_tagged_cars forum_thread_reply_tagged_cars_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_reply_tagged_cars
+    ADD CONSTRAINT forum_thread_reply_tagged_cars_pkey PRIMARY KEY (reply_id, car_id);
+
+
+--
+-- Name: forum_thread_reply_tagged_people forum_thread_reply_tagged_people_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_reply_tagged_people
+    ADD CONSTRAINT forum_thread_reply_tagged_people_pkey PRIMARY KEY (reply_id, user_id);
+
+
+--
 -- Name: forum_thread_reports forum_thread_reports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2733,6 +2827,22 @@ ALTER TABLE ONLY public.forum_thread_reports
 
 ALTER TABLE ONLY public.forum_thread_saves
     ADD CONSTRAINT forum_thread_saves_pkey PRIMARY KEY (thread_id, user_id);
+
+
+--
+-- Name: forum_thread_tagged_cars forum_thread_tagged_cars_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_tagged_cars
+    ADD CONSTRAINT forum_thread_tagged_cars_pkey PRIMARY KEY (thread_id, car_id);
+
+
+--
+-- Name: forum_thread_tagged_people forum_thread_tagged_people_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_tagged_people
+    ADD CONSTRAINT forum_thread_tagged_people_pkey PRIMARY KEY (thread_id, user_id);
 
 
 --
@@ -2752,10 +2862,10 @@ ALTER TABLE ONLY public.forum_threads
 
 
 --
--- Name: forum_topics forum_topics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: forum_thread_topic_options forum_topics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.forum_topics
+ALTER TABLE ONLY public.forum_thread_topic_options
     ADD CONSTRAINT forum_topics_pkey PRIMARY KEY (id);
 
 
@@ -3026,6 +3136,27 @@ CREATE INDEX feedback_votes_recent_idx ON public.feedback_votes USING btree (fee
 
 
 --
+-- Name: forum_shortcuts_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX forum_shortcuts_user_id_idx ON public.forum_shortcuts USING btree (user_id);
+
+
+--
+-- Name: forum_thread_topics_thread_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX forum_thread_topics_thread_id_idx ON public.forum_thread_topics USING btree (thread_id);
+
+
+--
+-- Name: forum_topics_thread_count_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX forum_topics_thread_count_idx ON public.forum_thread_topic_options USING btree (thread_count);
+
+
+--
 -- Name: idx_car_models_brand_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3173,10 +3304,38 @@ CREATE INDEX idx_forum_shortcuts_user ON public.forum_shortcuts USING btree (use
 
 
 --
+-- Name: idx_forum_thread_reply_tagged_cars_car_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_forum_thread_reply_tagged_cars_car_id ON public.forum_thread_reply_tagged_cars USING btree (car_id);
+
+
+--
+-- Name: idx_forum_thread_reply_tagged_people_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_forum_thread_reply_tagged_people_user_id ON public.forum_thread_reply_tagged_people USING btree (user_id);
+
+
+--
 -- Name: idx_forum_thread_saves_user; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_forum_thread_saves_user ON public.forum_thread_saves USING btree (user_id, created_at DESC, thread_id DESC);
+
+
+--
+-- Name: idx_forum_thread_tagged_cars_car_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_forum_thread_tagged_cars_car_id ON public.forum_thread_tagged_cars USING btree (car_id);
+
+
+--
+-- Name: idx_forum_thread_tagged_people_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_forum_thread_tagged_people_user_id ON public.forum_thread_tagged_people USING btree (user_id);
 
 
 --
@@ -4008,7 +4167,7 @@ ALTER TABLE ONLY public.forum_shortcuts
 --
 
 ALTER TABLE ONLY public.forum_shortcuts
-    ADD CONSTRAINT forum_shortcuts_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.forum_topics(id);
+    ADD CONSTRAINT forum_shortcuts_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.forum_thread_topic_options(id);
 
 
 --
@@ -4076,6 +4235,38 @@ ALTER TABLE ONLY public.forum_thread_reply_reports
 
 
 --
+-- Name: forum_thread_reply_tagged_cars forum_thread_reply_tagged_cars_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_reply_tagged_cars
+    ADD CONSTRAINT forum_thread_reply_tagged_cars_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_reply_tagged_cars forum_thread_reply_tagged_cars_reply_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_reply_tagged_cars
+    ADD CONSTRAINT forum_thread_reply_tagged_cars_reply_id_fkey FOREIGN KEY (reply_id) REFERENCES public.forum_thread_replies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_reply_tagged_people forum_thread_reply_tagged_people_reply_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_reply_tagged_people
+    ADD CONSTRAINT forum_thread_reply_tagged_people_reply_id_fkey FOREIGN KEY (reply_id) REFERENCES public.forum_thread_replies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_reply_tagged_people forum_thread_reply_tagged_people_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_reply_tagged_people
+    ADD CONSTRAINT forum_thread_reply_tagged_people_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: forum_thread_reports forum_thread_reports_reason_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4116,6 +4307,38 @@ ALTER TABLE ONLY public.forum_thread_saves
 
 
 --
+-- Name: forum_thread_tagged_cars forum_thread_tagged_cars_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_tagged_cars
+    ADD CONSTRAINT forum_thread_tagged_cars_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_tagged_cars forum_thread_tagged_cars_thread_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_tagged_cars
+    ADD CONSTRAINT forum_thread_tagged_cars_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.forum_threads(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_tagged_people forum_thread_tagged_people_thread_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_tagged_people
+    ADD CONSTRAINT forum_thread_tagged_people_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.forum_threads(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_tagged_people forum_thread_tagged_people_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_tagged_people
+    ADD CONSTRAINT forum_thread_tagged_people_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: forum_thread_topics forum_thread_topics_thread_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4128,7 +4351,7 @@ ALTER TABLE ONLY public.forum_thread_topics
 --
 
 ALTER TABLE ONLY public.forum_thread_topics
-    ADD CONSTRAINT forum_thread_topics_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.forum_topics(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT forum_thread_topics_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.forum_thread_topic_options(id) ON DELETE RESTRICT;
 
 
 --
@@ -4897,12 +5120,61 @@ ALTER TABLE ONLY public.user_presence
 
 
 --
+-- Name: forum_thread_reply_tagged_cars; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: forum_thread_reply_tagged_cars forum_thread_reply_tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: forum_thread_reply_tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: forum_thread_reply_tagged_people forum_thread_reply_tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
 -- Name: forum_thread_reports; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
 -- Name: forum_thread_saves; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: forum_thread_tagged_cars; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: forum_thread_tagged_cars forum_thread_tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: forum_thread_tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: forum_thread_tagged_people forum_thread_tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: forum_thread_topic_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
@@ -4929,12 +5201,7 @@ ALTER TABLE ONLY public.user_presence
 
 
 --
--- Name: forum_topics; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: forum_topics forum_topics_select_authenticated; Type: POLICY; Schema: public; Owner: -
+-- Name: forum_thread_topic_options forum_topics_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
 
