@@ -6,7 +6,7 @@ import com.carsocialmedia.backend.forums.dto.ReplyDto;
 import com.carsocialmedia.backend.forums.dto.ShortcutDto;
 import com.carsocialmedia.backend.forums.dto.ThreadCardDto;
 import com.carsocialmedia.backend.forums.dto.ThreadDetailDto;
-import com.carsocialmedia.backend.forums.dto.TopicGroupDto;
+import com.carsocialmedia.backend.forums.dto.TopicDto;
 import com.carsocialmedia.backend.forums.dto.request.CreateReplyRequest;
 import com.carsocialmedia.backend.forums.dto.request.CreateShortcutRequest;
 import com.carsocialmedia.backend.forums.dto.request.CreateThreadRequest;
@@ -24,8 +24,8 @@ import java.util.UUID;
  * The forums feature: topic-and-car-scoped discussion threads with Reddit-style nested replies,
  * likes, and user-saved filters ("shortcuts").
  *
- * <p>Threads form a single pool reached through two lenses that converge on the same intersection:
- * <em>by car</em> (brand → model) and <em>by topic</em>. Every list supports three sorts — {@code hot}
+ * <p>Threads form a single pool reached primarily <em>by car</em> (brand → model), optionally
+ * refined <em>by topic</em> within a brand or brand+model hub (never a topic-only feed). Every list supports three sorts — {@code hot}
  * (ranking score), {@code new} (creation time), {@code active} (last activity) — and paginates by
  * opaque keyset cursor.
  *
@@ -36,12 +36,12 @@ public interface ForumsService {
 
     // ---- topics ------------------------------------------------------------
 
-    /** The active topics, grouped by kind ({@code component} / {@code format}) for the picker. */
-    List<TopicGroupDto> listTopics();
+    /** The active topics, in curated order, for the picker. */
+    List<TopicDto> listTopics();
 
     /**
-     * Popular-hub suggestions for the forums discovery / empty state — the most active brands,
-     * models, and topics merged into one list, ranked by thread count.
+     * Popular-hub suggestions for the forums discovery / empty state — the most active brands and
+     * models merged into one list, ranked by thread count.
      *
      * @param limit the maximum number of suggestions to return (defaulted/capped by the service)
      */
@@ -52,14 +52,11 @@ public interface ForumsService {
     /** The global thread feed across the whole app. */
     CursorPage<ThreadCardDto> getFeed(String currentUserId, String sort, String cursor, int size);
 
-    /** Threads scoped to a brand (the brand hub). */
-    CursorPage<ThreadCardDto> getBrandThreads(String currentUserId, UUID brandId, String sort, String cursor, int size);
+    /** Threads scoped to a brand (the brand hub), optionally refined by a topic. */
+    CursorPage<ThreadCardDto> getBrandThreads(String currentUserId, UUID brandId, String sort, String topicId, String cursor, int size);
 
     /** Threads scoped to a model (the model hub), optionally refined by a topic. */
     CursorPage<ThreadCardDto> getModelThreads(String currentUserId, UUID modelId, String sort, String topicId, String cursor, int size);
-
-    /** Threads scoped to a topic (the topic hub), optionally refined by brand and/or model. */
-    CursorPage<ThreadCardDto> getTopicThreads(String currentUserId, String topicId, String sort, UUID brandId, UUID modelId, String cursor, int size);
 
     // ---- read: thread detail & replies -------------------------------------
 

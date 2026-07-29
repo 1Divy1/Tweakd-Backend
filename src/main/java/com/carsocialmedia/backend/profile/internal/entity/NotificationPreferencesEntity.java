@@ -48,13 +48,18 @@ public class NotificationPreferencesEntity {
     @Column(name = "price_drops_enabled", nullable = false)
     private boolean priceDropsEnabled = true;
 
+    /** Notifications for being tagged (or having a car tagged) in forum threads and replies. */
+    @Column(name = "tags_enabled", nullable = false)
+    private boolean tagsEnabled = true;
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
     public NotificationPreferencesDto toDto() {
         return new NotificationPreferencesDto(
                 likesEnabled, commentsEnabled, sharesEnabled,
-                dmsEnabled, flashMeetsEnabled, organizedEventsEnabled, priceDropsEnabled
+                dmsEnabled, flashMeetsEnabled, organizedEventsEnabled, priceDropsEnabled,
+                tagsEnabled
         );
     }
 }

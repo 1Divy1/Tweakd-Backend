@@ -10,28 +10,23 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * A forum topic — the "topic" axis threads are filtered by (e.g. {@code tuning}, {@code detailing}).
+ * A forum thread topic option.
  * Reference data owned by Supabase; the app only reads it.
  *
- * <p>{@code kind} groups topics into {@code component} vs {@code format} buckets for the topic
- * picker. The {@code id} is a human-readable slug (text PK), not a UUID.
+ * The {@code id} is a human-readable slug (text PK), not a UUID.
  */
 @Entity
-@Table(name = "forum_topics")
+@Table(name = "forum_thread_topic_options")
 @Getter
 @Setter
-public class ForumTopicEntity {
+public class ForumThreadTopicOptionsEntity {
 
-    /** Slug primary key, e.g. {@code "tuning"}. */
+    /** Slug primary key, e.g. {@code "detailing"}. */
     @Id
     private String id;
 
     @Column(name = "name", nullable = false)
     private String name;
-
-    /** {@code component} | {@code format} — groups topics in the picker. */
-    @Column(name = "kind", nullable = false)
-    private String kind;
 
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;

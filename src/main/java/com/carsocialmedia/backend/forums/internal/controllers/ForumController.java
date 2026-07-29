@@ -6,7 +6,7 @@ import com.carsocialmedia.backend.forums.dto.ForumSuggestionDto;
 import com.carsocialmedia.backend.forums.dto.ReplyDto;
 import com.carsocialmedia.backend.forums.dto.ThreadCardDto;
 import com.carsocialmedia.backend.forums.dto.ThreadDetailDto;
-import com.carsocialmedia.backend.forums.dto.TopicGroupDto;
+import com.carsocialmedia.backend.forums.dto.TopicDto;
 import com.carsocialmedia.backend.forums.dto.request.CreateReplyRequest;
 import com.carsocialmedia.backend.forums.dto.request.CreateThreadRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateReplyRequest;
@@ -46,14 +46,14 @@ public class ForumController {
 
     // ---- topics ------------------------------------------------------------
 
-    /** The active topics, grouped by kind ({@code component} / {@code format}). */
+    /** The active topics, in curated order. */
     @GetMapping("/topics")
-    public List<TopicGroupDto> getTopics() {
+    public List<TopicDto> getTopics() {
         return forumsService.listTopics();
     }
 
     /**
-     * Popular-hub suggestions (brands, models, topics) for the discovery / empty state, ranked by
+     * Popular-hub suggestions (brands and models) for the discovery / empty state, ranked by
      * thread count. {@code limit} is defaulted and capped by the service.
      */
     @GetMapping("/suggestions")
@@ -72,14 +72,15 @@ public class ForumController {
         return forumsService.getFeed(jwt.getSubject(), sort, cursor, size);
     }
 
-    /** Threads scoped to a brand. */
+    /** Threads scoped to a brand, optionally refined by {@code topic}. */
     @GetMapping("/brands/{brandId}/threads")
     public CursorPage<ThreadCardDto> getBrandThreads(@AuthenticationPrincipal Jwt jwt,
                                                      @PathVariable UUID brandId,
                                                      @RequestParam(defaultValue = "hot") String sort,
+                                                     @RequestParam(required = false) String topic,
                                                      @RequestParam(required = false) String cursor,
                                                      @RequestParam(defaultValue = "20") int size) {
-        return forumsService.getBrandThreads(jwt.getSubject(), brandId, sort, cursor, size);
+        return forumsService.getBrandThreads(jwt.getSubject(), brandId, sort, topic, cursor, size);
     }
 
     /** Threads scoped to a model, optionally refined by {@code topic}. */
@@ -93,17 +94,6 @@ public class ForumController {
         return forumsService.getModelThreads(jwt.getSubject(), modelId, sort, topic, cursor, size);
     }
 
-    /** Threads scoped to a topic, optionally refined by {@code brand} and/or {@code model}. */
-    @GetMapping("/topics/{topicId}/threads")
-    public CursorPage<ThreadCardDto> getTopicThreads(@AuthenticationPrincipal Jwt jwt,
-                                                     @PathVariable String topicId,
-                                                     @RequestParam(defaultValue = "hot") String sort,
-                                                     @RequestParam(required = false) UUID brand,
-                                                     @RequestParam(required = false) UUID model,
-                                                     @RequestParam(required = false) String cursor,
-                                                     @RequestParam(defaultValue = "20") int size) {
-        return forumsService.getTopicThreads(jwt.getSubject(), topicId, sort, brand, model, cursor, size);
-    }
 
     // ---- thread detail & replies -------------------------------------------
 

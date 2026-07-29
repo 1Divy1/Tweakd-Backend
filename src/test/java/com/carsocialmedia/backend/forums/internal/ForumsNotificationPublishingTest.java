@@ -1,21 +1,25 @@
 package com.carsocialmedia.backend.forums.internal;
 
-import com.carsocialmedia.backend.forums.ForumReplyLikedEvent;
-import com.carsocialmedia.backend.forums.ForumReplyRepliedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadLikedEvent;
-import com.carsocialmedia.backend.forums.ForumThreadRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumReplyRepliedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadLikedEvent;
+import com.carsocialmedia.backend.forums.events.ForumThreadRepliedEvent;
 import com.carsocialmedia.backend.forums.dto.request.CreateReplyRequest;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadReplyEntity;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostLikeRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumPostRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumReplyTaggedCarRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumReplyTaggedPersonRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumShortcutRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadLikeRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadReadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadSaveRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTaggedCarRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTaggedPersonRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicRepository;
-import com.carsocialmedia.backend.forums.internal.repositories.ForumTopicRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicOptionsRepository;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.report.ReportService;
@@ -90,7 +94,7 @@ class ForumsNotificationPublishingTest {
         eventPublisher = mock(ApplicationEventPublisher.class);
 
         service = new ForumsServiceImpl(
-                mock(ForumTopicRepository.class),
+                mock(ForumThreadTopicOptionsRepository.class),
                 threadRepository,
                 postRepository,
                 mock(ForumThreadTopicRepository.class),
@@ -98,6 +102,10 @@ class ForumsNotificationPublishingTest {
                 postLikeRepository,
                 mock(ForumThreadSaveRepository.class),
                 mock(ForumThreadReadRepository.class),
+                mock(ForumThreadTaggedPersonRepository.class),
+                mock(ForumThreadTaggedCarRepository.class),
+                mock(ForumReplyTaggedPersonRepository.class),
+                mock(ForumReplyTaggedCarRepository.class),
                 mock(ForumShortcutRepository.class),
                 mock(ProfileService.class),
                 mock(GarageService.class),
@@ -184,7 +192,7 @@ class ForumsNotificationPublishingTest {
         when(threadRepository.findById(THREAD)).thenReturn(Optional.of(thread(THREAD_AUTHOR, false)));
         when(postRepository.findById(any())).thenReturn(Optional.of(reply(REPLY, ACTOR, null)));
 
-        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("great thread", null));
+        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("great thread", null, null, null));
 
         ArgumentCaptor<ForumThreadRepliedEvent> captor = ArgumentCaptor.forClass(ForumThreadRepliedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
@@ -199,7 +207,7 @@ class ForumsNotificationPublishingTest {
         when(threadRepository.findById(THREAD)).thenReturn(Optional.of(thread(THREAD_AUTHOR, true)));
         when(postRepository.findById(any())).thenReturn(Optional.of(reply(REPLY, ACTOR, null)));
 
-        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("hi", null));
+        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("hi", null, null, null));
 
         verify(eventPublisher, never()).publishEvent(any());
     }
@@ -211,7 +219,7 @@ class ForumsNotificationPublishingTest {
         when(postRepository.findById(any())).thenReturn(Optional.of(reply(REPLY, ACTOR, PARENT_REPLY)));
         when(postRepository.findById(PARENT_REPLY)).thenReturn(Optional.of(reply(PARENT_REPLY, PARENT_AUTHOR, null)));
 
-        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("agreed", PARENT_REPLY));
+        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("agreed", PARENT_REPLY, null, null));
 
         ArgumentCaptor<ForumReplyRepliedEvent> captor = ArgumentCaptor.forClass(ForumReplyRepliedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
@@ -227,7 +235,7 @@ class ForumsNotificationPublishingTest {
         when(postRepository.findById(any())).thenReturn(Optional.of(reply(REPLY, ACTOR, PARENT_REPLY)));
         when(postRepository.findById(PARENT_REPLY)).thenReturn(Optional.of(reply(PARENT_REPLY, ACTOR, null)));
 
-        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("me again", PARENT_REPLY));
+        service.addReply(ACTOR.toString(), THREAD, new CreateReplyRequest("me again", PARENT_REPLY, null, null));
 
         verify(eventPublisher, never()).publishEvent(any());
     }

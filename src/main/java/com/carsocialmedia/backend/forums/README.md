@@ -9,12 +9,14 @@ handled by `ForumReportController` (see [Reporting](#reporting-delegates-to-repo
 
 ## Information architecture
 
-Threads form **one pool** reached through two lenses that converge on the same intersection:
+Threads form **one pool** reached through a single primary lens, optionally refined by topic:
 
-- **By car:** brand → model (`brand_id`, then `model_id`).
-- **By topic:** via the `forum_thread_topics` junction (`topic_id`).
+- **By car (primary):** brand → model (`brand_id`, then `model_id`).
+- **By topic (refinement):** applied *within* a brand or brand+model hub via the
+  `forum_thread_topics` junction (`topic_id`). Topic is never a standalone lens — there is no
+  topic-only feed.
 
-Both combine (e.g. `model = M4 AND topic = tuning`). Every list supports three **sorts**:
+The two combine (e.g. `model = M4 AND topic = tuning`). Every list supports three **sorts**:
 
 | Sort | Order by | Cursor key |
 |---|---|---|
@@ -33,6 +35,26 @@ hard-deleted on delete.
 
 A **shortcut** is a saved filter (any combination of brand/model/topic) pinned to the user's
 landing screen, drag-reorderable, with an optional `notify` flag — owner-scoped to the JWT subject.
+
+## Tagging people and cars
+
+Threads **and** replies can tag other users and their cars, with the same rule as the posts module:
+a car may only be tagged when **its owner is tagged in the same thread/reply** — the author's own
+cars are exempt (no self-tag needed). That mirrors the client flow: search a user, then pick from
+their garage. Violations are `CarOwnerNotTaggedException` (400); unknown ids are
+`InvalidReferenceException` (400). Car ownership is resolved through `GarageService.findCarOwnerIds`.
+
+Tags are stored as flat reference UUIDs in four junction tables (never entities), and resolved to
+`ProfileSearchResultDto` / `CarSummaryDto` when a DTO is assembled — batched per page, so a feed
+page still costs a fixed number of queries. They surface on `ThreadCardDto`, `ThreadDetailDto`, and
+`ReplyDto` as `tagged_people` / `tagged_cars`.
+
+Unlike topics and car scoping, tags **stay editable** after creation: `PATCH /threads/{id}` and
+`PATCH /replies/{id}` take PATCH-shaped lists — `null` leaves that set untouched, a non-null list
+replaces it wholesale (empty clears it). The owner rule is enforced against the *resulting* set, so
+untagging a person whose car is still tagged is rejected. A deleted (anonymized) thread keeps its
+tags — they are content, not author identity; a soft-deleted reply drops them along with its author
+and body.
 
 ## Trigger-maintained columns (never written by the app)
 
@@ -67,7 +89,8 @@ The backend connects with a `BYPASSRLS` service role, so **all** authorization l
 - **Delete reply**: author-only. With children → soft delete ("[deleted]" placeholder, subtree
   survives); childless → hard delete, then `collapseDeletedAncestors` prunes any soft-deleted
   ancestors left childless.
-- **Edit** (`PATCH`): author-only, content-only (thread titles are immutable, Reddit-style).
+- **Edit** (`PATCH`): author-only, content **and tags** (thread titles, car scoping and topics are
+  immutable, Reddit-style).
   Rejected on a deleted thread (`ThreadDeletedException`, 409), a deleted reply
   (`ForumPostDeletedException`, 409), or a locked thread (`ThreadLockedException`, 409).
 - **Reply / edit** on a locked thread → rejected (`ThreadLockedException`, 409). Replying to or
@@ -90,9 +113,10 @@ likes, deletes, and shortcuts CRUD. See the interface Javadoc.
 
 ### DTOs (`forums.dto`)
 
-`TopicDto`, `TopicGroupDto`, `ThreadCardDto`, `ThreadDetailDto`, `ReplyDto` (flat — children are
-fetched on demand per level), `ShortcutDto`, `CursorPage<T>`. Authors reuse
-`profile.dto.ProfileSearchResultDto`; brand/model reuse `garage.dto.CarBrandDto` / `CarModelDto`.
+`TopicDto`, `ThreadCardDto`, `ThreadDetailDto`, `ReplyDto` (flat — children are
+fetched on demand per level), `ShortcutDto`, `CursorPage<T>`. Authors and tagged people reuse
+`profile.dto.ProfileSearchResultDto`; brand/model reuse `garage.dto.CarBrandDto` / `CarModelDto`;
+tagged cars reuse `garage.dto.CarSummaryDto`.
 `notify` is exposed on the wire via `@JsonProperty` (the record component is `notifyEnabled`, since
 `notify` collides with `Object.notify()`).
 
@@ -120,19 +144,18 @@ shared reporting model.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/topics` | grouped by kind (`component`/`format`) |
+| GET | `/topics` | flat list, curated order |
 | GET | `/feed?sort=&cursor=&size=` | global |
-| GET | `/brands/{brandId}/threads?sort=&cursor=` | brand hub |
+| GET | `/brands/{brandId}/threads?sort=&topic=&cursor=` | brand hub |
 | GET | `/models/{modelId}/threads?sort=&topic=&cursor=` | model hub |
-| GET | `/topics/{topicId}/threads?sort=&brand=&model=&cursor=` | topic hub |
 | GET | `/threads/saved?cursor=` | caller's saved/bookmarked threads, newest save first |
 | GET | `/threads/{id}` | detail (incl. `viewerHasLiked`, `deleted`) |
 | GET | `/threads/{id}/replies?cursor=` | keyset page of root replies (no subtrees) |
 | GET | `/replies/{id}/replies?cursor=` | keyset page of a reply's direct children |
-| POST | `/threads` | create (201) |
-| PATCH | `/threads/{id}` | author edits OP body (content only) |
-| POST | `/threads/{id}/replies` | reply (201) |
-| PATCH | `/replies/{id}` | author edits reply text |
+| POST | `/threads` | create (201); optional `tagged_people` / `tagged_cars` |
+| PATCH | `/threads/{id}` | author edits OP body + tags (title/topics/car scoping immutable) |
+| POST | `/threads/{id}/replies` | reply (201); optional `tagged_people` / `tagged_cars` |
+| PATCH | `/replies/{id}` | author edits reply text + tags |
 | POST / DELETE | `/threads/{id}/like` | idempotent + race-safe (204) |
 | POST / DELETE | `/replies/{id}/like` | idempotent + race-safe (204); 409 on deleted reply |
 | POST / DELETE | `/threads/{id}/save` | bookmark / un-bookmark (204), idempotent |
@@ -153,6 +176,11 @@ shared reporting model.
 `ForumThreadTopicEntity`→`forum_thread_topics` (`@EmbeddedId` thread_id+topic_id),
 `ForumThreadLikeEntity`/`ForumPostLikeEntity` (composite-PK likes),
 `ForumThreadSaveEntity`→`forum_thread_saves` (composite PK thread_id+user_id, bookmarks),
+`ForumThreadTaggedPersonEntity`→`forum_thread_tagged_people`,
+`ForumThreadTaggedCarEntity`→`forum_thread_tagged_cars`,
+`ForumReplyTaggedPersonEntity`→`forum_thread_reply_tagged_people`,
+`ForumReplyTaggedCarEntity`→`forum_thread_reply_tagged_cars` (all composite-PK junctions holding
+flat `profiles.id` / `cars.id` refs; a deleted profile or car CASCADEs its tags away),
 `ForumThreadReadEntity`→`forum_thread_reads` (composite PK thread_id+user_id; upserted on
 `getThread` to track per-user read state), `ForumShortcutEntity`→`forum_shortcuts`.
 
@@ -170,6 +198,13 @@ back on forums.
 | `ForumReplyRepliedEvent(threadId, parentReplyId, replyId, recipientId, actorId, excerpt)` | `addReply` (nested reply) | reply under a parent reply | **parent reply author only** (never the thread author too) |
 | `ForumThreadLikedEvent(threadId, recipientId, actorId)` | `likeThread` | only when the `ON CONFLICT` insert affected a row | thread author |
 | `ForumReplyLikedEvent(replyId, threadId, recipientId, actorId)` | `likePost` (reply like) | only when the `ON CONFLICT` insert affected a row | reply author |
+| `ForumThreadTaggedEvent(threadId, recipientId, actorId, carTagged)` | `createThread` / `updateThread` | per **newly** tagged person (or owner of a newly tagged car) | the tagged user |
+| `ForumReplyTaggedEvent(threadId, replyId, recipientId, actorId, carTagged)` | `addReply` / `updateReply` | per **newly** tagged person (or owner of a newly tagged car) | the tagged user |
+
+A car's owner is always tagged as a person too, so the two collapse into one event per recipient
+carrying `carTagged` (drives "tagged your car" vs "tagged you"). Re-saving an unchanged tag set
+notifies nobody. The events live in `forums.events`, exposed to `notification` as the Modulith
+named interface `events`.
 
 To make "only on a real like" observable, `ForumThreadLikeRepository.insertIgnoringConflict` and
 `ForumPostLikeRepository.insertIgnoringConflict` now **return `int`** (rows inserted: 1 = new like,
@@ -177,8 +212,9 @@ To make "only on a real like" observable, `ForumThreadLikeRepository.insertIgnor
 
 ## Cross-module dependency
 
-`forums → profile` (author `findByIds`), `forums → garage` (added
-`findBrandsByIds` / `findModelsByIds` batch lookups, mirroring `findCarsByIds`), `forums → report`
+`forums → profile` (author + tagged-people `findByIds`), `forums → garage`
+(`findBrandsByIds` / `findModelsByIds` batch lookups mirroring `findCarsByIds`, plus `findCarsByIds`
+for tagged cars and `findCarOwnerIds` to enforce the tagging rule), `forums → report`
 (`ForumReportController` delegates report filing/reason-listing to `ReportService`), `forums →
 shared`. Nothing depends back on `forums`. Verified by `ModularityTests`.
 

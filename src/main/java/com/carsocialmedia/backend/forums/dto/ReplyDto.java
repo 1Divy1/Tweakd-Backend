@@ -1,9 +1,11 @@
 package com.carsocialmedia.backend.forums.dto;
 
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -17,6 +19,9 @@ import java.util.UUID;
  * @param id the reply id
  * @param author the reply author, or {@code null} when the reply is deleted
  * @param content the reply text, or {@code null} when the reply is deleted
+ * @param taggedPeople the profiles tagged in the reply (empty when none, or when it is deleted)
+ * @param taggedCars the cars tagged in the reply (empty when none, or when it is deleted); every
+ *        car's owner is among {@code taggedPeople} unless it belongs to the reply's author
  * @param likesCount how many users liked this reply
  * @param replyCount the number of direct children (fetched via {@code GET /replies/{id}/replies})
  * @param deleted whether the reply is soft-deleted
@@ -29,6 +34,8 @@ public record ReplyDto(
         UUID id,
         ProfileSearchResultDto author,
         String content,
+        List<ProfileSearchResultDto> taggedPeople,
+        List<CarSummaryDto> taggedCars,
         int likesCount,
         int replyCount,
         boolean deleted,
