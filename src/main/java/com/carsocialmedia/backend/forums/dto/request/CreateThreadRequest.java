@@ -24,11 +24,17 @@ import java.util.UUID;
  * @param modelId the car model this thread is about, or {@code null}
  * @param brandId the car brand this thread is about (used only when {@code modelId} is null), or {@code null}
  * @param topicIds the topic slugs to tag the thread with (optional, deduplicated server-side)
+ * @param taggedPeople ids of profiles tagged in the thread (optional, deduplicated server-side)
+ * @param taggedCars ids of cars tagged in the thread (optional, deduplicated server-side). A car
+ *        can only be tagged when its owner is in {@code taggedPeople} — except the author's own
+ *        cars, which need no self-tag.
  */
 public record CreateThreadRequest(
         @NotBlank @Size(max = 200) String title,
-        @Size(max = 20000) String content,
+        @NotBlank @Size(max = 20000) String content,
+        @NotNull UUID brandId,
+        @Size(max = 10) List<@NotNull String> topicIds,
         UUID modelId,
-        UUID brandId,
-        @Size(max = 10) List<@NotNull String> topicIds
+        @Size(max = 30) List<@NotNull UUID> taggedPeople,
+        @Size(max = 30) List<@NotNull UUID> taggedCars
 ) {}

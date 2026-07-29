@@ -12,5 +12,6 @@ public record NotificationPreferencesRequest(
         @NotNull(message = "dmsEnabled is required") Boolean dmsEnabled,
         @NotNull(message = "flashMeetsEnabled is required") Boolean flashMeetsEnabled,
         @NotNull(message = "organizedEventsEnabled is required") Boolean organizedEventsEnabled,
-        @NotNull(message = "priceDropsEnabled is required") Boolean priceDropsEnabled
+        @NotNull(message = "priceDropsEnabled is required") Boolean priceDropsEnabled,
+        @NotNull(message = "tagsEnabled is required") Boolean tagsEnabled
 ) {}

@@ -5,15 +5,13 @@ package com.carsocialmedia.backend.forums.dto;
  *
  * @param id the topic slug (e.g. {@code "tuning"})
  * @param name the display name
- * @param kind {@code component} or {@code format} — how topics are grouped
- * @param sortOrder the curated position within its kind
+ * @param sortOrder the curated position in the topic list
  * @param color optional accent color (hex), or {@code null}
  * @param threadCount number of threads tagged with this topic
  */
 public record TopicDto(
         String id,
         String name,
-        String kind,
         int sortOrder,
         String color,
         int threadCount

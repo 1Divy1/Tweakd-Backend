@@ -40,10 +40,10 @@ the junctions `profile_car_categories_junction` / `profile_community_roles_junct
 | `RealtimeLocationRequest` | lat, lng (required) | PATCH /me/realtime-location body |
 | `CategorySelectionRequest` | categoryIds | PUT /me/car-categories body (replace-all) |
 | `RoleSelectionRequest` | roleIds | PUT /me/community-roles body (replace-all) |
-| `NotificationPreferencesRequest` | 6 boolean toggles (all required) | PUT /me/notifications body |
+| `NotificationPreferencesRequest` | 8 boolean toggles (all required, incl. `tags_enabled`) | PUT /me/notifications body |
 | `CountryDto` / `CityDto` | reference data (CityDto exposes lat/lng) | reference reads |
 | `CommunityRoleDto` / `CarCategoryDto` | id, name | reference + selection reads |
-| `NotificationPreferencesDto` | 6 boolean toggles | notification reads/writes |
+| `NotificationPreferencesDto` | 8 boolean toggles (`tags_enabled` gates forum tag notifications) | notification reads/writes |
 
 `ProfileDto` additionally carries `cityId` and `discoveryRadiusKm`.
 
