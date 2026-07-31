@@ -96,6 +96,16 @@ public interface GarageService {
      */
     Map<UUID, UUID> findCarOwnerIds(Collection<UUID> carIds);
 
+    /**
+     * Every car id owned by the given profile, regardless of garage and without privacy gating.
+     * The inverse of {@link #findCarOwnerIds}: the tags module needs a user's car ids to find the
+     * content their cars were tagged in.
+     *
+     * @param ownerId the owning profile's id
+     * @return the owner's car ids (empty if they have no cars)
+     */
+    List<UUID> findCarIdsByOwner(UUID ownerId);
+
     // ---- garage views ------------------------------------------------------
 
     /**

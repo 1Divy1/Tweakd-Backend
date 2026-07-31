@@ -44,6 +44,8 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: REST controller, typing STOMP controller, service impl, event pushers, entities, repositories
 ├── presence/         ← public API: PresenceService, PresenceDto, UserPresenceChangedEvent
 │   └── internal/     ← private: in-memory session registry, WS lifecycle listeners, grace sweep + flush (@Scheduled), entity, repo, controller
+├── tags/             ← public API: TagsService, DTOs (merged tags feed). Owns no data — composes posts + forums + garage
+│   └── internal/     ← private: controller, service impl (four-stream merge), cursor
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
 ```
 
@@ -100,6 +102,7 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
 - [`posts` module](src/main/java/com/carsocialmedia/backend/posts/README.md)
 - [`feed` module](src/main/java/com/carsocialmedia/backend/feed/README.md)
+- [`tags` module](src/main/java/com/carsocialmedia/backend/tags/README.md)
 - [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
 - [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
 - [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)

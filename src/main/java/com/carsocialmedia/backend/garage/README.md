@@ -21,6 +21,7 @@ users' garages.
 |---|---|
 | `findCarsByIds(ids)` | Batch compact car summaries by id, no privacy gating (cross-module, e.g. post car tags) |
 | `findCarOwnerIds(carIds)` | Map of car id → owner id, no privacy gating (lets posts enforce that a tagged car's owner is tagged) |
+| `findCarIdsByOwner(ownerId)` | The inverse: every car id one profile owns (lets `tags` find the content a user's cars are tagged in, and lets untagging drop the caller's own car tags) |
 | `getMyGarage(currentUserId)` | The caller's own garage with car summaries |
 | `getGarageByUsername(currentUserId, username)` | Another user's garage; private profiles gated by follow status |
 | `addCar(currentUserId, CreateCarRequest)` | Creates car + mods in one transaction and returns presigned upload URLs for all photos |

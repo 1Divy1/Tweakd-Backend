@@ -16,6 +16,8 @@ import com.carsocialmedia.backend.forums.dto.request.UpdateShortcutRequest;
 import com.carsocialmedia.backend.forums.dto.request.UpdateThreadRequest;
 import com.carsocialmedia.backend.report.dto.ReportReasonDto;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -79,6 +81,68 @@ public interface ForumsService {
      * @param sort {@code old} (default, oldest first) or {@code new} (newest first)
      */
     CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String sort, String cursor, int size);
+
+    // ---- tags (the forums half of a profile's "tags" section) ---------------
+    //
+    // The tags module merges these keyset streams with the posts module's into one chronological
+    // page, then asks for the DTOs of just the ids that made the page. Content the tagged user
+    // wrote themselves is filtered out here, in SQL.
+
+    /**
+     * One keyset page of refs to the threads the given user — or one of their cars — is tagged in,
+     * most recently tagged first, excluding threads they started. Anonymized ("deleted") threads
+     * stay in: they keep their title, body and replies.
+     *
+     * @param userId the tagged user
+     * @param ownedCarIds that user's car ids, resolved once by the caller and reused across all
+     *        four tag streams; empty means "match person tags only"
+     * @param cursorTaggedAt the previous page's last {@code taggedAt}, or {@code null} for the first page
+     * @param cursorId the previous page's last content id, or {@code null} for the first page
+     * @param limit max refs to return (the caller over-fetches by one to detect a further page)
+     */
+    List<com.carsocialmedia.backend.shared.tagging.TaggedContentRef> findTaggedThreadRefs(
+            UUID userId, Collection<UUID> ownedCarIds, Instant cursorTaggedAt, UUID cursorId, int limit);
+
+    /**
+     * One keyset page of refs to the thread replies the given user — or one of their cars — is
+     * tagged in, most recently tagged first. Excludes their own replies and soft-deleted ones; the
+     * ref's {@code parentId} is the reply's thread.
+     *
+     * @see #findTaggedThreadRefs for the parameters
+     */
+    List<com.carsocialmedia.backend.shared.tagging.TaggedContentRef> findTaggedReplyRefs(
+            UUID userId, Collection<UUID> ownedCarIds, Instant cursorTaggedAt, UUID cursorId, int limit);
+
+    /**
+     * Batch-assembles the given threads as list cards, in the requested order. Ids that no longer
+     * resolve are dropped rather than erroring — a thread deleted mid-request just disappears from
+     * the caller's page.
+     */
+    List<ThreadCardDto> getThreadCardsByIds(UUID viewerId, List<UUID> threadIds);
+
+    /**
+     * Batch-assembles the given replies, in the requested order, resolving each one's thread author
+     * so the "Author" badge stays correct across a mixed-thread batch. Ids that no longer resolve
+     * are dropped.
+     */
+    List<ReplyDto> getRepliesByIds(UUID viewerId, List<UUID> replyIds);
+
+    /**
+     * Removes the caller's own tags from a thread: their person tag plus the tags of any of their
+     * own cars on it (dropping only the person tag would leave a car whose owner is not tagged,
+     * breaking the rule the tagging endpoints enforce). Idempotent.
+     *
+     * @throws com.carsocialmedia.backend.forums.exception.ThreadNotFoundException if no such thread
+     */
+    void removeSelfTagsFromThread(UUID userId, UUID threadId);
+
+    /**
+     * Removes the caller's own person and car tags from a reply; see
+     * {@link #removeSelfTagsFromThread}. Idempotent.
+     *
+     * @throws com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException if no such reply
+     */
+    void removeSelfTagsFromReply(UUID userId, UUID replyId);
 
     // ---- write: threads & replies ------------------------------------------
 

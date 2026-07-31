@@ -9,6 +9,8 @@ import com.carsocialmedia.backend.posts.internal.entities.CommentEntity;
 import com.carsocialmedia.backend.posts.internal.entities.PostEntity;
 import com.carsocialmedia.backend.posts.internal.repositories.CommentLikeRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.CommentRepository;
+import com.carsocialmedia.backend.posts.internal.repositories.CommentTaggedCarRepository;
+import com.carsocialmedia.backend.posts.internal.repositories.CommentTaggedPersonRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostImageRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostLikeRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostRepository;
@@ -78,6 +80,8 @@ class PostsNotificationPublishingTest {
                 mock(TaggedCarRepository.class),
                 commentRepository,
                 mock(CommentLikeRepository.class),
+                mock(CommentTaggedPersonRepository.class),
+                mock(CommentTaggedCarRepository.class),
                 postLikeRepository,
                 mock(SavedPostRepository.class),
                 postShareRepository,
@@ -156,7 +160,7 @@ class PostsNotificationPublishingTest {
         hydrated.setCreatedAt(Instant.now());
         when(commentRepository.findById(any())).thenReturn(Optional.of(hydrated));
 
-        service.addComment(ACTOR.toString(), POST, new CreateCommentRequest("first!", null));
+        service.addComment(ACTOR.toString(), POST, new CreateCommentRequest("first!", null, null, null));
 
         ArgumentCaptor<PostCommentedEvent> captor = ArgumentCaptor.forClass(PostCommentedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
@@ -177,7 +181,7 @@ class PostsNotificationPublishingTest {
         hydrated.setCreatedAt(Instant.now());
         when(commentRepository.findById(any())).thenReturn(Optional.of(hydrated));
 
-        service.addComment(AUTHOR.toString(), POST, new CreateCommentRequest("mine", null));
+        service.addComment(AUTHOR.toString(), POST, new CreateCommentRequest("mine", null, null, null));
 
         verify(eventPublisher, never()).publishEvent(any());
     }
