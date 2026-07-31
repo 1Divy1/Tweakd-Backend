@@ -1,9 +1,11 @@
 package com.carsocialmedia.backend.notification.internal;
 
 import com.carsocialmedia.backend.notification.NotificationService;
+import com.carsocialmedia.backend.posts.PostCommentTaggedEvent;
 import com.carsocialmedia.backend.posts.PostCommentedEvent;
 import com.carsocialmedia.backend.posts.PostLikedEvent;
 import com.carsocialmedia.backend.posts.PostSharedEvent;
+import com.carsocialmedia.backend.posts.PostTaggedEvent;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
@@ -25,6 +27,10 @@ import java.util.UUID;
  * equivalent of Modulith's {@code @ApplicationModuleListener}, which isn't on the classpath here),
  * so a rolled-back like/comment/share never notifies. The self-notify skip already happened at the
  * publish site; here we only gate on the recipient's preferences and resolve the actor's username.
+ *
+ * <p>Likes gate on {@code likes_enabled}, comments on {@code comments_enabled}, shares on
+ * {@code shares_enabled}, tags on {@code tags_enabled}. Tag events go to the tagged user, not the
+ * post's author.
  */
 @Component
 class PostsNotificationListener {
@@ -88,6 +94,45 @@ class PostsNotificationListener {
                 username + " shared your post",
                 null,
                 basePayload(event.actorId(), username, "post_id", event.postId()));
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(PostTaggedEvent event) {
+        NotificationPreferencesDto prefs = profileService.getNotificationPreferencesOrDefault(event.recipientId());
+        if (!prefs.tagsEnabled()) {
+            return;
+        }
+        String username = resolveUsername(event.actorId());
+        Map<String, Object> payload = basePayload(event.actorId(), username, "post_id", event.postId());
+        payload.put("car_tagged", event.carTagged());
+        notificationService.push(
+                event.recipientId(),
+                "post_tag",
+                username + (event.carTagged() ? " tagged your car in a post" : " tagged you in a post"),
+                null,
+                payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(PostCommentTaggedEvent event) {
+        NotificationPreferencesDto prefs = profileService.getNotificationPreferencesOrDefault(event.recipientId());
+        if (!prefs.tagsEnabled()) {
+            return;
+        }
+        String username = resolveUsername(event.actorId());
+        Map<String, Object> payload = basePayload(event.actorId(), username, "post_id", event.postId());
+        payload.put("comment_id", event.commentId().toString());
+        payload.put("car_tagged", event.carTagged());
+        notificationService.push(
+                event.recipientId(),
+                "post_comment_tag",
+                username + (event.carTagged() ? " tagged your car in a comment" : " tagged you in a comment"),
+                null,
+                payload);
     }
 
     /**

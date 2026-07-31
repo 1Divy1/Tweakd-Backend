@@ -56,6 +56,14 @@ untagging a person whose car is still tagged is rejected. A deleted (anonymized)
 tags — they are content, not author identity; a soft-deleted reply drops them along with its author
 and body.
 
+A tagged user can also **untag themselves** without the author's involvement
+(`removeSelfTagsFromThread` / `removeSelfTagsFromReply`, exposed by the `tags` module's
+`DELETE /api/v1/tags/{kind}/{targetId}`): the tag row is deleted, and any of that user's *own* cars
+tagged on the same content go with it so the owner rule still holds. The reverse lookup —
+"what is this user tagged in?" — is `findTaggedThreadRefs` / `findTaggedReplyRefs`, keyset streams
+that skip the user's own content and soft-deleted replies but keep anonymized threads. Both feed
+the [`tags` module](../tags/README.md).
+
 ## Trigger-maintained columns (never written by the app)
 
 The DB owns these; they are mapped read-only in JPA (`insertable=false, updatable=false`) and the
@@ -110,6 +118,12 @@ The backend connects with a `BYPASSRLS` service role, so **all** authorization l
 
 Topics, feed/hubs (`CursorPage<ThreadCardDto>`), thread detail + replies, thread/reply writes,
 likes, deletes, and shortcuts CRUD. See the interface Javadoc.
+
+Plus the tags-section composition surface consumed by the `tags` module: `findTaggedThreadRefs` /
+`findTaggedReplyRefs` (keyset ref streams), `getThreadCardsByIds` / `getRepliesByIds` (batch DTO
+assembly in the requested order — `getRepliesByIds` resolves each reply's thread author so the
+"Author" badge survives a mixed-thread batch), and `removeSelfTagsFromThread` /
+`removeSelfTagsFromReply`.
 
 ### DTOs (`forums.dto`)
 

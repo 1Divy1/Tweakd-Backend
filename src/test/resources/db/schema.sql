@@ -1156,6 +1156,42 @@ CREATE TABLE public.comment_reports (
 
 
 --
+-- Name: comment_tagged_cars; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.comment_tagged_cars (
+    comment_id uuid NOT NULL,
+    car_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE comment_tagged_cars; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.comment_tagged_cars IS 'Cars tagged in a post comment. Deleting a car silently removes its comment tags.';
+
+
+--
+-- Name: comment_tagged_people; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.comment_tagged_people (
+    comment_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE comment_tagged_people; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.comment_tagged_people IS 'Profiles tagged in a post comment. A tagged car''s owner must be tagged here.';
+
+
+--
 -- Name: comments; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2590,6 +2626,22 @@ ALTER TABLE ONLY public.comment_reports
 
 
 --
+-- Name: comment_tagged_cars comment_tagged_cars_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_tagged_cars
+    ADD CONSTRAINT comment_tagged_cars_pkey PRIMARY KEY (comment_id, car_id);
+
+
+--
+-- Name: comment_tagged_people comment_tagged_people_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_tagged_people
+    ADD CONSTRAINT comment_tagged_people_pkey PRIMARY KEY (comment_id, user_id);
+
+
+--
 -- Name: comments comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3224,6 +3276,20 @@ CREATE INDEX idx_cars_model_id ON public.cars USING btree (model_id);
 --
 
 CREATE INDEX idx_comment_likes_user_id ON public.comment_likes USING btree (user_id);
+
+
+--
+-- Name: idx_comment_tagged_cars_car_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_comment_tagged_cars_car_id ON public.comment_tagged_cars USING btree (car_id);
+
+
+--
+-- Name: idx_comment_tagged_people_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_comment_tagged_people_user_id ON public.comment_tagged_people USING btree (user_id);
 
 
 --
@@ -3880,6 +3946,38 @@ ALTER TABLE ONLY public.comment_likes
 
 ALTER TABLE ONLY public.comment_likes
     ADD CONSTRAINT comment_likes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: comment_tagged_cars comment_tagged_cars_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_tagged_cars
+    ADD CONSTRAINT comment_tagged_cars_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON DELETE CASCADE;
+
+
+--
+-- Name: comment_tagged_cars comment_tagged_cars_comment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_tagged_cars
+    ADD CONSTRAINT comment_tagged_cars_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES public.comments(id) ON DELETE CASCADE;
+
+
+--
+-- Name: comment_tagged_people comment_tagged_people_comment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_tagged_people
+    ADD CONSTRAINT comment_tagged_people_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES public.comments(id) ON DELETE CASCADE;
+
+
+--
+-- Name: comment_tagged_people comment_tagged_people_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_tagged_people
+    ADD CONSTRAINT comment_tagged_people_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 
 --
@@ -4923,6 +5021,28 @@ ALTER TABLE ONLY public.user_presence
 --
 -- Name: comment_reports; Type: ROW SECURITY; Schema: public; Owner: -
 --
+
+
+--
+-- Name: comment_tagged_cars; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: comment_tagged_cars comment_tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: comment_tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: comment_tagged_people comment_tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
 
 
 --

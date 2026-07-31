@@ -2,9 +2,11 @@ package com.carsocialmedia.backend.posts.internal;
 
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
+import com.carsocialmedia.backend.posts.PostCommentTaggedEvent;
 import com.carsocialmedia.backend.posts.PostCommentedEvent;
 import com.carsocialmedia.backend.posts.PostLikedEvent;
 import com.carsocialmedia.backend.posts.PostSharedEvent;
+import com.carsocialmedia.backend.posts.PostTaggedEvent;
 import com.carsocialmedia.backend.posts.PostsService;
 import com.carsocialmedia.backend.posts.dto.CommentDto;
 import com.carsocialmedia.backend.posts.dto.CommentPageDto;
@@ -25,6 +27,10 @@ import com.carsocialmedia.backend.posts.exception.PostNotFoundException;
 import com.carsocialmedia.backend.posts.internal.entities.CommentEntity;
 import com.carsocialmedia.backend.posts.internal.entities.CommentLikeEntity;
 import com.carsocialmedia.backend.posts.internal.entities.CommentLikeId;
+import com.carsocialmedia.backend.posts.internal.entities.CommentTaggedCarEntity;
+import com.carsocialmedia.backend.posts.internal.entities.CommentTaggedCarId;
+import com.carsocialmedia.backend.posts.internal.entities.CommentTaggedPersonEntity;
+import com.carsocialmedia.backend.posts.internal.entities.CommentTaggedPersonId;
 import com.carsocialmedia.backend.posts.internal.entities.PostEntity;
 import com.carsocialmedia.backend.posts.internal.entities.PostImageEntity;
 import com.carsocialmedia.backend.posts.internal.entities.PostLikeEntity;
@@ -39,11 +45,14 @@ import com.carsocialmedia.backend.posts.internal.entities.TaggedPersonEntity;
 import com.carsocialmedia.backend.posts.internal.entities.TaggedPersonId;
 import com.carsocialmedia.backend.posts.internal.repositories.CommentLikeRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.CommentRepository;
+import com.carsocialmedia.backend.posts.internal.repositories.CommentTaggedCarRepository;
+import com.carsocialmedia.backend.posts.internal.repositories.CommentTaggedPersonRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostImageRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostLikeRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.PostShareRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.SavedPostRepository;
+import com.carsocialmedia.backend.posts.internal.repositories.TagRefRow;
 import com.carsocialmedia.backend.posts.internal.repositories.TaggedCarRepository;
 import com.carsocialmedia.backend.posts.internal.repositories.TaggedPersonRepository;
 import com.carsocialmedia.backend.profile.ProfileService;
@@ -51,6 +60,7 @@ import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
+import com.carsocialmedia.backend.shared.tagging.TaggedContentRef;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
@@ -66,7 +76,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -94,6 +107,8 @@ public class PostsServiceImpl implements PostsService {
     private final TaggedCarRepository taggedCarRepository;
     private final CommentRepository commentRepository;
     private final CommentLikeRepository commentLikeRepository;
+    private final CommentTaggedPersonRepository commentTaggedPersonRepository;
+    private final CommentTaggedCarRepository commentTaggedCarRepository;
     private final PostLikeRepository postLikeRepository;
     private final SavedPostRepository savedPostRepository;
     private final PostShareRepository postShareRepository;
@@ -112,6 +127,8 @@ public class PostsServiceImpl implements PostsService {
                             TaggedCarRepository taggedCarRepository,
                             CommentRepository commentRepository,
                             CommentLikeRepository commentLikeRepository,
+                            CommentTaggedPersonRepository commentTaggedPersonRepository,
+                            CommentTaggedCarRepository commentTaggedCarRepository,
                             PostLikeRepository postLikeRepository,
                             SavedPostRepository savedPostRepository,
                             PostShareRepository postShareRepository,
@@ -126,6 +143,8 @@ public class PostsServiceImpl implements PostsService {
         this.taggedCarRepository = taggedCarRepository;
         this.commentRepository = commentRepository;
         this.commentLikeRepository = commentLikeRepository;
+        this.commentTaggedPersonRepository = commentTaggedPersonRepository;
+        this.commentTaggedCarRepository = commentTaggedCarRepository;
         this.postLikeRepository = postLikeRepository;
         this.savedPostRepository = savedPostRepository;
         this.postShareRepository = postShareRepository;
@@ -150,7 +169,7 @@ public class PostsServiceImpl implements PostsService {
 
         // Validate cross-module references up front so a bad tag fails the whole create.
         validateTaggedPeopleExist(personIds);
-        validateTaggedCars(userId, personIds, carIds);
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
 
         UUID postId = UUID.randomUUID();
         PostEntity post = new PostEntity();
@@ -180,6 +199,11 @@ public class PostsServiceImpl implements PostsService {
 
         PostEntity hydrated = postRepository.findById(postId)
                 .orElseThrow(() -> new PostNotFoundException(postId));
+
+        // Everything tagged on create is new, so every tagged person (bar the author) is notified.
+        publishTagEvents(personIds, carIds, ownerByCar, userId,
+                recipient -> new PostTaggedEvent(postId, recipient.userId(), userId, recipient.carTagged()));
+
         return toPostDto(hydrated, userId);
     }
 
@@ -196,17 +220,19 @@ public class PostsServiceImpl implements PostsService {
         // independently, but the "a tagged car's owner must be tagged" rule couples them — so the
         // check must run over the post's resulting tags, using current DB tags for any list the
         // request leaves untouched (null).
+        List<UUID> currentPersonIds = currentTaggedPersonIds(postId);
+        List<UUID> currentCarIds = currentTaggedCarIds(postId);
         List<UUID> finalPersonIds = request.taggedPeople() != null
                 ? distinctIds(request.taggedPeople())
-                : currentTaggedPersonIds(postId);
+                : currentPersonIds;
         List<UUID> finalCarIds = request.taggedCars() != null
                 ? distinctIds(request.taggedCars())
-                : currentTaggedCarIds(postId);
+                : currentCarIds;
 
         if (request.taggedPeople() != null) {
             validateTaggedPeopleExist(finalPersonIds);
         }
-        validateTaggedCars(userId, finalPersonIds, finalCarIds);
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, finalPersonIds, finalCarIds);
 
         // Apply scalar fields: null means "leave unchanged".
         if (request.description() != null) {
@@ -242,6 +268,12 @@ public class PostsServiceImpl implements PostsService {
 
         PostEntity hydrated = postRepository.findById(postId)
                 .orElseThrow(() -> new PostNotFoundException(postId));
+
+        // Only newly added tags notify — re-saving an unchanged tag set is silent.
+        publishTagEvents(added(currentPersonIds, finalPersonIds), added(currentCarIds, finalCarIds),
+                ownerByCar, userId,
+                recipient -> new PostTaggedEvent(postId, recipient.userId(), userId, recipient.carTagged()));
+
         return toPostDto(hydrated, userId);
     }
 
@@ -470,7 +502,7 @@ public class PostsServiceImpl implements PostsService {
     }
 
     /**
-     * Trims the over-fetched page, batch-resolves comment authors and the viewer's likes (no
+     * Trims the over-fetched page, batch-resolves comment authors, tags and the viewer's likes (no
      * per-row queries), and builds the {@link CommentPageDto}. Shared by the root-comment and
      * reply listings, which differ only in the keyset query that produced {@code rows}.
      */
@@ -478,18 +510,58 @@ public class PostsServiceImpl implements PostsService {
         boolean hasMore = rows.size() > limit;
         List<CommentEntity> page = hasMore ? rows.subList(0, limit) : rows;
 
-        List<UUID> authorIds = page.stream().map(CommentEntity::getUserId).distinct().toList();
-        Map<UUID, ProfileSearchResultDto> authors = profileService.findByIds(authorIds).stream()
-                .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
+        List<CommentDto> items = toCommentDtos(viewerId, page);
+
+        String nextCursor = hasMore ? lastCommentCursor(page) : null;
+        return new CommentPageDto(items, nextCursor);
+    }
+
+    /**
+     * Assembles a batch of comments with a fixed, small number of queries (no N+1): one batch each
+     * for the two tag join tables, one profile lookup covering authors and tagged people, one car
+     * lookup, and one viewer-like lookup. Output preserves the input order.
+     */
+    private List<CommentDto> toCommentDtos(UUID viewerId, List<CommentEntity> page) {
+        if (page.isEmpty()) {
+            return List.of();
+        }
+
+        // A deleted comment is a "[deleted]" placeholder: its tags are dropped from the DTO along
+        // with its content, so they are not even looked up.
+        List<UUID> visibleIds = page.stream()
+                .filter(c -> !c.isDeleted())
+                .map(CommentEntity::getId).toList();
+        Map<UUID, List<UUID>> taggedPersonIdsByComment = visibleIds.isEmpty() ? Map.of()
+                : commentTaggedPersonRepository.findAllByIdCommentIdIn(visibleIds).stream()
+                        .collect(Collectors.groupingBy(tp -> tp.getId().getCommentId(),
+                                Collectors.mapping(tp -> tp.getId().getUserId(), Collectors.toList())));
+        Map<UUID, List<UUID>> taggedCarIdsByComment = visibleIds.isEmpty() ? Map.of()
+                : commentTaggedCarRepository.findAllByIdCommentIdIn(visibleIds).stream()
+                        .collect(Collectors.groupingBy(tc -> tc.getId().getCommentId(),
+                                Collectors.mapping(tc -> tc.getId().getCarId(), Collectors.toList())));
+
+        Set<UUID> profileIds = page.stream().map(CommentEntity::getUserId).collect(Collectors.toCollection(HashSet::new));
+        taggedPersonIdsByComment.values().forEach(profileIds::addAll);
+        Map<UUID, ProfileSearchResultDto> authors = profileIds.isEmpty() ? Map.of()
+                : profileService.findByIds(profileIds).stream()
+                        .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
+
+        Set<UUID> taggedCarIds = taggedCarIdsByComment.values().stream()
+                .flatMap(List::stream).collect(Collectors.toSet());
+        Map<UUID, CarSummaryDto> taggedCars = taggedCarIds.isEmpty() ? Map.of()
+                : garageService.findCarsByIds(taggedCarIds).stream()
+                        .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
 
         List<UUID> commentIds = page.stream().map(CommentEntity::getId).toList();
         Set<UUID> likedByViewer = Set.copyOf(commentLikeRepository.findLikedCommentIds(viewerId, commentIds));
 
-        List<CommentDto> items = page.stream()
+        return page.stream()
                 .map(c -> new CommentDto(
                         c.getId(),
                         authors.get(c.getUserId()),
                         c.isDeleted() ? null : c.getContent(),
+                        resolve(taggedPersonIdsByComment.get(c.getId()), authors),
+                        resolve(taggedCarIdsByComment.get(c.getId()), taggedCars),
                         c.getParentCommentId(),
                         c.isDeleted(),
                         c.getLikesCount(),
@@ -497,9 +569,6 @@ public class PostsServiceImpl implements PostsService {
                         c.getCreatedAt(),
                         c.getReplyCount()))
                 .toList();
-
-        String nextCursor = hasMore ? lastCommentCursor(page) : null;
-        return new CommentPageDto(items, nextCursor);
     }
 
     @Override
@@ -531,6 +600,108 @@ public class PostsServiceImpl implements PostsService {
 
         String nextCursor = hasMore ? lastLikerCursor(page) : null;
         return new LikerPageDto(items, nextCursor);
+    }
+
+    // -------------------------------------------------------------------
+    // TAGS — the posts half of a profile's "tags" section
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TaggedContentRef> findTaggedPostRefs(UUID userId, Collection<UUID> ownedCarIds,
+                                                     Instant cursorTaggedAt, UUID cursorId, int limit) {
+        boolean firstPage = cursorTaggedAt == null || cursorId == null;
+        PageRequest page = PageRequest.of(0, Math.max(limit, 1));
+
+        List<TagRefRow> rows = new ArrayList<>(taggedPersonRepository.findTaggedPostRefs(
+                userId, firstPage, cursorTaggedAt, cursorId, page));
+        if (ownedCarIds != null && !ownedCarIds.isEmpty()) {
+            rows.addAll(taggedCarRepository.findTaggedPostRefs(
+                    ownedCarIds, userId, firstPage, cursorTaggedAt, cursorId, page));
+        }
+        return mergeTagRefs(rows, limit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TaggedContentRef> findTaggedCommentRefs(UUID userId, Collection<UUID> ownedCarIds,
+                                                        Instant cursorTaggedAt, UUID cursorId, int limit) {
+        boolean firstPage = cursorTaggedAt == null || cursorId == null;
+        PageRequest page = PageRequest.of(0, Math.max(limit, 1));
+
+        List<TagRefRow> rows = new ArrayList<>(commentTaggedPersonRepository.findTaggedCommentRefs(
+                userId, firstPage, cursorTaggedAt, cursorId, page));
+        if (ownedCarIds != null && !ownedCarIds.isEmpty()) {
+            rows.addAll(commentTaggedCarRepository.findTaggedCommentRefs(
+                    ownedCarIds, userId, firstPage, cursorTaggedAt, cursorId, page));
+        }
+        return mergeTagRefs(rows, limit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PostDto> getPostsByIds(UUID viewerId, List<UUID> postIds) {
+        return toPostDtosByIds(postIds, viewerId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CommentDto> getCommentsByIds(UUID viewerId, List<UUID> commentIds) {
+        if (commentIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, CommentEntity> byId = commentRepository.findAllById(commentIds).stream()
+                .collect(Collectors.toMap(CommentEntity::getId, Function.identity()));
+        List<CommentEntity> ordered = commentIds.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+        return toCommentDtos(viewerId, ordered);
+    }
+
+    @Override
+    @Transactional
+    public void removeSelfTagsFromPost(UUID userId, UUID postId) {
+        ensurePostExists(postId);
+        taggedPersonRepository.deleteByIdPostIdAndIdUserId(postId, userId);
+
+        List<UUID> ownCarIds = garageService.findCarIdsByOwner(userId);
+        if (!ownCarIds.isEmpty()) {
+            taggedCarRepository.deleteByIdPostIdAndIdCarIdIn(postId, ownCarIds);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void removeSelfTagsFromComment(UUID userId, UUID commentId) {
+        if (!commentRepository.existsById(commentId)) {
+            throw new CommentNotFoundException(commentId);
+        }
+        commentTaggedPersonRepository.deleteByIdCommentIdAndIdUserId(commentId, userId);
+
+        List<UUID> ownCarIds = garageService.findCarIdsByOwner(userId);
+        if (!ownCarIds.isEmpty()) {
+            commentTaggedCarRepository.deleteByIdCommentIdAndIdCarIdIn(commentId, ownCarIds);
+        }
+    }
+
+    /**
+     * Collapses the person-tag and car-tag streams of one surface into a single ordered page.
+     * A user tagged alongside their own car produces a row in both streams, so the same content
+     * is deduplicated here, keeping the later of the two tag timestamps.
+     */
+    private static List<TaggedContentRef> mergeTagRefs(List<TagRefRow> rows, int limit) {
+        Map<UUID, TaggedContentRef> newestByTarget = new LinkedHashMap<>();
+        for (TagRefRow row : rows) {
+            newestByTarget.merge(
+                    row.getTargetId(),
+                    new TaggedContentRef(row.getTargetId(), row.getParentId(), row.getTaggedAt()),
+                    (existing, candidate) -> candidate.taggedAt().isAfter(existing.taggedAt()) ? candidate : existing);
+        }
+        return newestByTarget.values().stream()
+                .sorted(TaggedContentRef.NEWEST_FIRST)
+                .limit(limit)
+                .toList();
     }
 
     // -------------------------------------------------------------------
@@ -627,6 +798,12 @@ public class PostsServiceImpl implements PostsService {
             }
         }
 
+        // Same tagging rules as posts and forum threads/replies, validated before anything is written.
+        List<UUID> personIds = distinctIds(request.taggedPeople());
+        List<UUID> carIds = distinctIds(request.taggedCars());
+        validateTaggedPeopleExist(personIds);
+        Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
+
         UUID commentId = UUID.randomUUID();
         CommentEntity comment = new CommentEntity();
         comment.setId(commentId);
@@ -638,6 +815,8 @@ public class PostsServiceImpl implements PostsService {
         comment.setLikesCount(0);
         commentRepository.save(comment);
 
+        insertCommentTags(commentId, personIds, carIds);
+
         // Flush the INSERT and clear the context so the re-fetch picks up the DB-managed createdAt.
         entityManager.flush();
         entityManager.clear();
@@ -645,18 +824,32 @@ public class PostsServiceImpl implements PostsService {
         CommentEntity hydrated = commentRepository.findById(commentId)
                 .orElseThrow(() -> new CommentNotFoundException(commentId));
 
-        ProfileSearchResultDto author = profileService.findByIds(List.of(userId)).stream()
-                .findFirst()
-                .orElse(null);
+        // One profile batch for the author and everyone tagged.
+        Set<UUID> profileIds = new LinkedHashSet<>();
+        profileIds.add(userId);
+        profileIds.addAll(personIds);
+        Map<UUID, ProfileSearchResultDto> profiles = profileService.findByIds(profileIds).stream()
+                .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
+        Map<UUID, CarSummaryDto> cars = carIds.isEmpty() ? Map.of()
+                : garageService.findCarsByIds(carIds).stream()
+                        .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
 
         // Notify the POST author for any comment or reply, whatever the nesting.
         publishSocialEvent(post.getUserId(), userId,
                 new PostCommentedEvent(postId, commentId, post.getUserId(), userId, excerpt(request.content())));
 
+        // Comments can't be edited, so every tag here is new. A tagged user who is also the post's
+        // author gets both notifications — different events, different meanings.
+        publishTagEvents(personIds, carIds, ownerByCar, userId,
+                recipient -> new PostCommentTaggedEvent(postId, commentId, recipient.userId(), userId,
+                        recipient.carTagged()));
+
         return new CommentDto(
                 hydrated.getId(),
-                author,
+                profiles.get(userId),
                 hydrated.getContent(),
+                resolve(personIds, profiles),
+                resolve(carIds, cars),
                 hydrated.getParentCommentId(),
                 hydrated.isDeleted(),
                 hydrated.getLikesCount(),
@@ -974,6 +1167,19 @@ public class PostsServiceImpl implements PostsService {
         }
     }
 
+    private void insertCommentTags(UUID commentId, List<UUID> personIds, List<UUID> carIds) {
+        for (UUID personId : personIds) {
+            CommentTaggedPersonEntity tagged = new CommentTaggedPersonEntity();
+            tagged.setId(new CommentTaggedPersonId(commentId, personId));
+            commentTaggedPersonRepository.save(tagged);
+        }
+        for (UUID carId : carIds) {
+            CommentTaggedCarEntity tagged = new CommentTaggedCarEntity();
+            tagged.setId(new CommentTaggedCarId(commentId, carId));
+            commentTaggedCarRepository.save(tagged);
+        }
+    }
+
     private void validateTaggedPeopleExist(List<UUID> personIds) {
         if (personIds.isEmpty()) {
             return;
@@ -985,14 +1191,16 @@ public class PostsServiceImpl implements PostsService {
     }
 
     /**
-     * Validates the tagged cars against the post's tagged people: every car must exist, and its
-     * owner must be tagged in the post — unless the owner is the author, who may tag their own
-     * cars without self-tagging. This is what makes the "tag a user, then pick their cars" flow
-     * enforceable server-side.
+     * Validates the tagged cars against the tagged people of the same post or comment: every car
+     * must exist, and its owner must be tagged alongside it — unless the owner is the author, who
+     * may tag their own cars without self-tagging. This is what makes the "tag a user, then pick
+     * their cars" flow enforceable server-side.
+     *
+     * @return each tagged car's owner id, reused by the caller to work out who to notify
      */
-    private void validateTaggedCars(UUID authorId, List<UUID> personIds, List<UUID> carIds) {
+    private Map<UUID, UUID> validateTaggedCars(UUID authorId, List<UUID> personIds, List<UUID> carIds) {
         if (carIds.isEmpty()) {
-            return;
+            return Map.of();
         }
         Map<UUID, UUID> ownerByCar = garageService.findCarOwnerIds(carIds);
         if (ownerByCar.size() != carIds.size()) {
@@ -1006,6 +1214,48 @@ public class PostsServiceImpl implements PostsService {
                 throw new CarOwnerNotTaggedException(carId);
             }
         }
+        return ownerByCar;
+    }
+
+    /**
+     * Publishes one tag event per user who is <em>newly</em> tagged — either directly or by having
+     * one of their cars tagged (a car's owner is tagged as a person too unless the car is the
+     * author's own, so the two collapse into a single notification carrying {@code carTagged}).
+     * Self-tags are dropped by {@link #publishSocialEvent}.
+     */
+    private void publishTagEvents(List<UUID> newPersonIds, List<UUID> newCarIds, Map<UUID, UUID> ownerByCar,
+                                  UUID actorId, Function<TagRecipient, Object> eventFactory) {
+        Set<UUID> ownersOfNewCars = newCarIds.stream()
+                .map(ownerByCar::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Set<UUID> recipients = new LinkedHashSet<>(newPersonIds);
+        recipients.addAll(ownersOfNewCars);
+        for (UUID recipientId : recipients) {
+            Object event = eventFactory.apply(new TagRecipient(recipientId, ownersOfNewCars.contains(recipientId)));
+            publishSocialEvent(recipientId, actorId, event);
+        }
+    }
+
+    /** One notification target of a tagging action, and whether it was (also) one of their cars. */
+    private record TagRecipient(UUID userId, boolean carTagged) {}
+
+    /** The ids in {@code next} that were not already in {@code current}, in {@code next}'s order. */
+    private static List<UUID> added(List<UUID> current, List<UUID> next) {
+        Set<UUID> before = Set.copyOf(current);
+        return next.stream().filter(id -> !before.contains(id)).toList();
+    }
+
+    /**
+     * Maps a comment's tag id list onto the batch-resolved DTOs, dropping ids that no longer
+     * resolve (a profile or car removed between the two queries).
+     */
+    private static <T> List<T> resolve(List<UUID> ids, Map<UUID, T> byId) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return ids.stream().map(byId::get).filter(Objects::nonNull).toList();
     }
 
     private List<UUID> currentTaggedPersonIds(UUID postId) {

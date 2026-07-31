@@ -6,7 +6,9 @@ import com.carsocialmedia.backend.forums.dto.request.UpdateThreadRequest;
 import com.carsocialmedia.backend.forums.events.ForumReplyTaggedEvent;
 import com.carsocialmedia.backend.forums.events.ForumThreadTaggedEvent;
 import com.carsocialmedia.backend.forums.exception.CarOwnerNotTaggedException;
+import com.carsocialmedia.backend.forums.exception.ForumPostNotFoundException;
 import com.carsocialmedia.backend.forums.exception.InvalidReferenceException;
+import com.carsocialmedia.backend.forums.exception.ThreadNotFoundException;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadReplyEntity;
 import com.carsocialmedia.backend.forums.internal.entities.ForumThreadTaggedCarEntity;
@@ -289,6 +291,50 @@ class ForumsTaggingTest {
         assertThatThrownBy(() -> service.updateThread(AUTHOR.toString(), THREAD,
                 new UpdateThreadRequest("edited", List.of(OTHER), null)))
                 .isInstanceOf(CarOwnerNotTaggedException.class);
+    }
+
+    // ---- untagging yourself -------------------------------------------------
+
+    @Test
+    void untaggingYourselfFromAThreadTakesYourOwnTaggedCarsWithIt() {
+        when(threadRepository.existsById(THREAD)).thenReturn(true);
+        when(garageService.findCarIdsByOwner(OWNER)).thenReturn(List.of(OWNER_CAR));
+
+        service.removeSelfTagsFromThread(OWNER, THREAD);
+
+        // Leaving the car behind would break the "a tagged car's owner is tagged too" rule.
+        verify(threadTaggedPersonRepository).deleteByIdThreadIdAndIdUserId(THREAD, OWNER);
+        verify(threadTaggedCarRepository).deleteByIdThreadIdAndIdCarIdIn(THREAD, List.of(OWNER_CAR));
+        verify(threadTaggedPersonRepository, never()).deleteAllByIdThreadId(any());
+    }
+
+    @Test
+    void untaggingFromAThreadThatIsGoneIsNotFound() {
+        when(threadRepository.existsById(THREAD)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.removeSelfTagsFromThread(OWNER, THREAD))
+                .isInstanceOf(ThreadNotFoundException.class);
+        verify(threadTaggedPersonRepository, never()).deleteByIdThreadIdAndIdUserId(any(), any());
+    }
+
+    @Test
+    void untaggingYourselfFromAReplyTakesYourOwnTaggedCarsWithIt() {
+        when(postRepository.existsById(REPLY)).thenReturn(true);
+        when(garageService.findCarIdsByOwner(OWNER)).thenReturn(List.of(OWNER_CAR));
+
+        service.removeSelfTagsFromReply(OWNER, REPLY);
+
+        verify(replyTaggedPersonRepository).deleteByIdReplyIdAndIdUserId(REPLY, OWNER);
+        verify(replyTaggedCarRepository).deleteByIdReplyIdAndIdCarIdIn(REPLY, List.of(OWNER_CAR));
+    }
+
+    @Test
+    void untaggingFromAReplyThatIsGoneIsNotFound() {
+        when(postRepository.existsById(REPLY)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.removeSelfTagsFromReply(OWNER, REPLY))
+                .isInstanceOf(ForumPostNotFoundException.class);
+        verify(replyTaggedPersonRepository, never()).deleteByIdReplyIdAndIdUserId(any(), any());
     }
 
     private static ForumThreadTaggedPersonEntity taggedPerson(UUID userId) {

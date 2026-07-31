@@ -38,11 +38,15 @@ like→unlike→re-like makes a second row — accepted).
 | `forum_reply_like` | someone likes your reply | reply author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id` |
 | `forum_thread_tag` | you (or your car) get newly tagged in a thread | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `car_tagged` (boolean) |
 | `forum_reply_tag` | you (or your car) get newly tagged in a thread reply | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id`, `car_tagged` (boolean) |
+| `post_tag` | you (or your car) get newly tagged in a post | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `post_id`, `car_tagged` (boolean) |
+| `post_comment_tag` | you (or your car) get tagged in a post comment | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `post_id`, `comment_id`, `car_tagged` (boolean) |
 
-The two tag types fire on create **and** edit, but only for tags that are new (re-saving an
-unchanged tag set is silent). A tagged car's owner is always tagged as a person too, so one
-notification covers both; `car_tagged` picks the title ("… tagged your car in a thread" vs
-"… tagged you in a thread"). Posts tagging still sends no notification.
+The four tag types fire on create **and** (where the surface is editable) on edit, but only for tags
+that are new — re-saving an unchanged tag set is silent. Comments have no edit endpoint, so every
+`post_comment_tag` is a create. A tagged car's owner is tagged as a person too unless the car is the
+author's own, so one notification covers both; `car_tagged` picks the title ("… tagged your car in a
+thread" vs "… tagged you in a thread"). A user tagged in a comment on their own post gets both a
+`post_comment` and a `post_comment_tag` — different events, different meanings.
 
 `title` is a short English string embedding the actor username (e.g. `"marius_dev liked your post"`;
 falls back to `"Someone …"` if the actor profile can't be resolved). Payload keys are literal

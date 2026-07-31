@@ -59,6 +59,7 @@ import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadSaveRe
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTaggedCarRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTaggedPersonRepository;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicRepository;
+import com.carsocialmedia.backend.forums.internal.repositories.TagRefRow;
 import com.carsocialmedia.backend.forums.internal.repositories.ForumThreadTopicOptionsRepository;
 import com.carsocialmedia.backend.garage.GarageService;
 import com.carsocialmedia.backend.garage.dto.CarBrandDto;
@@ -69,6 +70,7 @@ import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.report.dto.ReportReasonDto;
 import com.carsocialmedia.backend.shared.moderation.ModerationContentDto;
+import com.carsocialmedia.backend.shared.tagging.TaggedContentRef;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.context.ApplicationEventPublisher;
@@ -79,8 +81,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -346,6 +350,130 @@ public class ForumsServiceImpl implements ForumsService {
     }
 
     // -------------------------------------------------------------------
+    // TAGS — the forums half of a profile's "tags" section
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TaggedContentRef> findTaggedThreadRefs(UUID userId, Collection<UUID> ownedCarIds,
+                                                       Instant cursorTaggedAt, UUID cursorId, int limit) {
+        boolean firstPage = cursorTaggedAt == null || cursorId == null;
+        Pageable pageable = PageRequest.of(0, Math.max(limit, 1));
+
+        List<TagRefRow> rows = new ArrayList<>(threadTaggedPersonRepository.findTaggedThreadRefs(
+                userId, firstPage, cursorTaggedAt, cursorId, pageable));
+        if (ownedCarIds != null && !ownedCarIds.isEmpty()) {
+            rows.addAll(threadTaggedCarRepository.findTaggedThreadRefs(
+                    ownedCarIds, userId, firstPage, cursorTaggedAt, cursorId, pageable));
+        }
+        return mergeTagRefs(rows, limit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TaggedContentRef> findTaggedReplyRefs(UUID userId, Collection<UUID> ownedCarIds,
+                                                      Instant cursorTaggedAt, UUID cursorId, int limit) {
+        boolean firstPage = cursorTaggedAt == null || cursorId == null;
+        Pageable pageable = PageRequest.of(0, Math.max(limit, 1));
+
+        List<TagRefRow> rows = new ArrayList<>(replyTaggedPersonRepository.findTaggedReplyRefs(
+                userId, firstPage, cursorTaggedAt, cursorId, pageable));
+        if (ownedCarIds != null && !ownedCarIds.isEmpty()) {
+            rows.addAll(replyTaggedCarRepository.findTaggedReplyRefs(
+                    ownedCarIds, userId, firstPage, cursorTaggedAt, cursorId, pageable));
+        }
+        return mergeTagRefs(rows, limit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ThreadCardDto> getThreadCardsByIds(UUID viewerId, List<UUID> threadIds) {
+        if (threadIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, ForumThreadEntity> byId = threadRepository.findAllById(threadIds).stream()
+                .collect(Collectors.toMap(ForumThreadEntity::getId, Function.identity()));
+        List<ForumThreadEntity> ordered = threadIds.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+        return toThreadCards(ordered, viewerId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReplyDto> getRepliesByIds(UUID viewerId, List<UUID> replyIds) {
+        if (replyIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, ForumThreadReplyEntity> byId = postRepository.findAllById(replyIds).stream()
+                .collect(Collectors.toMap(ForumThreadReplyEntity::getId, Function.identity()));
+        List<ForumThreadReplyEntity> ordered = replyIds.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+        if (ordered.isEmpty()) {
+            return List.of();
+        }
+
+        // The replies can come from different threads, so the "Author" badge needs each thread's
+        // author — one batch lookup rather than one per reply.
+        Set<UUID> threadIds = ordered.stream()
+                .map(ForumThreadReplyEntity::getThreadId).collect(Collectors.toSet());
+        Map<UUID, UUID> authorByThread = threadRepository.findAllById(threadIds).stream()
+                .collect(Collectors.toMap(ForumThreadEntity::getId, ForumThreadEntity::getUserId));
+
+        return toReplyDtos(ordered, viewerId, authorByThread, null);
+    }
+
+    @Override
+    @Transactional
+    public void removeSelfTagsFromThread(UUID userId, UUID threadId) {
+        if (!threadRepository.existsById(threadId)) {
+            throw new ThreadNotFoundException(threadId);
+        }
+        threadTaggedPersonRepository.deleteByIdThreadIdAndIdUserId(threadId, userId);
+
+        List<UUID> ownCarIds = garageService.findCarIdsByOwner(userId);
+        if (!ownCarIds.isEmpty()) {
+            threadTaggedCarRepository.deleteByIdThreadIdAndIdCarIdIn(threadId, ownCarIds);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void removeSelfTagsFromReply(UUID userId, UUID replyId) {
+        if (!postRepository.existsById(replyId)) {
+            throw new ForumPostNotFoundException(replyId);
+        }
+        replyTaggedPersonRepository.deleteByIdReplyIdAndIdUserId(replyId, userId);
+
+        List<UUID> ownCarIds = garageService.findCarIdsByOwner(userId);
+        if (!ownCarIds.isEmpty()) {
+            replyTaggedCarRepository.deleteByIdReplyIdAndIdCarIdIn(replyId, ownCarIds);
+        }
+    }
+
+    /**
+     * Collapses the person-tag and car-tag streams of one surface into a single ordered page.
+     * A user tagged alongside their own car produces a row in both streams, so the same content is
+     * deduplicated here, keeping the later of the two tag timestamps.
+     */
+    private static List<TaggedContentRef> mergeTagRefs(List<TagRefRow> rows, int limit) {
+        Map<UUID, TaggedContentRef> newestByTarget = new LinkedHashMap<>();
+        for (TagRefRow row : rows) {
+            newestByTarget.merge(
+                    row.getTargetId(),
+                    new TaggedContentRef(row.getTargetId(), row.getParentId(), row.getTaggedAt()),
+                    (existing, candidate) -> candidate.taggedAt().isAfter(existing.taggedAt()) ? candidate : existing);
+        }
+        return newestByTarget.values().stream()
+                .sorted(TaggedContentRef.NEWEST_FIRST)
+                .limit(limit)
+                .toList();
+    }
+
+    // -------------------------------------------------------------------
     // WRITE — threads & replies
     // -------------------------------------------------------------------
 
@@ -531,7 +659,7 @@ public class ForumsServiceImpl implements ForumsService {
         publishTagEvents(personIds, carIds, ownerByCar, userId,
                 recipient -> new ForumReplyTaggedEvent(threadId, postId, recipient.userId(), userId, recipient.carTagged()));
 
-        return toReplyDtos(List.of(hydrated), userId, thread.getUserId()).getFirst();
+        return toReplyDtos(List.of(hydrated), userId, Map.of(), thread.getUserId()).getFirst();
     }
 
     @Override
@@ -583,7 +711,7 @@ public class ForumsServiceImpl implements ForumsService {
         publishTagEvents(added(currentPersonIds, personIds), added(currentCarIds, carIds), ownerByCar, userId,
                 recipient -> new ForumReplyTaggedEvent(post.getThreadId(), postId, recipient.userId(), userId, recipient.carTagged()));
 
-        return toReplyDtos(List.of(post), userId, thread.getUserId()).getFirst();
+        return toReplyDtos(List.of(post), userId, Map.of(), thread.getUserId()).getFirst();
     }
 
     // -------------------------------------------------------------------
@@ -1061,7 +1189,7 @@ public class ForumsServiceImpl implements ForumsService {
         boolean hasMore = rows.size() > limit;
         List<ForumThreadReplyEntity> page = hasMore ? rows.subList(0, limit) : rows;
 
-        List<ReplyDto> items = toReplyDtos(page, viewerId, threadAuthorId);
+        List<ReplyDto> items = toReplyDtos(page, viewerId, Map.of(), threadAuthorId);
         String nextCursor = hasMore
                 ? new TimeCursor(page.getLast().getCreatedAt(), page.getLast().getId()).encode()
                 : null;
@@ -1072,10 +1200,15 @@ public class ForumsServiceImpl implements ForumsService {
      * Assembles flat {@link ReplyDto}s (no nesting — children are fetched on demand) with one
      * profile batch and one like-flag batch for the whole page. A deleted reply is a "[deleted]"
      * placeholder: author and content are nulled, and its author id is excluded from the lookup. A
-     * reply whose author is {@code threadAuthorId} (the OP) is flagged {@code isAuthor} for the
-     * "Author" badge.
+     * reply written by its thread's original poster is flagged {@code isAuthor} for the "Author"
+     * badge.
+     *
+     * @param authorByThread thread id → that thread's author, for a batch spanning several threads
+     * @param threadAuthorId the single thread author when every reply belongs to one thread (the
+     *        listing endpoints); {@code null} when {@code authorByThread} is the source of truth
      */
-    private List<ReplyDto> toReplyDtos(List<ForumThreadReplyEntity> posts, UUID viewerId, UUID threadAuthorId) {
+    private List<ReplyDto> toReplyDtos(List<ForumThreadReplyEntity> posts, UUID viewerId,
+                                       Map<UUID, UUID> authorByThread, UUID threadAuthorId) {
         if (posts.isEmpty()) {
             return List.of();
         }
@@ -1123,7 +1256,8 @@ public class ForumsServiceImpl implements ForumsService {
                         p.getLikesCount(),
                         p.getReplyCount(),
                         p.isDeleted(),
-                        !p.isDeleted() && p.getUserId().equals(threadAuthorId),
+                        !p.isDeleted() && p.getUserId().equals(
+                                threadAuthorId != null ? threadAuthorId : authorByThread.get(p.getThreadId())),
                         liked.contains(p.getId()),
                         p.getCreatedAt()))
                 .toList();
