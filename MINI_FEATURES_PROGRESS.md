@@ -13,9 +13,9 @@ non-DONE item. Verify claims against the working tree (`git status`, `./mvnw -q 
 | 2 | Schema dump refresh (`./scripts/dump-schema.sh`, needs Docker) | DONE | Fable |
 | 3 | Language feature (profile module) + profile edit (name/bio/avatar) | DONE | Opus agent A |
 | 4 | DM car tagging (dms module) | DONE | Opus agent B |
-| 5 | Notification producers (posts/forums events → notification listeners) | IN PROGRESS | Opus agent C |
-| 6 | Fable code review + security review of the whole diff | NOT STARTED | Fable |
-| 7 | Mobile API templates handed to user | NOT STARTED | Fable |
+| 5 | Notification producers (posts/forums events → notification listeners) | DONE | Opus agent C |
+| 6 | Fable code review + security review of the whole diff | DONE | Fable |
+| 7 | Mobile API templates handed to user | DONE | Fable |
 
 ## Investigation results (all verified against live DB + code on 2026-07-17)
 
@@ -79,10 +79,203 @@ non-DONE item. Verify claims against the working tree (`git status`, `./mvnw -q 
   `internal/` package-private. Never make internal types public.
 - Controllers thin; JWT subject = profile UUID; base path `/api/v1/<module>`.
 - Verify: `./mvnw -q compile`, `./mvnw test -Dtest=ModularityTests#verifiesModularStructure`, module tests green.
-- Update this file's status table + a short work log entry when done. No commits.
+- Checkpoint progress into this file's Work log INCREMENTALLY (one terse line per milestone), then
+  do the full status-table update when done. No commits. (Owner rule 2026-07-17: subagent context
+  dies with the subagent — the tracker must be current enough to resume from at any moment.)
 
 ## Work log
 
+- 2026-07-31 (profile "tags" section — a third tab beside posts & garage): DONE. Full suite
+  **421 tests**, 0 failures, Testcontainers ITs included; `ModularityTests` green. **No migration
+  needed** — every reverse-lookup index the queries use already existed.
+
+  **New module `tags`** (`/api/v1/tags`), modelled on `feed`: owns no data, composes `posts`
+  (post + comment tags), `forums` (thread + reply tags), `garage` (the owner's car ids) and
+  `profile` (username → id). DMs excluded per the owner's ask.
+
+  | Method | Path | Notes |
+  |---|---|---|
+  | GET | `/by-username/{username}?cursor=&size=` | A profile's tags section, merged + keyset-paged |
+  | GET | `/me?cursor=&size=` | The caller's own |
+  | DELETE | `/{kind}/{targetId}` | Untag yourself; 204, 400 unknown kind, 404 content gone |
+
+  **Owner decisions (asked before building, 2026-07-31):** one merged feed (not sub-tabs) with a
+  `kind` discriminator (`post` / `post_comment` / `forum_thread` / `forum_reply`); content the
+  profile owner authored is **excluded**; items reuse the existing DTOs (`PostDto`, `CommentDto` +
+  parent `PostDto`, `ThreadCardDto`, `ReplyDto` + parent `ThreadCardDto`); untag **deletes** the tag
+  (not a hidden flag) and is hidden from every viewer.
+
+  **Untag semantics:** deleting the caller's person tag also deletes the tags of the caller's *own*
+  cars on that content — otherwise the removal would leave a tagged car whose owner is untagged,
+  violating the invariant the tagging endpoints enforce. Other people's tags are untouched; the
+  author may re-tag. Idempotent.
+
+  **Feed mechanics:** ordered by *when the tag was made* (`coalesce(tag.created_at,
+  content.created_at)` — `tagged_people` / `tagged_cars` have a nullable `created_at`), `id` as
+  tiebreaker. One opaque cursor is re-applied by all four streams; each returns ≤ `size + 1` refs,
+  which are merged, deduped (person + own-car tag on the same content = one item), sorted, trimmed,
+  and only then hydrated (one batch call per content type; a comment's parent post rides the post
+  batch, a reply's parent thread the thread batch). Soft-deleted comments/replies are skipped;
+  anonymized threads are kept (content intact).
+
+  **Files created (main):** `shared/tagging/TaggedContentRef.java` (+ the Postgres-compatible
+  unsigned-uuid `NEWEST_FIRST` comparator); `tags/` — `package-info.java`, `TagsService.java`,
+  `README.md`, `dto/{package-info,TaggedContentKind,TaggedItemDto,TaggedItemPageDto}.java`,
+  `exception/{InvalidTagCursorException,UnknownTaggedContentKindException}.java`,
+  `internal/{TagsController,TagsServiceImpl,TagCursor}.java`;
+  `posts/internal/repositories/TagRefRow.java`, `forums/internal/repositories/TagRefRow.java`,
+  `forums/dto/package-info.java` (`@NamedInterface("dto")` — required for `tags` to consume
+  `ThreadCardDto` / `ReplyDto`; `posts/dto` already had one).
+  **Files modified (main):** `PostsService` + `PostsServiceImpl` (findTaggedPostRefs /
+  findTaggedCommentRefs / getPostsByIds / getCommentsByIds / removeSelfTagsFromPost /
+  removeSelfTagsFromComment; `toCommentDtos` extracted from `toCommentPage`), `ForumsService` +
+  `ForumsServiceImpl` (findTaggedThreadRefs / findTaggedReplyRefs / getThreadCardsByIds /
+  getRepliesByIds / removeSelfTagsFromThread / removeSelfTagsFromReply; `toReplyDtos` now takes a
+  thread→author map so the "Author" badge survives a mixed-thread batch), `GarageService` +
+  `GarageServiceImpl` + `CarRepository` (`findCarIdsByOwner` / `findIdsByOwnerId`), the eight tag
+  repositories (keyset ref query + targeted delete each), `CONTEXT.md`, `posts/README.md`,
+  `forums/README.md`, `garage/README.md`.
+  **Files created (test):** `tags/internal/TagsServiceImplTest.java` (14),
+  `tags/internal/TagsControllerWebTest.java` (7),
+  `posts/internal/repositories/PostTagRefRepositoryIT.java` (10),
+  `forums/internal/repositories/ForumTagRefRepositoryIT.java` (8).
+  **Files modified (test):** `PostsTaggingTest` (+5 untag), `ForumsTaggingTest` (+4 untag).
+  **Test counts:** +48 net (373 → 421).
+
+  **Deviations / decisions to flag to user:**
+  - **Path is `/api/v1/tags/...`, not `/api/v1/profiles/{username}/tags`** (which the untag preview
+    sketched during the Q&A). The project rule is `/api/v1/<module>`, and `feed` sets the precedent
+    for a composing module owning its own base path. `by-username/{username}` mirrors
+    `GET /api/v1/posts/by-username/{username}`.
+  - **A page can be shorter than `size` even when more items exist** — dedup happens after the
+    fetch. `next_cursor == null` is the only end-of-feed signal; documented in `TaggedItemPageDto`.
+  - **Anonymized (author-deleted) forum threads stay in the feed**; soft-deleted comments and
+    replies are dropped. An anonymized thread keeps its title/body/replies, a deleted
+    comment/reply has no content and no tags to show.
+  - **Per-item viewer state is the viewer's**, not the profile owner's (`viewer_has_liked` etc.),
+    since the DTOs are hydrated with the caller's id.
+  - Ordering compares uuids **unsigned** (`TaggedContentRef.NEWEST_FIRST`) to match Postgres's
+    byte-wise `uuid` ordering; `UUID.compareTo` is signed and would disagree with the SQL keyset on
+    equal-timestamp ties, which could skip or repeat a row across pages.
+  - `forums/dto` gained `@NamedInterface("dto")`. This only *widens* what forums exposes (its root
+    package stays the unnamed interface); no existing consumer changed.
+
+- 2026-07-31 (comment tagging — tag people & cars in a post's comment section): DONE (code),
+  **migration NOT yet applied to Supabase**.
+
+  **Endpoint change** (`PostController`, base `/api/v1/posts`): `POST /{postId}/comments` accepts two
+  new optional body fields `tagged_people: [uuid]` / `tagged_cars: [uuid]` (≤30 each, deduplicated
+  server-side). Same rule as posts/threads/replies: a car may only be tagged when its owner is in
+  `tagged_people` or is the comment's author → else 400 `CarOwnerNotTaggedException`; unknown
+  person/car id → 400 `InvalidReferenceException`. `CommentDto` now carries
+  `tagged_people: [{id, username, avatar_url}]` and `tagged_cars: [CarSummaryDto]` on **all three**
+  read paths (create response, `GET /{postId}/comments`, `GET /{postId}/comments/{commentId}/replies`).
+  A soft-deleted comment returns empty tag lists (join rows are kept, just not looked up — same
+  treatment as forum replies).
+
+  **USER ACTION NEEDED: apply `migrations/2026-07-31_comment_tagging.sql` to Supabase** (two tables
+  `comment_tagged_people` / `comment_tagged_cars`, both FK-CASCADE off `comments`, `profiles`,
+  `cars`, RLS enabled + select policy). Until it runs, the app will fail `ddl-auto: validate` at
+  startup. The test dump `src/test/resources/db/schema.sql` was hand-edited to match; re-run
+  `./scripts/dump-schema.sh` after applying to re-sync it. Both the migration and the hand-edited
+  dump statements were executed against a throwaway local Postgres to verify they parse and apply.
+
+  **Notifications**: new type `post_comment_tag` (gated by `tags_enabled`, recipient = the tagged
+  user, payload `actor_id`, `actor_username`, `post_id`, `comment_id`, `car_tagged`). Per the owner's
+  2026-07-31 decision the pre-existing gap for **post-level** tags was closed in the same pass: new
+  type `post_tag` (payload `actor_id`, `actor_username`, `post_id`, `car_tagged`), fired from
+  `createPost` / `updatePost` for **newly added** tags only. `notifications.type` is plain text, so
+  neither type needed a migration.
+
+  **Files created (main):** `posts/PostTaggedEvent.java`, `posts/PostCommentTaggedEvent.java`,
+  `posts/internal/entities/CommentTaggedPersonEntity.java` + `CommentTaggedPersonId.java`,
+  `CommentTaggedCarEntity.java` + `CommentTaggedCarId.java`,
+  `posts/internal/repositories/CommentTaggedPersonRepository.java` + `CommentTaggedCarRepository.java`;
+  `migrations/2026-07-31_comment_tagging.sql`.
+  **Files modified (main):** `posts/dto/CommentDto.java` (+`taggedPeople`/`taggedCars` after
+  `content`), `posts/dto/request/CreateCommentRequest.java` (+ the two `@Size(max = 30)` lists),
+  `posts/internal/PostsServiceImpl.java` (two repos injected; `addComment` validates/persists/echoes
+  tags; `toCommentPage` batch-resolves them; `validateTaggedCars` now returns `ownerByCar`; new
+  `publishTagEvents` / `TagRecipient` / `added` / `resolve` helpers mirroring `ForumsServiceImpl`),
+  `notification/internal/PostsNotificationListener.java` (+2 handlers), `posts/README.md`,
+  `notification/README.md`, `src/test/resources/db/schema.sql`.
+  **Files created (test):** `posts/internal/PostsTaggingTest.java` (14).
+  **Files modified (test):** `notification/internal/PostsNotificationListenerTest.java` (7→14),
+  `posts/internal/PostsNotificationPublishingTest.java` (constructor + 4-arg `CreateCommentRequest`).
+
+  **Verification:** `./mvnw clean test` → **373 tests, 0 failures, 0 errors** (baseline 358; +15
+  net), Testcontainers ITs included — so the hand-edited `schema.sql` loads into a real Postgres.
+  `ModularityTests#verifiesModularStructure` GREEN (no new module dependency: `notification` already
+  depended on `posts`). Not yet exercised against the live Supabase DB or a running app.
+
+  **Deviations / decisions to flag:**
+  - No mobile-breaking change: untagged comments serialize exactly as before, and the two request
+    fields are optional.
+  - `CommentDto` gained its two fields **after `content`** (mirrors `ReplyDto`); it's an additive
+    JSON change, but any positional constructor call had to be updated.
+  - Comment tags are create-only — there is no `PATCH /comments/{id}` in this module, so no
+    replace-all/edit semantics were built (unlike threads/replies, which have one).
+  - A user tagged in a comment on their own post gets both `post_comment` and `post_comment_tag`.
+  - Table names are `comment_tagged_people` / `comment_tagged_cars` (prefixed), not the unprefixed
+    `tagged_people` / `tagged_cars` the posts tables use.
+
+- 2026-07-17 (Item 5 — notification producers): DONE. Full suite **343 tests**, 0 failures
+  (baseline 308; +35 net). `ModularityTests#verifiesModularStructure` GREEN — new dependencies
+  notification→posts and notification→forums created no cycle (neither depends back on notification).
+
+  **The 7 in-app notification types** (each event = one notification row; no aggregation in v1 —
+  like→unlike→re-like makes a second row, accepted). Recipient's `notification_preferences` gate the
+  push; a missing prefs row (or missing profile) reads as all-enabled. Self-notify + anonymized-author
+  skips happen at the PUBLISH site. `title` embeds the actor username (fallback `"Someone …"`).
+  Payload keys are literal snake_case; all ids serialized as strings:
+
+  | type | body | payload JSON shape |
+  |---|---|---|
+  | `post_like` (`likes_enabled`) | null | `{"actor_id","actor_username","post_id"}` |
+  | `post_comment` (`comments_enabled`) | comment excerpt ≤80 or null | `{"actor_id","actor_username","post_id","comment_id"}` |
+  | `post_share` (`shares_enabled`) | null | `{"actor_id","actor_username","post_id"}` |
+  | `forum_thread_reply` (`comments_enabled`) | reply excerpt ≤80 or null | `{"actor_id","actor_username","thread_id","reply_id"}` |
+  | `forum_reply_reply` (`comments_enabled`) | reply excerpt ≤80 or null | `{"actor_id","actor_username","thread_id","parent_reply_id","reply_id"}` |
+  | `forum_thread_like` (`likes_enabled`) | null | `{"actor_id","actor_username","thread_id"}` |
+  | `forum_reply_like` (`likes_enabled`) | null | `{"actor_id","actor_username","thread_id","reply_id"}` |
+
+  **Files created (main):** events in module public API — `posts/PostLikedEvent.java`,
+  `PostCommentedEvent.java`, `PostSharedEvent.java`; `forums/ForumThreadRepliedEvent.java`,
+  `ForumReplyRepliedEvent.java`, `ForumThreadLikedEvent.java`, `ForumReplyLikedEvent.java`. Listeners
+  `notification/internal/PostsNotificationListener.java`, `ForumsNotificationListener.java`;
+  `notification/internal/NotificationAsyncConfig.java`.
+  **Files modified (main):** `profile/ProfileService.java` + `profile/internal/ProfileServiceImpl.java`
+  (new read-only `getNotificationPreferencesOrDefault(UUID)`); `posts/internal/PostsServiceImpl.java`
+  (inject `ApplicationEventPublisher`; `likePost`/`sharePost` load the post row for its author and
+  publish on real insert; `addComment` publishes for the post author at any nesting; `publishSocialEvent`
+  + `excerpt` helpers); `forums/internal/ForumsServiceImpl.java` (same injection; `addReply` root→thread
+  author / nested→parent-reply author only; `likeThread`/`likePost` publish only when insert count == 1);
+  `forums/internal/repositories/ForumThreadLikeRepository.java` + `ForumPostLikeRepository.java`
+  (`insertIgnoringConflict` return type `void`→`int` so a real insert is observable);
+  `notification/README.md`, `posts/README.md`, `forums/README.md`.
+  **Files created (test):** `notification/internal/PostsNotificationListenerTest` (8),
+  `ForumsNotificationListenerTest` (8), `posts/internal/PostsNotificationPublishingTest` (7),
+  `forums/internal/ForumsNotificationPublishingTest` (10).
+  **Files modified (test):** `profile/internal/ProfileServiceImplTest` (+3 for the new prefs method,
+  52→55). New tests: 36.
+
+  **Deviations / decisions to flag to user:**
+  - **`@ApplicationModuleListener` is NOT on this project's classpath** (only `spring-modulith-starter-core`
+    is present; the annotation lives in the events module). Adding the events module risks auto-activating
+    the persistent event-publication registry, which would need an `event_publication` table and could
+    crash startup under `ddl-auto: validate`. So the listeners use its exact standard-Spring composition
+    `@Async @Transactional(propagation = REQUIRES_NEW) @TransactionalEventListener` — same async +
+    after-commit + isolated-tx semantics — and `NotificationAsyncConfig` adds `@EnableAsync` (async was
+    not enabled anywhere before; the existing `DmPresencePusher` uses a synchronous `@EventListener`).
+  - **Self-notify + null/anonymized-author skips are done at the PUBLISH site** (one consistent place,
+    via `publishSocialEvent`), not in the listener. Listeners still gate on prefs and resolve the username.
+  - **Forum like repos now return `int`** from `insertIgnoringConflict` (was `void`) so "notify only on a
+    real like" is observable; callers previously ignored the return, so this is source-compatible.
+  - **Posts producers now load the post row** (`likePost`/`sharePost`/`addComment`) instead of a bare
+    `existsById` check, to get the author id for the recipient. Same 404 behavior on a missing post.
+  - Excerpt truncation is ~80 chars with a trailing `…`; blank comment/reply text ⇒ null body.
+  - Full-suite count came out 343 (not the 308+36=344 I'd expect) — a one-test discrepancy vs the stated
+    308 baseline, most likely the committed-tree baseline differing by one; 0 failures either way.
 - 2026-07-17: Investigation + user Q&A done. Tracker created.
 - 2026-07-17 (Fable review of agent A): added avatar-key ownership check in ProfileServiceImpl.updateAvatar
   (key must start with `avatars/{userId}/`, else 400) + test. Without it a caller could point their profile at —

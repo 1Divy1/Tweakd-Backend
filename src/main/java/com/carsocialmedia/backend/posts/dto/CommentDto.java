@@ -1,8 +1,10 @@
 package com.carsocialmedia.backend.posts.dto;
 
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -15,6 +17,9 @@ import java.util.UUID;
  * @param id the comment ID
  * @param author the comment author (id, username, avatarUrl)
  * @param content the comment text, or {@code null} when the comment is deleted
+ * @param taggedPeople the profiles tagged in the comment (empty when none, or when it is deleted)
+ * @param taggedCars the cars tagged in the comment (empty when none, or when it is deleted); every
+ *        car's owner is among {@code taggedPeople} unless it belongs to the comment's author
  * @param parentCommentId the parent comment for a threaded reply, or {@code null} for a root comment
  * @param deleted whether the comment is soft-deleted
  * @param likeCount how many users liked this comment
@@ -26,6 +31,8 @@ public record CommentDto(
         UUID id,
         ProfileSearchResultDto author,
         String content,
+        List<ProfileSearchResultDto> taggedPeople,
+        List<CarSummaryDto> taggedCars,
         UUID parentCommentId,
         boolean deleted,
         long likeCount,

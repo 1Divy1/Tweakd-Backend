@@ -9,6 +9,8 @@ import com.carsocialmedia.backend.posts.dto.request.CreateCommentRequest;
 import com.carsocialmedia.backend.posts.dto.request.CreatePostRequest;
 import com.carsocialmedia.backend.posts.dto.request.UpdatePostRequest;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -180,6 +182,69 @@ public interface PostsService {
      * @return the page of likers plus the cursor for the next page (or {@code null} if last)
      */
     LikerPageDto getPostLikers(UUID postId, String cursor, int size);
+
+    // -------------------------------------------------------------------
+    // TAGS — the data behind a profile's "tags" section (composed by the tags module)
+    //
+    // The tags module merges these keyset streams with the forums module's into one
+    // chronological page, then asks for the DTOs of just the ids that made the page. Content the
+    // tagged user wrote themselves is filtered out here, in SQL.
+    // -------------------------------------------------------------------
+
+    /**
+     * One keyset page of refs to the posts the given user — or one of their cars — is tagged in,
+     * most recently tagged first, excluding posts they authored.
+     *
+     * @param userId the tagged user
+     * @param ownedCarIds that user's car ids, resolved once by the caller and reused across all
+     *        four tag streams; empty means "match person tags only"
+     * @param cursorTaggedAt the previous page's last {@code taggedAt}, or {@code null} for the first page
+     * @param cursorId the previous page's last content id, or {@code null} for the first page
+     * @param limit max refs to return (the caller over-fetches by one to detect a further page)
+     */
+    List<com.carsocialmedia.backend.shared.tagging.TaggedContentRef> findTaggedPostRefs(
+            UUID userId, Collection<UUID> ownedCarIds, Instant cursorTaggedAt, UUID cursorId, int limit);
+
+    /**
+     * One keyset page of refs to the post comments the given user — or one of their cars — is
+     * tagged in, most recently tagged first. Excludes their own comments and soft-deleted ones; the
+     * ref's {@code parentId} is the comment's post.
+     *
+     * @see #findTaggedPostRefs for the parameters
+     */
+    List<com.carsocialmedia.backend.shared.tagging.TaggedContentRef> findTaggedCommentRefs(
+            UUID userId, Collection<UUID> ownedCarIds, Instant cursorTaggedAt, UUID cursorId, int limit);
+
+    /**
+     * Batch-assembles the given posts (same shape as any feed row), in the requested order. Ids
+     * that no longer resolve are dropped rather than erroring — the caller is rendering a merged
+     * page and a post deleted mid-request should just disappear from it.
+     */
+    List<PostDto> getPostsByIds(UUID viewerId, List<UUID> postIds);
+
+    /**
+     * Batch-assembles the given comments, in the requested order, with the same author / tag / like
+     * resolution as the comment listings. Ids that no longer resolve are dropped.
+     */
+    List<CommentDto> getCommentsByIds(UUID viewerId, List<UUID> commentIds);
+
+    /**
+     * Removes the caller's own tags from a post: their person tag plus the tags of any of their own
+     * cars on that post (dropping only the person tag would leave a car whose owner is not tagged,
+     * breaking the rule the tagging endpoints enforce). Idempotent — untagging where there is no
+     * tag is a no-op.
+     *
+     * @throws com.carsocialmedia.backend.posts.exception.PostNotFoundException if the post does not exist
+     */
+    void removeSelfTagsFromPost(UUID userId, UUID postId);
+
+    /**
+     * Removes the caller's own person and car tags from a comment; see
+     * {@link #removeSelfTagsFromPost}. Idempotent.
+     *
+     * @throws com.carsocialmedia.backend.posts.exception.CommentNotFoundException if the comment does not exist
+     */
+    void removeSelfTagsFromComment(UUID userId, UUID commentId);
 
     // -------------------------------------------------------------------
     // ENGAGEMENT — likes, saves, shares, comments

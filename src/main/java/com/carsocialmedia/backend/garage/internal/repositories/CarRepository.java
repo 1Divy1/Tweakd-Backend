@@ -70,6 +70,17 @@ public interface CarRepository extends JpaRepository<CarEntity, UUID> {
     }
 
     /**
+     * Every car id belonging to one owner. The inverse of {@link #findOwnerIdsByCarIds}, used by
+     * the tags module to ask "which cars are mine?" before scanning the tag join tables.
+     */
+    @Query("""
+            select c.id
+              from CarEntity c
+             where c.garage.ownerId = :ownerId
+            """)
+    List<UUID> findIdsByOwnerId(@Param("ownerId") UUID ownerId);
+
+    /**
      * Car detail. Pulls every reference row the {@link CarEntity} touches so the response
      * mapping stays inside the open session.
      */

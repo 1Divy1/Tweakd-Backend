@@ -2,7 +2,8 @@
 
 Owns everything in the feed: `posts` and their child tables `post_images`,
 `tagged_people`, `tagged_cars`, plus engagement tables `post_likes`, `post_shares`,
-`saved_posts`, `comments`, and `comment_likes`.
+`saved_posts`, `comments`, `comment_likes`, and the comment tag tables
+`comment_tagged_people` / `comment_tagged_cars`.
 
 Tagged people and tagged cars are stored as flat reference UUIDs — the post never holds
 profile or car entities. They are resolved to `ProfileSearchResultDto` / `CarSummaryDto`
@@ -15,8 +16,27 @@ cars in a dropdown. On create and update the rule is enforced over the post's *r
 tag set — e.g. untagging a person whose car is still tagged is rejected
 (`CarOwnerNotTaggedException`). Car ownership is resolved via `GarageService.findCarOwnerIds`.
 
+The same rule applies to **comments**: `POST /{postId}/comments` accepts optional `tagged_people` /
+`tagged_cars` (≤30 each, deduplicated server-side), validated against the comment's author. Comments
+have no edit endpoint, so a comment's tag set is fixed at creation. All three comment read paths
+(the create response, the comment page and the reply page) echo the tags back as
+`ProfileSearchResultDto` / `CarSummaryDto`; a soft-deleted comment returns empty tag lists, exactly
+like a deleted forum reply (the join rows stay in place, they're just not looked up).
+
+A tagged user can **untag themselves** from a post or a comment
+(`removeSelfTagsFromPost` / `removeSelfTagsFromComment`, exposed by the `tags` module's
+`DELETE /api/v1/tags/{kind}/{targetId}`). The tag row is deleted, not hidden, and any of that
+user's *own* cars tagged on the same content go with it — otherwise the removal would leave a
+tagged car whose owner is no longer tagged. Other people's tags are untouched.
+
+The `tags` module also reads these tables in reverse ("what is this user tagged in?") through
+`findTaggedPostRefs` / `findTaggedCommentRefs` — keyset streams of ids that exclude the tagged
+user's own content and, for comments, soft-deleted rows. See the
+[`tags` module](../tags/README.md).
+
 Depends on the `profile` module (author + tagged-people resolution), the `garage` module
-(tagged-car resolution), and the `storage` module (presigned upload URLs + key→URL).
+(tagged-car resolution + `findCarIdsByOwner` for untagging), and the `storage` module (presigned
+upload URLs + key→URL).
 
 ## Create-a-post flow
 
@@ -55,9 +75,12 @@ key is persisted; the public URL is built on read via `StorageService.publicUrl`
 | `likePost / unlikePost(currentUserId, postId)` | Like / unlike a post (idempotent) |
 | `savePost / unsavePost(currentUserId, postId)` | Save / unsave (bookmark) a post (idempotent) |
 | `sharePost(currentUserId, postId, content)` / `unsharePost(currentUserId, postId)` | Share / unshare a post; non-blank `content` = quote share (idempotent) |
-| `addComment(currentUserId, postId, CreateCommentRequest)` | Add a comment or threaded reply; returns the `CommentDto` |
+| `addComment(currentUserId, postId, CreateCommentRequest)` | Add a comment or threaded reply (+ its tagged people/cars); returns the `CommentDto` |
 | `deleteComment(currentUserId, postId, commentId)` | Soft-delete a comment (idempotent); comment author or post owner |
 | `likeComment / unlikeComment(currentUserId, postId, commentId)` | Like / unlike a comment (idempotent) |
+| `findTaggedPostRefs` / `findTaggedCommentRefs(userId, ownedCarIds, cursorTaggedAt, cursorId, limit)` | Keyset stream of "content this user (or their car) is tagged in", newest tag first; excludes their own content. Consumed by `tags` |
+| `getPostsByIds(viewerId, postIds)` / `getCommentsByIds(viewerId, commentIds)` | Batch DTO assembly in the requested order; unresolvable ids are dropped |
+| `removeSelfTagsFromPost / removeSelfTagsFromComment(userId, targetId)` | Untag yourself: person tag + your own cars' tags on that content (idempotent) |
 
 **Engagement counts are trigger-owned.** Every denormalized count — `posts.likes_count`,
 `saved_count`, `shares_count`, `quote_shares_count`, `comments_count`, and `comments.likes_count`
@@ -73,13 +96,13 @@ a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE
 |---|---|
 | `PostDto` | Full post for feed/detail: author, images, tagged people/cars, counts + visibility flags, viewer like/save state |
 | `PostImageDto` | One image: `id`, full `imageUrl` (built from R2 key), `displayOrder` |
-| `CreateCommentRequest` | Comment payload: `content` (required) + optional `parentCommentId` for a reply |
+| `CreateCommentRequest` | Comment payload: `content` (required) + optional `parentCommentId` for a reply, `taggedPeople`, `taggedCars` (≤30 each) |
 | `SharePostRequest` | Share payload: optional `content` caption (non-blank = quote share) |
 | `CreatePostRequest` | Create payload: caption, `taggedPeople`, `taggedCars`, three `*CountEnabled` toggles. No images |
 | `UpdatePostRequest` | Partial-update payload (PATCH semantics: null = leave unchanged; non-null tag list = replace-all) |
 | `PostImageKeysRequest` | Ordered list of R2 keys (max 10) — the post's complete desired image set |
 | `PostPageDto` | One keyset page of posts (`items` + `nextCursor`) — profile grids |
-| `CommentDto` / `CommentPageDto` | A comment / one keyset page of comments |
+| `CommentDto` / `CommentPageDto` | A comment (incl. `taggedPeople` / `taggedCars`) / one keyset page of comments |
 | `LikerPageDto` | One keyset page of likers (`ProfileSearchResultDto` items) |
 
 ### Exceptions
@@ -90,8 +113,8 @@ a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE
 | `CommentNotFoundException` | 404 | Comment id doesn't exist (or doesn't belong to the post in the URL) |
 | `NotPostOwnerException` | 403 | Caller tries to mutate a post they don't own |
 | `NotCommentOwnerException` | 403 | Caller tries to delete a comment they neither authored nor own the post of |
-| `InvalidReferenceException` | 400 | A tagged person or car id doesn't exist |
-| `CarOwnerNotTaggedException` | 400 | A tagged car's owner is neither the author nor a tagged person |
+| `InvalidReferenceException` | 400 | A tagged person or car id doesn't exist (post **or** comment tags) |
+| `CarOwnerNotTaggedException` | 400 | A tagged car's owner is neither the author nor a tagged person (post **or** comment tags) |
 | `InvalidCursorException` | 400 | A pagination cursor can't be decoded |
 
 ## REST endpoints
@@ -115,7 +138,7 @@ Base path: `/api/v1/posts`
 | POST / DELETE | `/{postId}/likes` | Like / unlike a post (204; idempotent) |
 | POST / DELETE | `/{postId}/saves` | Save / unsave a post (204; idempotent) |
 | POST / DELETE | `/{postId}/shares` | Share / unshare a post (204; idempotent). POST body `{ "content": "…" }` optional → quote share |
-| POST | `/{postId}/comments` | Add a comment / reply (201); body `{ "content": "…", "parentCommentId": "…"? }` |
+| POST | `/{postId}/comments` | Add a comment / reply (201); body `{ "content": "…", "parent_comment_id": "…"?, "tagged_people": [uuid]?, "tagged_cars": [uuid]? }` |
 | DELETE | `/{postId}/comments/{commentId}` | Soft-delete the caller's comment (204; author only) |
 | POST / DELETE | `/{postId}/comments/{commentId}/likes` | Like / unlike a comment (204; idempotent) |
 
@@ -141,6 +164,8 @@ A global feed endpoint is still pending, but it now only needs its own keyset qu
 | `TaggedCarEntity` → `tagged_cars` | Composite PK `(post_id, car_id)`; `car_id` is a flat `cars.id` ref |
 | `PostLikeEntity` / `SavedPostEntity` / `PostShareEntity` | Composite-PK engagement rows |
 | `CommentEntity` / `CommentLikeEntity` | Threaded comments (self-ref `parent_comment_id`) and their likes |
+| `CommentTaggedPersonEntity` → `comment_tagged_people` | Composite PK `(comment_id, user_id)`; flat `profiles.id` ref |
+| `CommentTaggedCarEntity` → `comment_tagged_cars` | Composite PK `(comment_id, car_id)`; flat `cars.id` ref |
 
 ## Domain events published
 
@@ -155,9 +180,15 @@ self-event. The `notification` module consumes these; nothing depends back on po
 | `PostLikedEvent(postId, recipientId, actorId)` | `likePost` | only on a real first like (not on a duplicate) | post author |
 | `PostCommentedEvent(postId, commentId, recipientId, actorId, excerpt)` | `addComment` | any comment or reply, whatever the nesting | post author |
 | `PostSharedEvent(postId, recipientId, actorId)` | `sharePost` | only on a real first share (plain or quote) | post author |
+| `PostTaggedEvent(postId, recipientId, actorId, carTagged)` | `createPost` / `updatePost` | one per **newly** tagged user (re-saving an unchanged set is silent) | the tagged user |
+| `PostCommentTaggedEvent(postId, commentId, recipientId, actorId, carTagged)` | `addComment` | one per tagged user (comments aren't editable, so every tag is new) | the tagged user |
 
 Note: `likePost` / `sharePost` / `addComment` now load the post row (for the author id) instead of a
 bare existence check.
+
+A tagged car's owner is tagged as a person too unless the car is the author's own, so the two
+collapse into one event per recipient carrying `carTagged`. A user tagged in a comment on their own
+post receives both a `PostCommentedEvent` and a `PostCommentTaggedEvent`.
 
 ## Cross-module dependencies
 

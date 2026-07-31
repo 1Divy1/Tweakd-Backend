@@ -1,9 +1,11 @@
 package com.carsocialmedia.backend.notification.internal;
 
 import com.carsocialmedia.backend.notification.NotificationService;
+import com.carsocialmedia.backend.posts.PostCommentTaggedEvent;
 import com.carsocialmedia.backend.posts.PostCommentedEvent;
 import com.carsocialmedia.backend.posts.PostLikedEvent;
 import com.carsocialmedia.backend.posts.PostSharedEvent;
+import com.carsocialmedia.backend.posts.PostTaggedEvent;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.NotificationPreferencesDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
@@ -49,6 +51,10 @@ class PostsNotificationListenerTest {
 
     private static NotificationPreferencesDto with(boolean likes, boolean comments, boolean shares) {
         return new NotificationPreferencesDto(likes, comments, shares, true, true, true, true, true);
+    }
+
+    private static NotificationPreferencesDto withTags(boolean tags) {
+        return new NotificationPreferencesDto(true, true, true, true, true, true, true, tags);
     }
 
     @BeforeEach
@@ -126,6 +132,77 @@ class PostsNotificationListenerTest {
         when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(with(true, true, false));
 
         listener.on(new PostSharedEvent(POST, RECIPIENT, ACTOR));
+
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void postTagPushesToTheTaggedUserWithTheCarFlag() {
+        when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(allEnabled());
+
+        listener.on(new PostTaggedEvent(POST, RECIPIENT, ACTOR, true));
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(notificationService).push(eq(RECIPIENT), eq("post_tag"),
+                eq("marius_dev tagged your car in a post"), isNull(), payload.capture());
+        assertThat(payload.getValue())
+                .containsEntry("post_id", POST.toString())
+                .containsEntry("car_tagged", true)
+                .doesNotContainKey("comment_id");
+    }
+
+    @Test
+    void postTagWordsTheTitleForAPersonOnlyTag() {
+        when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(allEnabled());
+
+        listener.on(new PostTaggedEvent(POST, RECIPIENT, ACTOR, false));
+
+        verify(notificationService).push(eq(RECIPIENT), eq("post_tag"),
+                eq("marius_dev tagged you in a post"), isNull(), any());
+    }
+
+    @Test
+    void postTagSkippedWhenTagsDisabled() {
+        when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(withTags(false));
+
+        listener.on(new PostTaggedEvent(POST, RECIPIENT, ACTOR, false));
+
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void postCommentTagCarriesBothThePostAndCommentIds() {
+        when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(allEnabled());
+
+        listener.on(new PostCommentTaggedEvent(POST, COMMENT, RECIPIENT, ACTOR, false));
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(notificationService).push(eq(RECIPIENT), eq("post_comment_tag"),
+                eq("marius_dev tagged you in a comment"), isNull(), payload.capture());
+        assertThat(payload.getValue())
+                .containsEntry("actor_id", ACTOR.toString())
+                .containsEntry("post_id", POST.toString())
+                .containsEntry("comment_id", COMMENT.toString())
+                .containsEntry("car_tagged", false);
+    }
+
+    @Test
+    void postCommentTagWordsTheTitleForACarTag() {
+        when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(allEnabled());
+
+        listener.on(new PostCommentTaggedEvent(POST, COMMENT, RECIPIENT, ACTOR, true));
+
+        verify(notificationService).push(eq(RECIPIENT), eq("post_comment_tag"),
+                eq("marius_dev tagged your car in a comment"), isNull(), any());
+    }
+
+    @Test
+    void postCommentTagSkippedWhenTagsDisabled() {
+        when(profileService.getNotificationPreferencesOrDefault(RECIPIENT)).thenReturn(withTags(false));
+
+        listener.on(new PostCommentTaggedEvent(POST, COMMENT, RECIPIENT, ACTOR, true));
 
         verifyNoInteractions(notificationService);
     }
