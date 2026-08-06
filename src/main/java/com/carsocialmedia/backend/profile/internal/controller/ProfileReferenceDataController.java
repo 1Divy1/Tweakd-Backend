@@ -2,9 +2,9 @@ package com.carsocialmedia.backend.profile.internal.controller;
 
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
-import com.carsocialmedia.backend.profile.dto.CityDto;
+import com.carsocialmedia.backend.shared.geo.CityDto;
 import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
-import com.carsocialmedia.backend.profile.dto.CountryDto;
+import com.carsocialmedia.backend.shared.geo.CountryDto;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;

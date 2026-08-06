@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.profile.dto;
+package com.carsocialmedia.backend.shared.geo;
 
 /**
  * A selectable country.

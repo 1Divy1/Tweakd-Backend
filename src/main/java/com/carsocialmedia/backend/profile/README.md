@@ -1,9 +1,14 @@
 # profile module
 
 Manages user profile data and onboarding. Owns the `profiles` table plus the
-onboarding reference/selection tables: `countries`, `cities`,
-`community_role_options`, `car_category_options`, `notification_preferences`, and
-the junctions `profile_car_categories_junction` / `profile_community_roles_junction`.
+onboarding reference/selection tables: `community_role_options`, `car_category_options`,
+`notification_preferences`, and the junctions `profile_car_categories_junction` /
+`profile_community_roles_junction`.
+
+> **countries / cities** used to live here, because onboarding was the first feature to need a
+> city list. They are app-wide geo reference data, not profile data — once the `business` module
+> needed the same tables they moved to [`shared/geo`](../shared/geo). The onboarding endpoints
+> below are unchanged; only the entity/DTO packages moved.
 
 > **dream_cars** is intentionally *not* here — it references `car_brands`/`car_models`
 > (owned by the garage module), so it will live in the **garage** module when built.
@@ -41,7 +46,7 @@ the junctions `profile_car_categories_junction` / `profile_community_roles_junct
 | `CategorySelectionRequest` | categoryIds | PUT /me/car-categories body (replace-all) |
 | `RoleSelectionRequest` | roleIds | PUT /me/community-roles body (replace-all) |
 | `NotificationPreferencesRequest` | 8 boolean toggles (all required, incl. `tags_enabled`) | PUT /me/notifications body |
-| `CountryDto` / `CityDto` | reference data (CityDto exposes lat/lng) | reference reads |
+| `CountryDto` / `CityDto` | reference data (CityDto exposes lat/lng); defined in `shared/geo` | reference reads |
 | `CommunityRoleDto` / `CarCategoryDto` | id, name | reference + selection reads |
 | `NotificationPreferencesDto` | 8 boolean toggles (`tags_enabled` gates forum tag notifications) | notification reads/writes |
 
@@ -95,7 +100,7 @@ Reference reads (base path `/api/v1/profile/reference`):
 | isVerified | boolean | |
 | isBusiness | boolean | |
 | requiresOnboarding | boolean | |
-| city | CityEntity | `@ManyToOne` on `city_id`, nullable |
+| city | CityEntity (`shared.geo`) | `@ManyToOne` on `city_id`, nullable |
 | discoveryRadiusKm | Integer | nullable, DB check 1–100 |
 | realtimeLocation | Point | `geography` (unconstrained), nullable |
 
@@ -103,8 +108,8 @@ Reference reads (base path `/api/v1/profile/reference`):
 
 ### Other entities
 
-`CountryEntity`, `CityEntity`, `CommunityRoleOptionEntity`, `CarCategoryOptionEntity`
-are read-only reference tables. `NotificationPreferencesEntity` is 1:1 with a profile
+`CommunityRoleOptionEntity` and `CarCategoryOptionEntity` are read-only reference tables
+(`CountryEntity` / `CityEntity` now live in `shared/geo`). `NotificationPreferencesEntity` is 1:1 with a profile
 (`profile_id` PK). The two junction entities (`ProfileCarCategoryEntity`,
 `ProfileCommunityRoleEntity`) use composite `@EmbeddedId` keys, mirroring
 `follow/internal/FollowEntity`; they are written replace-all per profile.

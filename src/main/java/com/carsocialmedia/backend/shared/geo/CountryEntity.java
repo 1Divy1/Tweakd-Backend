@@ -1,6 +1,5 @@
-package com.carsocialmedia.backend.profile.internal.entity;
+package com.carsocialmedia.backend.shared.geo;
 
-import com.carsocialmedia.backend.profile.dto.CountryDto;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

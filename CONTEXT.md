@@ -46,7 +46,10 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: in-memory session registry, WS lifecycle listeners, grace sweep + flush (@Scheduled), entity, repo, controller
 ├── tags/             ← public API: TagsService, DTOs (merged tags feed). Owns no data — composes posts + forums + garage
 │   └── internal/     ← private: controller, service impl (four-stream merge), cursor
+├── business/         ← public API: BusinessService, DTOs (map pin / profile / hours / type). Read-only
+│   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, open-now derivation
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
+    └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
 
 **Public root package** — what other modules may import: service interfaces, DTOs/records, domain events, exception types.
@@ -103,6 +106,7 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`posts` module](src/main/java/com/carsocialmedia/backend/posts/README.md)
 - [`feed` module](src/main/java/com/carsocialmedia/backend/feed/README.md)
 - [`tags` module](src/main/java/com/carsocialmedia/backend/tags/README.md)
+- [`business` module](src/main/java/com/carsocialmedia/backend/business/README.md)
 - [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
 - [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
 - [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)

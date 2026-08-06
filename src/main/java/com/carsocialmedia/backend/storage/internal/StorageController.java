@@ -22,14 +22,12 @@ public class StorageController {
     private final StorageService storageService;
 
     // ----- AVATARS -----
-
     @GetMapping("/avatar")
     public UploadUrlResponse avatar(@AuthenticationPrincipal Jwt jwt) {
         return storageService.avatarUploadUrlRequest(UUID.fromString(jwt.getSubject()));
     }
 
     // ----- CARS -----
-
     @GetMapping("/cars/{carId}/cover")
     public UploadUrlResponse cover(@PathVariable UUID carId) {
         return storageService.coverUploadUrlRequest(carId);
@@ -60,7 +58,6 @@ public class StorageController {
     }
 
     // ----- POSTS -----
-
     @PostMapping("/posts/{postId}/upload-urls")
     public PostImagesUploadUrlsResponse postImages(
             @PathVariable UUID postId,
