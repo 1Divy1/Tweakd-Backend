@@ -31,6 +31,16 @@ public class StorageServiceImpl implements StorageService {
         this.s3Client = s3Client;
     }
 
+    // === AVATARS ===
+    // avatars/{userId}/{uuid}.webp
+    @Override
+    public UploadUrlResponse avatarUploadUrlRequest(UUID userId) {
+        String key = "avatars/" + userId +
+                "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
+
+        return buildUploadUrlResponse(config.getAvatars(), key, FileFormat.WEBP);
+    }
+
     // === GARAGE ===
     // cars/{carId}/cover.webp
     @Override
@@ -49,31 +59,6 @@ public class StorageServiceImpl implements StorageService {
                 "/gallery/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
 
         return buildUploadUrlResponse(config.getGarage(), key, FileFormat.WEBP);
-    }
-
-    // === AVATARS ===
-    // avatars/{userId}/{uuid}.webp
-    @Override
-    public UploadUrlResponse avatarUploadUrlRequest(UUID userId) {
-        String key = "avatars/" + userId +
-                "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
-
-        return buildUploadUrlResponse(config.getAvatars(), key, FileFormat.WEBP);
-    }
-
-    // === POSTS ===
-
-    // posts/{postId}/{uuid}.webp  (one per requested image)
-    @Override
-    public PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count) {
-        List<UploadUrlResponse> uploads = new ArrayList<>(count);
-
-        for (int i = 0; i < count; i++) {
-            String key = "posts/" + postId +
-                    "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
-            uploads.add(buildUploadUrlResponse(config.getPosts(), key, FileFormat.WEBP));
-        }
-        return new PostImagesUploadUrlsResponse(uploads);
     }
 
     // cars/{carId}/modifications/{modId}/{phase}/{uuid}.{ext}
@@ -104,6 +89,20 @@ public class StorageServiceImpl implements StorageService {
         return new ModificationUploadUrlsResponse(uploads);
     }
 
+    // === POSTS ===
+    // posts/{postId}/{uuid}.webp  (one per requested image)
+    @Override
+    public PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count) {
+        List<UploadUrlResponse> uploads = new ArrayList<>(count);
+
+        for (int i = 0; i < count; i++) {
+            String key = "posts/" + postId +
+                    "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
+            uploads.add(buildUploadUrlResponse(config.getPosts(), key, FileFormat.WEBP));
+        }
+        return new PostImagesUploadUrlsResponse(uploads);
+    }
+
     @Override
     public String publicUrl(StorageBucket bucket, String key) {
         if (key == null || key.isBlank()) {
@@ -130,8 +129,11 @@ public class StorageServiceImpl implements StorageService {
     }
 
     // ========== HELPERS ==========
-
-    private UploadUrlResponse buildUploadUrlResponse(R2Config.BucketTarget target, String key, FileFormat format) {
+    private UploadUrlResponse buildUploadUrlResponse(
+            R2Config.BucketTarget target,
+            String key,
+            FileFormat format
+    ) {
         String uploadUrl = presigner.generateUploadUrl(target.getBucket(), key, format.getContentType());
         return new UploadUrlResponse(key, uploadUrl);
     }

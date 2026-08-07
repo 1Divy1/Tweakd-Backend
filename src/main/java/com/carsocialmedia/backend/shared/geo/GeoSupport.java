@@ -1,4 +1,4 @@
-package com.carsocialmedia.backend.profile.internal;
+package com.carsocialmedia.backend.shared.geo;
 
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;

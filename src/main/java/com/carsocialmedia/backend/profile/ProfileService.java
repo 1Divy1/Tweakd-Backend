@@ -2,9 +2,9 @@ package com.carsocialmedia.backend.profile;
 
 import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
 import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
-import com.carsocialmedia.backend.profile.dto.CityDto;
+import com.carsocialmedia.backend.shared.geo.CityDto;
 import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
-import com.carsocialmedia.backend.profile.dto.CountryDto;
+import com.carsocialmedia.backend.shared.geo.CountryDto;
 import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
 import com.carsocialmedia.backend.profile.dto.ProfileEditRequest;

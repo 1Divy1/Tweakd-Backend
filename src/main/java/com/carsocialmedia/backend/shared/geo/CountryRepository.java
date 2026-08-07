@@ -1,6 +1,5 @@
-package com.carsocialmedia.backend.profile.internal.repository;
+package com.carsocialmedia.backend.shared.geo;
 
-import com.carsocialmedia.backend.profile.internal.entity.CountryEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
