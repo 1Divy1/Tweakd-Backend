@@ -1,7 +1,7 @@
 package com.carsocialmedia.backend.profile.internal;
 
 import com.carsocialmedia.backend.profile.dto.ProfileDto;
-import com.carsocialmedia.backend.profile.internal.entity.CityEntity;
+import com.carsocialmedia.backend.shared.geo.CityEntity;
 import com.carsocialmedia.backend.profile.internal.entity.ProfileEntity;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;

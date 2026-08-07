@@ -42,3 +42,32 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.car_fuel_type_options (id, name) VALUES
     ('test_fuel', 'Test Fuel')
 ON CONFLICT (id) DO NOTHING;
+
+-- Business reference data. business_accounts has RESTRICT FKs to all three lookup tables plus
+-- cities, so a business row cannot be inserted without these. The status ids must match the real
+-- Supabase values, because the visibility filter compares against them as literals.
+INSERT INTO public.countries (id, name) VALUES
+    ('RO', 'Romania')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.cities (id, name, region, country, location) VALUES
+    ('test-city', 'Test City', 'Test Region', 'RO',
+     public.ST_SetSRID(public.ST_MakePoint(23.6236, 46.7712), 4326)::public.geography)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.business_type_options (id, type) VALUES
+    ('test_business_type', 'Test Business Type'),
+    ('test_other_type', 'Test Other Type')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.business_account_verification_status_options (id, status) VALUES
+    ('pending', 'Pending'),
+    ('verified', 'Verified'),
+    ('rejected', 'Rejected')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.business_account_active_status_options (id, status) VALUES
+    ('active', 'Active'),
+    ('suspended', 'Suspended'),
+    ('deleted', 'Deleted')
+ON CONFLICT (id) DO NOTHING;

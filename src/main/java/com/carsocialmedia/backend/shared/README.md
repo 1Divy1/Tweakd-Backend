@@ -51,3 +51,24 @@ Module-level exceptions (e.g. `ProfileNotFoundException`, `CannotFollowSelfExcep
 `GlobalExceptionHandler` handles:
 - `ApiException` subclasses → status + message from the exception
 - `MethodArgumentNotValidException` → 400 with a `field → message` map in `errors`
+## Geo reference data — `geo/`
+
+The app-wide `countries` and `cities` lookup tables, plus `GeoSupport` for converting between
+plain lat/lng doubles (the wire format) and the JTS `Point`s stored in `geography(Point,4326)`
+columns.
+
+| Type | Purpose |
+|---|---|
+| `CountryEntity` / `CountryRepository` | `countries` reference table |
+| `CityEntity` / `CityRepository` | `cities` reference table; carries a `geography(Point,4326)` location |
+| `CountryDto` / `CityDto` | wire shapes (`CityDto` exposes lat/lng as doubles) |
+| `GeoSupport` | `point(lat, lng)`, `latOf(p)`, `lngOf(p)` — **PostGIS order is (lng, lat)** |
+
+These originally lived in the `profile` module because onboarding was the first feature to need a
+city list. They moved here once `business` needed the same tables: a business's city has nothing to
+do with a user profile, and one feature module should not have to expose a lookup on behalf of
+another. Rows are seeded and owned by Supabase; nothing in the app writes to them.
+
+**`cities.id` is a slug** (`cluj-napoca`, `bucharest`) and is not displayable — `cities.name` holds
+the properly accented display name (`Cluj-Napoca`, `București`). Any module that stores a city id
+and shows it to a user must resolve the name through `CityRepository`.

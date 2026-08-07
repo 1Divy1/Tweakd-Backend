@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.profile.internal.entity;
 
+import com.carsocialmedia.backend.shared.geo.CityEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;

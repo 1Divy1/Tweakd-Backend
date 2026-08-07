@@ -151,6 +151,133 @@ $$;
 
 
 --
+-- Name: dm_send_message(uuid, text, uuid[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.dm_send_message(p_recipient_id uuid, p_content text DEFAULT ''::text, p_tagged_car_ids uuid[] DEFAULT '{}'::uuid[]) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_sender          uuid        := auth.uid();
+  v_content         text        := coalesce(p_content, '');
+  v_cars            uuid[]      := coalesce(p_tagged_car_ids, '{}'::uuid[]);
+  v_user_a          uuid;
+  v_user_b          uuid;
+  v_conversation_id uuid;
+  v_message_id      uuid        := gen_random_uuid();
+  v_now             timestamptz := now();
+begin
+  if v_sender is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  if p_recipient_id is null then
+    raise exception 'recipient_id is required' using errcode = '22023';
+  end if;
+
+  if p_recipient_id = v_sender then
+    raise exception 'cannot send a message to yourself' using errcode = '22023';
+  end if;
+
+  if not exists (select 1 from public.profiles p where p.id = p_recipient_id) then
+    raise exception 'recipient not found' using errcode = '22023';
+  end if;
+
+  -- A send needs text, cars, or both — never an empty payload.
+  if btrim(v_content) = '' and coalesce(cardinality(v_cars), 0) = 0 then
+    raise exception 'message must have content or at least one tagged car'
+      using errcode = '22023';
+  end if;
+
+  if length(v_content) > 2000 then
+    raise exception 'content exceeds 2000 characters' using errcode = '22001';
+  end if;
+
+  -- Canonical pair ordering — dm_conversations has CHECK (user_a < user_b)
+  -- and UNIQUE (user_a, user_b), so one pair is always one row.
+  v_user_a := least(v_sender, p_recipient_id);
+  v_user_b := greatest(v_sender, p_recipient_id);
+
+  insert into public.dm_conversations (id, user_a, user_b, created_at)
+  values (gen_random_uuid(), v_user_a, v_user_b, v_now)
+  on conflict (user_a, user_b) do nothing;
+
+  select c.id
+    into v_conversation_id
+    from public.dm_conversations c
+   where c.user_a = v_user_a
+     and c.user_b = v_user_b;
+
+  insert into public.dm_messages
+    (id, conversation_id, sender_id, content, is_deleted, created_at)
+  values
+    (v_message_id, v_conversation_id, v_sender, v_content, false, v_now);
+
+  -- Unknown car ids are skipped rather than raising, so one stale id from a
+  -- car deleted mid-compose cannot fail the whole send.
+  if coalesce(cardinality(v_cars), 0) > 0 then
+    insert into public.dm_message_car_tags (message_id, car_id, created_at)
+    select v_message_id, c.id, v_now
+      from public.cars c
+     where c.id = any (v_cars)
+    on conflict do nothing;
+  end if;
+
+  -- A blank preview (car-only share) is meaningful to the app: the inbox row
+  -- renders "shared cars". NULL is reserved for "last message was deleted".
+  update public.dm_conversations
+     set last_message_at        = v_now,
+         last_message_preview   = v_content,
+         last_message_sender_id = v_sender
+   where id = v_conversation_id;
+
+  -- Sender side: make sure the row exists and the chat is no longer hidden.
+  -- unread_count is left alone; the chat page marks the conversation read.
+  insert into public.dm_participant_state (conversation_id, user_id, unread_count)
+  values (v_conversation_id, v_sender, 0)
+  on conflict (conversation_id, user_id) do update
+    set hidden_at = null;
+
+  -- Recipient side: bump the badge and resurface a chat they had hidden.
+  insert into public.dm_participant_state (conversation_id, user_id, unread_count)
+  values (v_conversation_id, p_recipient_id, 1)
+  on conflict (conversation_id, user_id) do update
+    set unread_count = public.dm_participant_state.unread_count + 1,
+        hidden_at    = null;
+
+  return jsonb_build_object(
+    'id',              v_message_id,
+    'conversation_id', v_conversation_id,
+    'sender_id',       v_sender,
+    'content',         v_content,
+    'deleted',         false,
+    'created_at',      to_jsonb(v_now)
+  );
+end;
+$$;
+
+
+--
+-- Name: dm_topic_is_peer(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.dm_topic_is_peer(topic text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+  select exists (
+    select 1
+    from public.dm_conversations c
+    where (c.user_a = auth.uid()
+           and c.user_b::text = substring(topic from 6))
+       or (c.user_b = auth.uid()
+           and c.user_a::text = substring(topic from 6))
+  );
+$$;
+
+
+--
 -- Name: fn_forum_post_likes_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -498,6 +625,20 @@ $$;
 
 
 --
+-- Name: set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.set_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: sync_comment_likes_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -760,6 +901,134 @@ CREATE TABLE public.blocked_accounts (
 
 
 --
+-- Name: business_account_active_status_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.business_account_active_status_options (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE business_account_active_status_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.business_account_active_status_options IS 'Reference table for admins to manage the status of a business account';
+
+
+--
+-- Name: business_account_verification_status_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.business_account_verification_status_options (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE business_account_verification_status_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.business_account_verification_status_options IS 'Reference table for the account''s verification status';
+
+
+--
+-- Name: business_accounts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.business_accounts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    type text NOT NULL,
+    phone_number text,
+    email text,
+    website_url text,
+    address text NOT NULL,
+    location public.geography(Point,4326) NOT NULL,
+    city text NOT NULL,
+    verification_status text NOT NULL,
+    active_status text NOT NULL,
+    verified_at timestamp with time zone,
+    logo_url text,
+    description text,
+    average_rating numeric DEFAULT 0 NOT NULL,
+    review_count integer DEFAULT 0 NOT NULL,
+    follower_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    timezone text DEFAULT 'Europe/Bucharest'::text NOT NULL,
+    CONSTRAINT business_accounts_timezone_valid CHECK (((now() AT TIME ZONE timezone) IS NOT NULL))
+);
+
+
+--
+-- Name: COLUMN business_accounts.timezone; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.business_accounts.timezone IS 'IANA zone id (e.g. Europe/Bucharest) used to interpret this business''s opening hours.';
+
+
+--
+-- Name: business_hours; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.business_hours (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    business_id uuid NOT NULL,
+    weekday smallint NOT NULL,
+    opening_hour time without time zone,
+    closing_hour time without time zone,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    is_closed boolean DEFAULT false NOT NULL,
+    CONSTRAINT business_hours_times_present CHECK (((is_closed AND (opening_hour IS NULL) AND (closing_hour IS NULL)) OR ((NOT is_closed) AND (opening_hour IS NOT NULL) AND (closing_hour IS NOT NULL)))),
+    CONSTRAINT business_hours_weekday_range CHECK (((weekday >= 1) AND (weekday <= 7)))
+);
+
+
+--
+-- Name: TABLE business_hours; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.business_hours IS 'The weekly working hours for that business (eg: monday to friday from 8 a.m. to 17 p.m.)';
+
+
+--
+-- Name: COLUMN business_hours.weekday; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.business_hours.weekday IS 'ISO-8601 day of week: 1 = Monday … 7 = Sunday (java.time.DayOfWeek.getValue()).';
+
+
+--
+-- Name: COLUMN business_hours.closing_hour; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.business_hours.closing_hour IS 'Interpreted in business_accounts.timezone. A closing_hour <= opening_hour means the shift runs past midnight into the next day.';
+
+
+--
+-- Name: business_type_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.business_type_options (
+    id text NOT NULL,
+    type text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE business_type_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.business_type_options IS 'A predefined list of business categories for the auto industry';
+
+
+--
 -- Name: car_brands; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -958,6 +1227,7 @@ CREATE TABLE public.car_modifications (
     installation_date timestamp with time zone NOT NULL,
     price integer,
     mileage_at_install integer,
+    price_currency text,
     CONSTRAINT car_modifications_mileage_at_install_check CHECK ((mileage_at_install > 0)),
     CONSTRAINT car_modifications_price_check CHECK (((price)::double precision > (0.0)::double precision))
 );
@@ -996,6 +1266,13 @@ COMMENT ON COLUMN public.car_modifications.price IS 'The cost of the mods.';
 --
 
 COMMENT ON COLUMN public.car_modifications.mileage_at_install IS 'How many kilometers or miles the car had when installing the mods.';
+
+
+--
+-- Name: COLUMN car_modifications.price_currency; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_modifications.price_currency IS 'Valuta pentru price. Necesară ca totalul cheltuielilor din cartea de service să poată agrega și modurile.';
 
 
 --
@@ -1909,7 +2186,8 @@ CREATE TABLE public.notification_preferences (
     price_drops_enabled boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     organized_events_enabled boolean NOT NULL,
-    tags_enabled boolean DEFAULT true NOT NULL
+    tags_enabled boolean DEFAULT true NOT NULL,
+    service_reminders_enabled boolean DEFAULT true NOT NULL
 );
 
 
@@ -1939,6 +2217,13 @@ COMMENT ON COLUMN public.notification_preferences.organized_events_enabled IS 'W
 --
 
 COMMENT ON COLUMN public.notification_preferences.tags_enabled IS 'Whether the user receives notification if they or their cars get tagged in the app (eg: forums, thread replies, traditional posts, etc)';
+
+
+--
+-- Name: COLUMN notification_preferences.service_reminders_enabled; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.notification_preferences.service_reminders_enabled IS 'Reminder-e pentru service-uri programate și documente care expiră (carte de service).';
 
 
 --
@@ -2426,6 +2711,196 @@ CREATE TABLE public.user_presence (
 
 
 --
+-- Name: vehicle_entry_attachments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vehicle_entry_attachments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entry_id uuid NOT NULL,
+    file_key text NOT NULL,
+    file_type text NOT NULL,
+    "position" smallint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT vehicle_entry_attachments_file_type_check CHECK ((file_type = ANY (ARRAY['image'::text, 'pdf'::text])))
+);
+
+
+--
+-- Name: TABLE vehicle_entry_attachments; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.vehicle_entry_attachments IS 'Facturi, bonuri și scanuri de polițe atașate unei intrări din cartea de service. file_key = cheie Cloudflare R2, nu URL.';
+
+
+--
+-- Name: vehicle_entry_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vehicle_entry_options (
+    id text NOT NULL,
+    name text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    kind text DEFAULT 'service'::text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    CONSTRAINT vehicle_entry_options_kind_check CHECK ((kind = ANY (ARRAY['service'::text, 'document'::text])))
+);
+
+
+--
+-- Name: TABLE vehicle_entry_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.vehicle_entry_options IS 'Reference table storing a list of predefined services on a car (eg: oil change, tire rotation & balance, RCA renewal)';
+
+
+--
+-- Name: COLUMN vehicle_entry_options.kind; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_entry_options.kind IS 'service = intervenție pe mașină (ulei, frâne, tuning); document = poliță/inspecție (RCA, CASCO, ITP, rovinietă)';
+
+
+--
+-- Name: vehicle_entry_status; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vehicle_entry_status (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    color text
+);
+
+
+--
+-- Name: vehicle_history_entries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vehicle_history_entries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    scheduled_date timestamp with time zone,
+    title text,
+    category text NOT NULL,
+    price numeric(12,2),
+    location text,
+    business_name text,
+    completed_mileage integer,
+    notes text,
+    repeatable boolean DEFAULT false NOT NULL,
+    cycle_length integer,
+    notify_before integer,
+    car_id uuid NOT NULL,
+    price_currency text,
+    status text DEFAULT 'scheduled'::text NOT NULL,
+    entry_kind text DEFAULT 'service'::text NOT NULL,
+    valid_from date,
+    policy_number text,
+    trigger_type text DEFAULT 'date'::text NOT NULL,
+    due_mileage integer,
+    completed_at timestamp with time zone,
+    mileage_unit_id text,
+    cycle_mileage integer,
+    parent_entry_id uuid,
+    advance_reminder_sent_at timestamp with time zone,
+    due_day_reminder_sent_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    business_profile_id uuid,
+    CONSTRAINT vehicle_history_entries_cycle_length_check CHECK ((cycle_length > 0)),
+    CONSTRAINT vhe_completed_mileage_check CHECK (((completed_mileage IS NULL) OR (completed_mileage >= 0))),
+    CONSTRAINT vhe_cycle_mileage_check CHECK (((cycle_mileage IS NULL) OR (cycle_mileage > 0))),
+    CONSTRAINT vhe_document_shape_check CHECK (((entry_kind <> 'document'::text) OR ((trigger_type = 'date'::text) AND (scheduled_date IS NOT NULL)))),
+    CONSTRAINT vhe_due_mileage_check CHECK (((due_mileage IS NULL) OR (due_mileage >= 0))),
+    CONSTRAINT vhe_entry_kind_check CHECK ((entry_kind = ANY (ARRAY['service'::text, 'document'::text]))),
+    CONSTRAINT vhe_notify_before_check CHECK (((notify_before IS NULL) OR (notify_before > 0))),
+    CONSTRAINT vhe_price_check CHECK (((price IS NULL) OR (price >= (0)::numeric))),
+    CONSTRAINT vhe_price_currency_check CHECK (((price IS NULL) OR (price_currency IS NOT NULL))),
+    CONSTRAINT vhe_repeatable_check CHECK (((repeatable = false) OR (cycle_length IS NOT NULL) OR (cycle_mileage IS NOT NULL))),
+    CONSTRAINT vhe_trigger_consistency_check CHECK ((((trigger_type = 'date'::text) AND (scheduled_date IS NOT NULL)) OR ((trigger_type = 'mileage'::text) AND (due_mileage IS NOT NULL)) OR ((trigger_type = 'both'::text) AND (scheduled_date IS NOT NULL) AND (due_mileage IS NOT NULL)))),
+    CONSTRAINT vhe_trigger_type_check CHECK ((trigger_type = ANY (ARRAY['date'::text, 'mileage'::text, 'both'::text])))
+);
+
+
+--
+-- Name: TABLE vehicle_history_entries; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.vehicle_history_entries IS 'Stores each entry on a car (eg: oil change, ITP, tire rotation, etc)';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.completed_mileage; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.completed_mileage IS 'Kilometrajul mașinii în momentul efectuării. Unitatea vine din mileage_unit_id.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.cycle_length; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.cycle_length IS 'An integer number, storing the number of months, representing a cycle''s length.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.notify_before; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.notify_before IS 'The number of days before receiving the reminder notification';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.valid_from; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.valid_from IS 'Doar pentru entry_kind = document: data de început a poliței. Data de expirare se ține în scheduled_date.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.policy_number; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.policy_number IS 'Doar pentru entry_kind = document: numărul poliței / documentului (opțional).';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.completed_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.completed_at IS 'Data reală la care s-a efectuat intervenția. NULL cât timp status = scheduled.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.parent_entry_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.parent_entry_id IS 'Intrarea din care a fost generat acest rând (lanț de recurență). NULL pentru prima apariție.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.advance_reminder_sent_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.advance_reminder_sent_at IS 'Setat de backend când a plecat push-ul cu notify_before zile înainte. Fără el, job-ul retrimite la fiecare rulare.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.due_day_reminder_sent_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.due_day_reminder_sent_at IS 'Setat când a plecat reminder-ul din dimineața scadenței.';
+
+
+--
+-- Name: COLUMN vehicle_history_entries.business_profile_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.vehicle_history_entries.business_profile_id IS 'Opțional: contul de business din app. business_name rămâne fallback text liber.';
+
+
+--
 -- Name: admin_team_members admin_team_members_email_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2463,6 +2938,94 @@ ALTER TABLE ONLY public.app_language_options
 
 ALTER TABLE ONLY public.blocked_accounts
     ADD CONSTRAINT blocked_accounts_pkey PRIMARY KEY (blocker_id, blocked_id);
+
+
+--
+-- Name: business_account_active_status_options business_account_active_status_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_account_active_status_options
+    ADD CONSTRAINT business_account_active_status_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: business_account_active_status_options business_account_active_status_options_status_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_account_active_status_options
+    ADD CONSTRAINT business_account_active_status_options_status_key UNIQUE (status);
+
+
+--
+-- Name: business_account_verification_status_options business_account_verification_status_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_account_verification_status_options
+    ADD CONSTRAINT business_account_verification_status_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: business_account_verification_status_options business_account_verification_status_options_status_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_account_verification_status_options
+    ADD CONSTRAINT business_account_verification_status_options_status_key UNIQUE (status);
+
+
+--
+-- Name: business_accounts business_accounts_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_email_key UNIQUE (email);
+
+
+--
+-- Name: business_accounts business_accounts_phone_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_phone_number_key UNIQUE (phone_number);
+
+
+--
+-- Name: business_accounts business_accounts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: business_hours business_hours_business_weekday_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_hours
+    ADD CONSTRAINT business_hours_business_weekday_key UNIQUE (business_id, weekday);
+
+
+--
+-- Name: business_hours business_hours_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_hours
+    ADD CONSTRAINT business_hours_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: business_type_options business_type_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_type_options
+    ADD CONSTRAINT business_type_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: business_type_options business_type_options_type_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_type_options
+    ADD CONSTRAINT business_type_options_type_key UNIQUE (type);
 
 
 --
@@ -3090,6 +3653,22 @@ ALTER TABLE ONLY public.saved_posts
 
 
 --
+-- Name: vehicle_entry_options service_type_options_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_entry_options
+    ADD CONSTRAINT service_type_options_name_key UNIQUE (name);
+
+
+--
+-- Name: vehicle_entry_options service_type_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_entry_options
+    ADD CONSTRAINT service_type_options_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: support_ticket_categories support_ticket_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3143,6 +3722,66 @@ ALTER TABLE ONLY public.post_images
 
 ALTER TABLE ONLY public.user_presence
     ADD CONSTRAINT user_presence_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: vehicle_entry_attachments vehicle_entry_attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_entry_attachments
+    ADD CONSTRAINT vehicle_entry_attachments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vehicle_entry_status vehicle_entry_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_entry_status
+    ADD CONSTRAINT vehicle_entry_status_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vehicle_entry_status vehicle_entry_status_status_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_entry_status
+    ADD CONSTRAINT vehicle_entry_status_status_key UNIQUE (status);
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: business_accounts_location_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX business_accounts_location_idx ON public.business_accounts USING gist (location);
+
+
+--
+-- Name: business_accounts_visible_type_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX business_accounts_visible_type_idx ON public.business_accounts USING btree (type) WHERE ((active_status = 'active'::text) AND (verification_status = 'verified'::text));
+
+
+--
+-- Name: business_hours_business_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX business_hours_business_id_idx ON public.business_hours USING btree (business_id);
+
+
+--
+-- Name: dm_conversations_user_b_a_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX dm_conversations_user_b_a_idx ON public.dm_conversations USING btree (user_b, user_a);
 
 
 --
@@ -3524,6 +4163,48 @@ CREATE INDEX idx_tagged_people_user_id ON public.tagged_people USING btree (user
 
 
 --
+-- Name: idx_vehicle_entry_attachments_entry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vehicle_entry_attachments_entry ON public.vehicle_entry_attachments USING btree (entry_id, "position");
+
+
+--
+-- Name: idx_vhe_car_completed; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vhe_car_completed ON public.vehicle_history_entries USING btree (car_id, completed_at DESC);
+
+
+--
+-- Name: idx_vhe_car_due_mileage; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vhe_car_due_mileage ON public.vehicle_history_entries USING btree (car_id, due_mileage) WHERE ((status = 'scheduled'::text) AND (due_mileage IS NOT NULL));
+
+
+--
+-- Name: idx_vhe_car_scheduled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vhe_car_scheduled ON public.vehicle_history_entries USING btree (car_id, scheduled_date) WHERE (status = 'scheduled'::text);
+
+
+--
+-- Name: idx_vhe_parent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vhe_parent ON public.vehicle_history_entries USING btree (parent_entry_id) WHERE (parent_entry_id IS NOT NULL);
+
+
+--
+-- Name: idx_vhe_pending_reminders; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_vhe_pending_reminders ON public.vehicle_history_entries USING btree (scheduled_date) WHERE ((status = 'scheduled'::text) AND (advance_reminder_sent_at IS NULL));
+
+
+--
 -- Name: moderation_actions_author_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3797,6 +4478,13 @@ CREATE TRIGGER trg_sync_post_shares_count AFTER INSERT OR DELETE ON public.post_
 
 
 --
+-- Name: vehicle_history_entries trg_vehicle_history_entries_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_vehicle_history_entries_updated_at BEFORE UPDATE ON public.vehicle_history_entries FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: admin_team_members admin_team_members_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3818,6 +4506,46 @@ ALTER TABLE ONLY public.blocked_accounts
 
 ALTER TABLE ONLY public.blocked_accounts
     ADD CONSTRAINT blocked_accounts_blocker_id_fkey FOREIGN KEY (blocker_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: business_accounts business_accounts_active_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_active_status_fkey FOREIGN KEY (active_status) REFERENCES public.business_account_active_status_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: business_accounts business_accounts_city_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_city_fkey FOREIGN KEY (city) REFERENCES public.cities(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: business_accounts business_accounts_type_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_type_fkey FOREIGN KEY (type) REFERENCES public.business_type_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: business_accounts business_accounts_verification_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_accounts
+    ADD CONSTRAINT business_accounts_verification_status_fkey FOREIGN KEY (verification_status) REFERENCES public.business_account_verification_status_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: business_hours business_hours_business_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_hours
+    ADD CONSTRAINT business_hours_business_id_fkey FOREIGN KEY (business_id) REFERENCES public.business_accounts(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -3858,6 +4586,14 @@ ALTER TABLE ONLY public.car_modifications
 
 ALTER TABLE ONLY public.car_modifications
     ADD CONSTRAINT car_modifications_category_fkey FOREIGN KEY (category_id) REFERENCES public.car_mod_categories(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_modifications car_modifications_price_currency_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_modifications
+    ADD CONSTRAINT car_modifications_price_currency_fkey FOREIGN KEY (price_currency) REFERENCES public.price_currencies_options(id);
 
 
 --
@@ -3949,6 +4685,30 @@ ALTER TABLE ONLY public.comment_likes
 
 
 --
+-- Name: comment_reports comment_reports_comment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_reports
+    ADD CONSTRAINT comment_reports_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES public.comments(id) ON DELETE CASCADE;
+
+
+--
+-- Name: comment_reports comment_reports_reason_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_reports
+    ADD CONSTRAINT comment_reports_reason_id_fkey FOREIGN KEY (reason_id) REFERENCES public.report_reasons(id);
+
+
+--
+-- Name: comment_reports comment_reports_reporter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_reports
+    ADD CONSTRAINT comment_reports_reporter_id_fkey FOREIGN KEY (reporter_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: comment_tagged_cars comment_tagged_cars_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3978,30 +4738,6 @@ ALTER TABLE ONLY public.comment_tagged_people
 
 ALTER TABLE ONLY public.comment_tagged_people
     ADD CONSTRAINT comment_tagged_people_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: comment_reports comment_reports_comment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.comment_reports
-    ADD CONSTRAINT comment_reports_comment_id_fkey FOREIGN KEY (comment_id) REFERENCES public.comments(id) ON DELETE CASCADE;
-
-
---
--- Name: comment_reports comment_reports_reason_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.comment_reports
-    ADD CONSTRAINT comment_reports_reason_id_fkey FOREIGN KEY (reason_id) REFERENCES public.report_reasons(id);
-
-
---
--- Name: comment_reports comment_reports_reporter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.comment_reports
-    ADD CONSTRAINT comment_reports_reporter_id_fkey FOREIGN KEY (reporter_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 
 --
@@ -4749,6 +5485,70 @@ ALTER TABLE ONLY public.user_presence
 
 
 --
+-- Name: vehicle_entry_attachments vehicle_entry_attachments_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_entry_attachments
+    ADD CONSTRAINT vehicle_entry_attachments_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.vehicle_history_entries(id) ON DELETE CASCADE;
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_business_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_business_profile_id_fkey FOREIGN KEY (business_profile_id) REFERENCES public.profiles(id) ON DELETE SET NULL;
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_category_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_category_fkey FOREIGN KEY (category) REFERENCES public.vehicle_entry_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_mileage_unit_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_mileage_unit_id_fkey FOREIGN KEY (mileage_unit_id) REFERENCES public.car_distance_units(id);
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_parent_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_parent_entry_id_fkey FOREIGN KEY (parent_entry_id) REFERENCES public.vehicle_history_entries(id) ON DELETE SET NULL;
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_price_currency_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_price_currency_fkey FOREIGN KEY (price_currency) REFERENCES public.price_currencies_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: vehicle_history_entries vehicle_history_entries_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_history_entries
+    ADD CONSTRAINT vehicle_history_entries_status_fkey FOREIGN KEY (status) REFERENCES public.vehicle_entry_status(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
 -- Name: car_category_options Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -4839,6 +5639,61 @@ ALTER TABLE ONLY public.user_presence
 --
 -- Name: blocked_accounts; Type: ROW SECURITY; Schema: public; Owner: -
 --
+
+
+--
+-- Name: business_account_active_status_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: business_account_verification_status_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: business_accounts; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: business_accounts business_accounts_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: business_account_active_status_options business_active_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: business_hours; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: business_hours business_hours_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: business_type_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: business_type_options business_type_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: business_account_verification_status_options business_verification_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
 
 
 --
@@ -5576,6 +6431,38 @@ ALTER TABLE ONLY public.user_presence
 
 --
 -- Name: user_presence; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: vehicle_entry_attachments; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: vehicle_entry_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: vehicle_entry_options vehicle_entry_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: vehicle_entry_status; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: vehicle_entry_status vehicle_entry_status_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: vehicle_history_entries; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
