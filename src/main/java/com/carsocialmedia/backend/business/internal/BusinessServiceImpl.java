@@ -189,7 +189,7 @@ class BusinessServiceImpl implements BusinessService {
         if (stored == null || stored.isBlank() || stored.startsWith("http")) {
             return stored;
         }
-        return storageService.publicUrl(StorageBucket.BUSINESSES, stored);
+        return storageService.publicUrl(StorageBucket.BUSINESS, stored);
     }
 
     private static BusinessHoursDto toHoursDto(BusinessHoursEntity hours) {
