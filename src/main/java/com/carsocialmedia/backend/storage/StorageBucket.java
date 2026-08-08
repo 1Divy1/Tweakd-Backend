@@ -12,5 +12,5 @@ public enum StorageBucket {
     GARAGE,
     POSTS,
     AVATARS,
-    BUSINESSES
+    BUSINESS
 }
