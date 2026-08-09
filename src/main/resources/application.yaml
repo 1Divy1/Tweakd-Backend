@@ -20,7 +20,7 @@ cloudflare:
     avatars:
       bucket: ${CLOUDFLARE_AVATARS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_AVATARS_BUCKET_URL}
-    businesses:
+    business:
       bucket: ${CLOUDFLARE_BUSINESS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_BUSINESS_BUCKET_URL}
 
