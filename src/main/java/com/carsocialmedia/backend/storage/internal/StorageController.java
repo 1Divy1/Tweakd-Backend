@@ -57,6 +57,12 @@ public class StorageController {
         return storageService.modificationBatchUploadUrlRequest(carId, modId, request.files());
     }
 
+    // ----- MAP EVENTS -----
+    @GetMapping("/events/{eventId}/cover")
+    public UploadUrlResponse eventCover(@PathVariable UUID eventId) {
+        return storageService.eventCoverUploadUrlRequest(eventId);
+    }
+
     // ----- POSTS -----
     @PostMapping("/posts/{postId}/upload-urls")
     public PostImagesUploadUrlsResponse postImages(

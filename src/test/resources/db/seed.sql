@@ -71,3 +71,38 @@ INSERT INTO public.business_account_active_status_options (id, status) VALUES
     ('suspended', 'Suspended'),
     ('deleted', 'Deleted')
 ON CONFLICT (id) DO NOTHING;
+
+-- Map-events reference data. car_events has RESTRICT FKs to the category, status and approval
+-- status tables, and the two join tables have RESTRICT FKs to their own status tables, so no event
+-- row can be inserted without these. The ids must match the real Supabase values: the module
+-- compares against them as literals (both in Java constants and in the native map query's
+-- `status not in ('hidden','canceled','previous')`).
+INSERT INTO public.car_event_categories (id, category, is_available) VALUES
+    ('car_meet', 'Car meet', true),
+    ('test_unavailable_category', 'Test Unavailable Category', false)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.car_event_status_options (id, status) VALUES
+    ('upcoming', 'Upcoming'),
+    ('live', 'Live'),
+    ('previous', 'Previous'),
+    ('hidden', 'Hidden'),
+    ('canceled', 'Canceled')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.car_event_approval_status_options (id, status) VALUES
+    ('pending', 'Pending'),
+    ('accepted', 'Accepted'),
+    ('rejected', 'Rejected')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.car_event_attendee_status (id, status) VALUES
+    ('attending', 'Attending'),
+    ('interested', 'Interested')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.car_event_participant_status_options (id, status) VALUES
+    ('pending', 'Pending'),
+    ('accepted', 'Accepted'),
+    ('rejected', 'Rejected')
+ON CONFLICT (id) DO NOTHING;

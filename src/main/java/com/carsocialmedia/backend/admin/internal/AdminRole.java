@@ -16,6 +16,8 @@ enum AdminRole {
 
     senior_admin(EnumSet.complementOf(EnumSet.of(Capability.TRANSFER_OWNERSHIP))),
 
+    // Note: no APPROVE_EVENTS — content moderators handle reported content, but publishing an
+    // event to the map is an owner / senior-admin decision.
     content_moderator(EnumSet.of(Capability.REVIEW_CONTENT, Capability.WARN_BAN)),
 
     support_agent(EnumSet.of(Capability.ANSWER_TICKETS)),

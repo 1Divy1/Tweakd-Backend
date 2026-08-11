@@ -52,6 +52,14 @@ public class NotificationPreferencesEntity {
     @Column(name = "tags_enabled", nullable = false)
     private boolean tagsEnabled = true;
 
+    /**
+     * Notifications for running a map event you organize (a car registered, you were added as an
+     * organizer). Distinct from {@link #organizedEventsEnabled}, which covers attendee-facing
+     * event logistics.
+     */
+    @Column(name = "event_organizer_enabled", nullable = false)
+    private boolean eventOrganizerEnabled = true;
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
@@ -59,7 +67,7 @@ public class NotificationPreferencesEntity {
         return new NotificationPreferencesDto(
                 likesEnabled, commentsEnabled, sharesEnabled,
                 dmsEnabled, flashMeetsEnabled, organizedEventsEnabled, priceDropsEnabled,
-                tagsEnabled
+                tagsEnabled, eventOrganizerEnabled
         );
     }
 }

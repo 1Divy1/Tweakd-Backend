@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,6 +74,19 @@ public interface BusinessAccountRepository extends JpaRepository<BusinessAccount
                                       @Param("radiusMetres") double radiusMetres,
                                       @Param("typeId") String typeId,
                                       @Param("limit") int limit);
+
+    /**
+     * Name + logo key for a batch of ids, active and verified only. Hidden and unknown ids simply
+     * do not come back, so a caller can never learn that a suspended business exists.
+     */
+    @Query("""
+            select b
+              from BusinessAccountEntity b
+             where b.id in :ids
+               and b.activeStatus = 'active'
+               and b.verificationStatus = 'verified'
+            """)
+    List<BusinessAccountEntity> findVisibleByIds(@Param("ids") Collection<UUID> ids);
 
     /** Row shape of {@link #findVisibleNearby}; assembled into a map pin by the service. */
     interface MapPinRow {
