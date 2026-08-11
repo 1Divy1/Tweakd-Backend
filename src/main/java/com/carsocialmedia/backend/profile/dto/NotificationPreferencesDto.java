@@ -11,5 +11,6 @@ public record NotificationPreferencesDto(
         boolean flashMeetsEnabled,
         boolean organizedEventsEnabled,
         boolean priceDropsEnabled,
-        boolean tagsEnabled
+        boolean tagsEnabled,
+        boolean eventOrganizerEnabled
 ) {}

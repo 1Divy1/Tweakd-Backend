@@ -625,7 +625,7 @@ class ProfileServiceImplTest {
                 .thenAnswer(inv -> inv.getArgument(0));
 
         NotificationPreferencesDto dto = service.updateNotificationPreferences(USER_S,
-                new NotificationPreferencesRequest(false, false, true, true, false, true, false, true));
+                new NotificationPreferencesRequest(false, false, true, true, false, true, false, true, true));
 
         assertThat(dto.likesEnabled()).isFalse();
         assertThat(dto.sharesEnabled()).isTrue();

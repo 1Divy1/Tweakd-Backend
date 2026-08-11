@@ -26,6 +26,12 @@ cloudflare:
     avatars:
       bucket: test-avatars-bucket
       public-url: http://localhost:9000/test-avatars-bucket
+    business:
+      bucket: test-business-bucket
+      public-url: http://localhost:9000/test-business-bucket
+    map-events:
+      bucket: test-map-events-bucket
+      public-url: http://localhost:9000/test-map-events-bucket
 
 spring:
   application:

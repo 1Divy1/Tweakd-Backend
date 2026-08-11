@@ -46,15 +46,15 @@ class PostsNotificationListenerTest {
     private PostsNotificationListener listener;
 
     private static NotificationPreferencesDto allEnabled() {
-        return new NotificationPreferencesDto(true, true, true, true, true, true, true, true);
+        return new NotificationPreferencesDto(true, true, true, true, true, true, true, true, true);
     }
 
     private static NotificationPreferencesDto with(boolean likes, boolean comments, boolean shares) {
-        return new NotificationPreferencesDto(likes, comments, shares, true, true, true, true, true);
+        return new NotificationPreferencesDto(likes, comments, shares, true, true, true, true, true, true);
     }
 
     private static NotificationPreferencesDto withTags(boolean tags) {
-        return new NotificationPreferencesDto(true, true, true, true, true, true, true, tags);
+        return new NotificationPreferencesDto(true, true, true, true, true, true, true, tags, true);
     }
 
     @BeforeEach
