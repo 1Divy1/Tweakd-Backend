@@ -22,7 +22,9 @@ import java.util.UUID;
  * registrations" do not need a join; it is filled in from {@code GarageService} at insert time.
  *
  * <p>Inserts, updates and deletes all move {@code car_events.attending_cars_count} via
- * {@code trg_update_car_event_attending_cars_count}.
+ * {@code trg_update_car_event_attending_cars_count}, which treats {@link #ACCEPTED} and
+ * {@link #WITHDRAWN} as equally "still attending" — the count only moves on a genuine acceptance,
+ * rejection, or the hard delete that approving a withdrawal performs.
  */
 @Entity
 @Table(name = "car_event_participants")
@@ -39,6 +41,13 @@ public class MapEventParticipantEntity {
     /** Turned down by an organizer. */
     public static final String REJECTED = "rejected";
 
+    /**
+     * The owner asked to withdraw and it is awaiting an organizer's decision. The row is
+     * <strong>not removed</strong> — the participant is still on the entry list until an organizer
+     * approves the request (hard delete) or rejects it (reverts to {@link #ACCEPTED}).
+     */
+    public static final String WITHDRAWN = "withdrawn";
+
     @EmbeddedId
     private MapEventParticipantId id;
 
@@ -48,6 +57,14 @@ public class MapEventParticipantEntity {
 
     @Column(name = "status", nullable = false)
     private String status;
+
+    /**
+     * The reason given for the most recent withdrawal request. Set when a request is submitted;
+     * left as-is on rejection (a historical record of the last attempt), overwritten by the next
+     * request.
+     */
+    @Column(name = "withdraw_note")
+    private String withdrawNote;
 
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)

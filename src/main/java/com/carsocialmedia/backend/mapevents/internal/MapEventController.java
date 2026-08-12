@@ -8,13 +8,17 @@ import com.carsocialmedia.backend.mapevents.dto.MapEventPageDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventParticipantDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventPinDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventSummaryDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
+import com.carsocialmedia.backend.mapevents.dto.OrganizerCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.AttendanceRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CoverImageKeyRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.ParticipantDecisionRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.RegisterCarRequest;
+import com.carsocialmedia.backend.mapevents.dto.request.ReplaceMapEventRulesRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.UpdateMapEventRequest;
+import com.carsocialmedia.backend.mapevents.dto.request.WithdrawParticipationRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -137,6 +141,14 @@ class MapEventController {
         return mapEventsService.saveCoverImageKey(userId(jwt), eventId, request.key());
     }
 
+    /** Replaces the event's rules list wholesale, in order. Allowed only while pending or rejected. */
+    @PutMapping("/{eventId}/rules")
+    public MapEventDto replaceRules(@AuthenticationPrincipal Jwt jwt,
+                                    @PathVariable UUID eventId,
+                                    @Valid @RequestBody ReplaceMapEventRulesRequest request) {
+        return mapEventsService.replaceRules(userId(jwt), eventId, request.rules());
+    }
+
     /** Calls the event off. The page survives; the pin leaves the map. */
     @PostMapping("/{eventId}/cancel")
     public MapEventDto cancelEvent(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID eventId) {
@@ -157,6 +169,15 @@ class MapEventController {
     }
 
     // ----- Organizers -----
+
+    /**
+     * Searches app users and businesses by name — candidates for {@link #addOrganizer}. Individual
+     * and business hits come back merged in one list, tagged by {@code type}.
+     */
+    @GetMapping("/organizers/search")
+    public List<OrganizerCandidateDto> searchOrganizerCandidates(@RequestParam("q") String query) {
+        return mapEventsService.searchOrganizerCandidates(query);
+    }
 
     /** Credits a co-organizer — an app user or a business account. Creator only. */
     @PostMapping("/{eventId}/organizers")
@@ -199,6 +220,7 @@ class MapEventController {
         return mapEventsService.registerCar(userId(jwt), eventId, request.carId());
     }
 
+    /** Withdraws a still-pending registration outright. An accepted one must use {@link #requestWithdrawal}. */
     @DeleteMapping("/{eventId}/cars/{carId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void withdrawCar(@AuthenticationPrincipal Jwt jwt,
@@ -214,6 +236,43 @@ class MapEventController {
                                                     @PathVariable UUID carId,
                                                     @Valid @RequestBody ParticipantDecisionRequest request) {
         return mapEventsService.decideParticipant(userId(jwt), eventId, carId, request.status());
+    }
+
+    // ----- Withdrawal requests -----
+
+    /**
+     * Requests withdrawal from the event: every one of the caller's accepted cars is flagged, not
+     * removed, pending an organizer's decision.
+     */
+    @PostMapping("/{eventId}/withdraw")
+    public List<MapEventParticipantDto> requestWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                                           @PathVariable UUID eventId,
+                                                           @Valid @RequestBody WithdrawParticipationRequest request) {
+        return mapEventsService.requestWithdrawal(userId(jwt), eventId, request.note());
+    }
+
+    /** The event's pending withdrawal requests, one entry per requesting owner. Organizer only. */
+    @GetMapping("/{eventId}/withdrawals")
+    public List<MapEventWithdrawalRequestDto> listWithdrawalRequests(@AuthenticationPrincipal Jwt jwt,
+                                                                      @PathVariable UUID eventId) {
+        return mapEventsService.listWithdrawalRequests(userId(jwt), eventId);
+    }
+
+    /** Approves a withdrawal request: the owner's cars are removed from the event outright. */
+    @PostMapping("/{eventId}/withdrawals/{ownerId}/approve")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void approveWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                  @PathVariable UUID eventId,
+                                  @PathVariable UUID ownerId) {
+        mapEventsService.approveWithdrawal(userId(jwt), eventId, ownerId);
+    }
+
+    /** Rejects a withdrawal request: the owner's cars stay in the line-up as accepted. */
+    @PostMapping("/{eventId}/withdrawals/{ownerId}/reject")
+    public List<MapEventParticipantDto> rejectWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                                          @PathVariable UUID eventId,
+                                                          @PathVariable UUID ownerId) {
+        return mapEventsService.rejectWithdrawal(userId(jwt), eventId, ownerId);
     }
 
     private static UUID userId(Jwt jwt) {

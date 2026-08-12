@@ -10,8 +10,8 @@ Users create events from the app; **an admin must approve one before it appears 
 The module is "map events" (it is a map feature) and lives at `/api/v1/map-events`; the Supabase
 tables it owns are named `car_event*`. Types here carry the `MapEvent` prefix and name their table
 explicitly. Tables owned: `car_events`, `car_event_categories`, `car_event_organizers`,
-`car_event_attendees_list`, `car_event_participants`, `event_car_meet`, plus the three status
-reference tables.
+`car_event_organizer_rules`, `car_event_attendees_list`, `car_event_participants`, `event_car_meet`,
+plus the three status reference tables.
 
 ## Two independent states
 
@@ -40,6 +40,7 @@ clears its `rejection_reason` and resubmits it as `pending`.
 |---|:--:|:--:|:--:|:--:|
 | Edit (while pending/rejected) | ✅ | ✅ | ❌ | ❌ |
 | Attach / replace cover | ✅ | ✅ | ❌ | ❌ |
+| Replace rules (while pending/rejected) | ✅ | ✅ | ❌ | ❌ |
 | Cancel, mark finished | ✅ | ✅ | ❌ | ❌ |
 | Accept / reject entered cars | ✅ | ✅ | ❌ | ❌ |
 | Add / remove organizers | ✅ | ❌ | ❌ | ❌ |
@@ -65,6 +66,13 @@ permissions. Every permission check looks at *individual* organizers.
   `requires_participant_approval` the row starts `pending` and an organizer accepts/rejects it;
   otherwise it is `accepted` outright.
 
+`car_events.max_participant_capacity` is an optional cap (`null` = no limit) on the **accepted**
+line-up. `registerCar` rejects a brand-new entry once `attending_cars_count` reaches the cap
+(`EventClosedException`); re-sending an already-registered car is a no-op and is never blocked by
+it. A `pending` entry submitted before the cap was hit is left alone — the cap does not retroactively
+reject it, and an organizer may still accept or reject it — so `attending_cars_count` can briefly
+exceed the cap by one if an organizer accepts a pending car after the line-up filled up.
+
 Both counts (`attendees_count`, `attending_cars_count`) are **trigger-owned**
 (`trg_update_car_event_attendees_count`, `trg_update_car_event_attending_cars_count`); this module
 never writes a count column. After an RSVP change the row is re-read (`entityManager.refresh`) so
@@ -76,6 +84,23 @@ the response shows the new total rather than the stale one in the session.
 gets its own detail table — the car meet's is `event_car_meet` (`registration_deadline`).
 `is_available` gates a category on the create screen without invalidating existing events.
 `CarMeetDetailsDto` is the first of what will be one detail DTO per subcategory.
+
+## Rules
+
+`car_event_organizer_rules` holds an organizer's free-text rules for the event ("no burnouts", "park
+in marked bays"), ordered by `sort_order`. Despite the table name, this is a plain event feature, not
+car-meet specific — `rules` sits alongside `organizers` at the top level of `MapEventDto`, not nested
+under `carMeet`.
+
+`CreateMapEventRequest.rules` is optional and, when non-empty, is saved in the **same transaction**
+as the event — one `POST /` covers title, description, timings and rules together; no follow-up call
+needed (rules have no dependency that would force a second request, unlike the cover image below).
+
+There is no per-rule endpoint: `PUT /{eventId}/rules` replaces the whole list in one call, in the
+order given, deleting the old rows and re-inserting with `sort_order` set from list position (the
+`(event_id, sort_order)` unique index means the delete must land before the insert). It's how rules
+get added after creation, reordered, or cleared (empty list). Same lock as the rest of the event:
+organizer only, and only while pending/rejected.
 
 ## Cover images
 
@@ -109,9 +134,11 @@ claim another's upload.
 | `createEvent(...)` | `POST /` → 201 | submitted as `pending` |
 | `updateEvent(...)` | `PATCH /{eventId}` | pending/rejected only |
 | `saveCoverImageKey(...)` | `PATCH /{eventId}/cover` | |
+| `replaceRules(...)` | `PUT /{eventId}/rules` | whole-list replace, pending/rejected only |
 | `cancelEvent(...)` / `markFinished(...)` | `POST /{eventId}/cancel` / `/finish` | organizer, idempotent |
 | `deleteEvent(...)` | `DELETE /{eventId}` → 204 | **creator only** |
 | `addOrganizer(...)` / `removeOrganizer(...)` | `POST /{eventId}/organizers`, `DELETE /{eventId}/organizers/{id}` | creator only |
+| `searchOrganizerCandidates(query)` | `GET /organizers/search?q=` | merged user + business search, for the add-organizer picker |
 | `setAttendance(...)` / `removeAttendance(...)` | `PUT` / `DELETE /{eventId}/attendance` | |
 | `registerCar(...)` / `withdrawCar(...)` | `POST /{eventId}/cars` → 201, `DELETE /{eventId}/cars/{carId}` | |
 | `decideParticipant(...)` | `PATCH /{eventId}/cars/{carId}` | organizer verdict |

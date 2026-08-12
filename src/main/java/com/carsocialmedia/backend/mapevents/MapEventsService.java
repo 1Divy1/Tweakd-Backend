@@ -8,6 +8,8 @@ import com.carsocialmedia.backend.mapevents.dto.MapEventPageDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventParticipantDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventPinDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventSummaryDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
+import com.carsocialmedia.backend.mapevents.dto.OrganizerCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.UpdateMapEventRequest;
@@ -71,12 +73,16 @@ public interface MapEventsService {
     /**
      * One keyset page of the cars entered into an event, newest registration first.
      *
-     * <p>Anyone may read the {@code accepted} line-up. {@code pending} and {@code rejected} are
-     * organizer-only, since they expose entries that were turned down.
+     * <p>Anyone may read the public line-up: {@code accepted} cars, plus {@code withdrawn} ones
+     * (a pending withdrawal does not remove a participant from the list, only flags it via their
+     * {@code status}). {@code pending} and {@code rejected} are organizer-only, since they expose
+     * entries that were turned down.
      *
-     * @param status optional filter; {@code null} = the accepted line-up
+     * @param status optional filter: {@code pending}, {@code accepted}, {@code rejected} or
+     *               {@code withdrawn}; {@code null} = the public line-up ({@code accepted} +
+     *               {@code withdrawn})
      * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if a
-     *         non-organizer asks for a non-accepted status
+     *         non-organizer asks for {@code pending} or {@code rejected}
      */
     MapEventPageDto<MapEventParticipantDto> listParticipants(UUID currentUserId, UUID eventId, String status,
                                                              String cursor, int size);
@@ -91,10 +97,12 @@ public interface MapEventsService {
 
     /**
      * Creates an event, submitted for approval. The caller becomes {@code created_by} and is
-     * inserted as the {@code creator} organizer.
+     * inserted as the {@code creator} organizer. If {@code request.rules()} is non-empty, the rules
+     * are saved in the same transaction as the event — no follow-up call needed.
      *
-     * <p>The cover image is attached afterwards via {@link #saveCoverImageKey}: the event row must
-     * exist before an upload URL can be namespaced to it.
+     * <p>The cover image is the one exception, attached afterwards via {@link #saveCoverImageKey}:
+     * unlike rules, it depends on an external upload (a presigned R2 URL namespaced to the event's
+     * id, then the client PUTting the file), so the event row must exist first.
      *
      * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if the
      *         category is unknown or unavailable, the timings are inconsistent, or a car meet is
@@ -119,6 +127,16 @@ public interface MapEventsService {
      *            under this event's own prefix, so one event cannot claim another's upload
      */
     MapEventDto saveCoverImageKey(UUID currentUserId, UUID eventId, String key);
+
+    /**
+     * Replaces an event's rules list wholesale, in the given order. {@code sort_order} is assigned
+     * server-side from list position; an empty list clears all rules. Organizer only, and only while
+     * editable — approval locks the rules exactly as it locks the rest of the event.
+     *
+     * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize it
+     * @throws com.carsocialmedia.backend.mapevents.exception.EventNotEditableException if it has been approved, cancelled or finished
+     */
+    MapEventDto replaceRules(UUID currentUserId, UUID eventId, List<String> rules);
 
     /**
      * Calls the event off ({@code status = canceled}). The page survives so attendees can see what
@@ -161,6 +179,15 @@ public interface MapEventsService {
      */
     MapEventDto removeOrganizer(UUID currentUserId, UUID eventId, UUID organizerId);
 
+    /**
+     * Searches app users and businesses by name prefix, merged into one list — candidates for
+     * {@link #addOrganizer}. Mirrors {@code ProfileService.searchByUsername} and
+     * {@code BusinessService.searchByName}, tagging each hit with which one it came from.
+     *
+     * @param query search text; blank or {@code null} returns an empty list
+     */
+    List<OrganizerCandidateDto> searchOrganizerCandidates(String query);
+
     // ===================== Attending (spectators) =====================
 
     /**
@@ -186,7 +213,15 @@ public interface MapEventsService {
      */
     MapEventParticipantDto registerCar(UUID currentUserId, UUID eventId, UUID carId);
 
-    /** Withdraws one of the caller's cars from the event. Idempotent. */
+    /**
+     * Withdraws one of the caller's cars from the event outright. Idempotent, and only allowed
+     * while the registration is still {@code pending} — nothing has been confirmed yet, so there is
+     * nothing to ask an organizer's leave to undo. An {@code accepted} car must go through
+     * {@link #requestWithdrawal} instead.
+     *
+     * @throws com.carsocialmedia.backend.mapevents.exception.CarNotOwnedException if the car is not the caller's
+     * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if the registration is already {@code accepted}
+     */
     void withdrawCar(UUID currentUserId, UUID eventId, UUID carId);
 
     /**
@@ -195,6 +230,46 @@ public interface MapEventsService {
      * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
      */
     MapEventParticipantDto decideParticipant(UUID currentUserId, UUID eventId, UUID carId, String status);
+
+    // ===================== Withdrawal requests =====================
+
+    /**
+     * Requests withdrawal from an event: every one of the caller's {@code accepted} rows for it is
+     * flagged {@code withdrawn} and an organizer is notified. The rows are <strong>not</strong>
+     * removed — the caller stays on the entry list, with the pending withdrawal visible via their
+     * {@code status}, until an organizer decides.
+     *
+     * @param note optional context for the organizer, or {@code null}
+     * @throws com.carsocialmedia.backend.mapevents.exception.EventClosedException if the event has finished
+     * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if the caller has no accepted registration on this event
+     */
+    List<MapEventParticipantDto> requestWithdrawal(UUID currentUserId, UUID eventId, String note);
+
+    /**
+     * The event's pending withdrawal requests, one entry per requesting owner. Organizer only.
+     *
+     * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
+     */
+    List<MapEventWithdrawalRequestDto> listWithdrawalRequests(UUID currentUserId, UUID eventId);
+
+    /**
+     * Approves a participant's withdrawal request: every one of their rows for this event is
+     * hard-deleted, actually taking them off the entry list.
+     *
+     * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
+     * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if that owner has no pending withdrawal request
+     */
+    void approveWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId);
+
+    /**
+     * Rejects a participant's withdrawal request: every one of their rows for this event reverts to
+     * {@code accepted}, staying in the line-up. {@code withdraw_note} is left as a historical record
+     * of the attempt rather than cleared.
+     *
+     * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
+     * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if that owner has no pending withdrawal request
+     */
+    List<MapEventParticipantDto> rejectWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId);
 
     // ===================== Admin (called by the admin module) =====================
 

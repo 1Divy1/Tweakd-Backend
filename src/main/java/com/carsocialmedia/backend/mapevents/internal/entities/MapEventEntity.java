@@ -124,6 +124,10 @@ public class MapEventEntity {
     @Column(name = "requires_participant_approval", nullable = false)
     private boolean requiresParticipantApproval;
 
+    /** Optional cap on accepted cars ({@link #attendingCarsCount}); {@code null} means no limit. */
+    @Column(name = "max_participant_capacity")
+    private Integer maxParticipantCapacity;
+
     /** The single user who created the event. Immutable — it decides who may delete it. */
     @Column(name = "created_by", nullable = false, updatable = false)
     private UUID createdBy;

@@ -28,12 +28,15 @@ public interface MapEventRepository extends JpaRepository<MapEventEntity, UUID> 
 
     /**
      * Approved, still-running events whose location lies within {@code radiusMetres} of the given
-     * centre, nearest first — the map screen's query.
+     * centre — the map screen's query.
      *
      * <p>Native because it is a PostGIS query: {@code ST_DWithin} on the {@code geography} column is
      * index-aware, so Postgres uses the GiST index {@code car_events_location_idx}. A bare
      * {@code ST_Distance(...) < x} comparison would force a sequential scan over every event.
-     * {@code ST_Distance} on {@code geography} returns metres, so kilometres are a plain division.
+     *
+     * <p>Ordered by {@code id} purely so {@code limit} truncates deterministically when a radius
+     * has more matches than the limit allows — the map renders every pin at its own coordinates
+     * regardless of array order, so there is nothing to optimise for beyond stability.
      *
      * <p><strong>The time filter is not redundant with {@code status}.</strong> Nothing sweeps
      * {@code status} automatically (automatic transitions were deferred), so an event nobody marked
@@ -57,9 +60,7 @@ public interface MapEventRepository extends JpaRepository<MapEventEntity, UUID> 
                    e.status                                            as "status",
                    e.attendees_count                                   as "attendeesCount",
                    e.attending_cars_count                              as "attendingCarsCount",
-                   st_distance(e.location,
-                               st_setsrid(st_makepoint(:lng, :lat), 4326)::geography)
-                       / 1000.0                                        as "distanceKm"
+                   e.max_participant_capacity                          as "maxParticipantCapacity"
               from car_events e
               join car_event_categories c on c.id = e.event_type
              where e.approval_status = 'accepted'
@@ -69,7 +70,7 @@ public interface MapEventRepository extends JpaRepository<MapEventEntity, UUID> 
                               st_setsrid(st_makepoint(:lng, :lat), 4326)::geography,
                               :radiusMetres)
                and (cast(:categoryId as text) is null or e.event_type = cast(:categoryId as text))
-             order by "distanceKm" asc, e.id asc
+             order by e.id asc
              limit :limit
             """, nativeQuery = true)
     List<MapPinRow> findVisibleNearby(@Param("lat") double lat,
@@ -145,6 +146,6 @@ public interface MapEventRepository extends JpaRepository<MapEventEntity, UUID> 
         String getStatus();
         int getAttendeesCount();
         int getAttendingCarsCount();
-        double getDistanceKm();
+        Integer getMaxParticipantCapacity();
     }
 }

@@ -9,6 +9,8 @@ import com.carsocialmedia.backend.mapevents.MapEventCarDecidedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventCarRegisteredEvent;
 import com.carsocialmedia.backend.mapevents.MapEventOrganizerAddedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventRejectedEvent;
+import com.carsocialmedia.backend.mapevents.MapEventWithdrawalDecidedEvent;
+import com.carsocialmedia.backend.mapevents.MapEventWithdrawalRequestedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventsService;
 import com.carsocialmedia.backend.mapevents.dto.CarMeetDetailsDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventAttendeeDto;
@@ -18,8 +20,11 @@ import com.carsocialmedia.backend.mapevents.dto.MapEventOrganizerDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventPageDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventParticipantDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventPinDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventRuleDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventSummaryDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventViewerStateDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
+import com.carsocialmedia.backend.mapevents.dto.OrganizerCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.UpdateMapEventRequest;
@@ -38,12 +43,14 @@ import com.carsocialmedia.backend.mapevents.internal.entities.MapEventEntity;
 import com.carsocialmedia.backend.mapevents.internal.entities.MapEventOrganizerEntity;
 import com.carsocialmedia.backend.mapevents.internal.entities.MapEventParticipantEntity;
 import com.carsocialmedia.backend.mapevents.internal.entities.MapEventParticipantId;
+import com.carsocialmedia.backend.mapevents.internal.entities.MapEventRuleEntity;
 import com.carsocialmedia.backend.mapevents.internal.repositories.CarMeetRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventAttendeeRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventCategoryRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventOrganizerRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventParticipantRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventRepository;
+import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventRuleRepository;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.shared.geo.GeoSupport;
@@ -62,6 +69,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -69,6 +77,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 class MapEventsServiceImpl implements MapEventsService {
@@ -93,6 +102,7 @@ class MapEventsServiceImpl implements MapEventsService {
     private final MapEventOrganizerRepository organizerRepository;
     private final MapEventAttendeeRepository attendeeRepository;
     private final MapEventParticipantRepository participantRepository;
+    private final MapEventRuleRepository ruleRepository;
     private final ProfileService profileService;
     private final GarageService garageService;
     private final BusinessService businessService;
@@ -108,6 +118,7 @@ class MapEventsServiceImpl implements MapEventsService {
                          MapEventOrganizerRepository organizerRepository,
                          MapEventAttendeeRepository attendeeRepository,
                          MapEventParticipantRepository participantRepository,
+                         MapEventRuleRepository ruleRepository,
                          ProfileService profileService,
                          GarageService garageService,
                          BusinessService businessService,
@@ -119,6 +130,7 @@ class MapEventsServiceImpl implements MapEventsService {
         this.organizerRepository = organizerRepository;
         this.attendeeRepository = attendeeRepository;
         this.participantRepository = participantRepository;
+        this.ruleRepository = ruleRepository;
         this.profileService = profileService;
         this.garageService = garageService;
         this.businessService = businessService;
@@ -153,7 +165,7 @@ class MapEventsServiceImpl implements MapEventsService {
                         row.getStatus(),
                         row.getAttendeesCount(),
                         row.getAttendingCarsCount(),
-                        row.getDistanceKm()))
+                        row.getMaxParticipantCapacity()))
                 .toList();
     }
 
@@ -234,24 +246,28 @@ class MapEventsServiceImpl implements MapEventsService {
                                                                     String cursor, int size) {
         requireVisible(currentUserId, eventId);
 
-        String normalisedStatus = normaliseParticipantStatus(status, true);
+        String normalisedStatus = normaliseParticipantStatus(status);
         // Pending and rejected entries are the organizers' business: exposing them would tell
-        // everyone whose car was turned away.
-        if (!MapEventParticipantEntity.ACCEPTED.equals(normalisedStatus)
-                && !isOrganizer(eventId, currentUserId)) {
+        // everyone whose car was turned away. A withdrawal request does not carry that stigma —
+        // the participant asked to leave themselves — so it is as public as accepted.
+        boolean publiclyVisible = normalisedStatus == null
+                || MapEventParticipantEntity.ACCEPTED.equals(normalisedStatus)
+                || MapEventParticipantEntity.WITHDRAWN.equals(normalisedStatus);
+        if (!publiclyVisible && !isOrganizer(eventId, currentUserId)) {
             throw new NotEventOrganizerException(
                     "Only organizers can view cars that are not in the accepted line-up");
         }
 
         int pageSize = clampPageSize(size);
         MapEventCursor decoded = MapEventCursor.decode(cursor);
+        Instant cursorCreatedAt = decoded == null ? null : decoded.timestamp();
+        UUID cursorCarId = decoded == null ? null : decoded.id();
 
-        List<MapEventParticipantEntity> rows = participantRepository.findPage(
-                eventId,
-                normalisedStatus,
-                decoded == null ? null : decoded.timestamp(),
-                decoded == null ? null : decoded.id(),
-                Limit.of(pageSize + 1));
+        // No filter = the public line-up, which now includes withdrawn cars alongside accepted
+        // ones (a pending withdrawal does not remove a participant from the entry list).
+        List<MapEventParticipantEntity> rows = normalisedStatus == null
+                ? participantRepository.findLineupPage(eventId, cursorCreatedAt, cursorCarId, Limit.of(pageSize + 1))
+                : participantRepository.findPage(eventId, normalisedStatus, cursorCreatedAt, cursorCarId, Limit.of(pageSize + 1));
 
         boolean hasMore = rows.size() > pageSize;
         List<MapEventParticipantEntity> page = hasMore ? rows.subList(0, pageSize) : rows;
@@ -315,6 +331,7 @@ class MapEventsServiceImpl implements MapEventsService {
         event.setApprovalStatus(MapEventEntity.APPROVAL_PENDING);
         event.setRequiresParticipantApproval(
                 request.requiresParticipantApproval() == null || request.requiresParticipantApproval());
+        event.setMaxParticipantCapacity(request.maxParticipantCapacity());
         event.setCreatedBy(currentUserId);
 
         eventRepository.saveAndFlush(event);
@@ -333,6 +350,10 @@ class MapEventsServiceImpl implements MapEventsService {
 
         if (MapEventCategoryEntity.CAR_MEET.equals(category.getId())) {
             saveCarMeetDetails(event, request.registrationDeadline(), true);
+        }
+
+        if (request.rules() != null && !request.rules().isEmpty()) {
+            insertRules(event.getId(), request.rules());
         }
 
         return assemble(event, currentUserId, true);
@@ -373,6 +394,9 @@ class MapEventsServiceImpl implements MapEventsService {
         }
         if (request.requiresParticipantApproval() != null) {
             event.setRequiresParticipantApproval(request.requiresParticipantApproval());
+        }
+        if (request.maxParticipantCapacity() != null) {
+            event.setMaxParticipantCapacity(request.maxParticipantCapacity());
         }
         if (request.registrationDeadline() != null) {
             if (!MapEventCategoryEntity.CAR_MEET.equals(event.getCategory().getId())) {
@@ -415,6 +439,37 @@ class MapEventsServiceImpl implements MapEventsService {
             deleteR2ObjectsAfterCommit(List.of(previous), eventId);
         }
         return assemble(event, currentUserId, true);
+    }
+
+    @Override
+    @Transactional
+    public MapEventDto replaceRules(UUID currentUserId, UUID eventId, List<String> rules) {
+        MapEventEntity event = loadEvent(eventId);
+        requireOrganizer(event, currentUserId);
+        requireEditable(event);
+
+        // The (event_id, sort_order) unique index means the old rows must be gone before the new
+        // ones land; deleteByEventId is a real DELETE statement, executed immediately rather than
+        // queued, so the insert below never collides with it.
+        ruleRepository.deleteByEventId(eventId);
+        insertRules(eventId, rules);
+
+        return assemble(event, currentUserId, true);
+    }
+
+    /** Inserts a fresh set of rule rows, {@code sort_order} assigned from list position. */
+    private void insertRules(UUID eventId, List<String> rules) {
+        List<MapEventRuleEntity> rows = new ArrayList<>(rules.size());
+        short order = 0;
+        for (String rule : rules) {
+            MapEventRuleEntity row = new MapEventRuleEntity();
+            row.setId(UUID.randomUUID());
+            row.setEventId(eventId);
+            row.setRule(rule.trim());
+            row.setSortOrder(order++);
+            rows.add(row);
+        }
+        ruleRepository.saveAll(rows);
     }
 
     @Override
@@ -521,6 +576,24 @@ class MapEventsServiceImpl implements MapEventsService {
         return assemble(event, currentUserId, true);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<OrganizerCandidateDto> searchOrganizerCandidates(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+
+        Stream<OrganizerCandidateDto> individuals = profileService.searchByUsername(query).stream()
+                .map(profile -> new OrganizerCandidateDto(
+                        MapEventOrganizerDto.INDIVIDUAL, profile.id(), profile.username(), profile.avatarUrl()));
+
+        Stream<OrganizerCandidateDto> businesses = businessService.searchByName(query).stream()
+                .map(business -> new OrganizerCandidateDto(
+                        MapEventOrganizerDto.BUSINESS, business.id(), business.name(), business.logoUrl()));
+
+        return Stream.concat(individuals, businesses).toList();
+    }
+
     // ==================================================================
     // Attending (spectators)
     // ==================================================================
@@ -585,17 +658,22 @@ class MapEventsServiceImpl implements MapEventsService {
         });
 
         MapEventParticipantId id = new MapEventParticipantId(eventId, carId);
-        MapEventParticipantEntity participant = participantRepository.findById(id)
-                .orElseGet(() -> {
-                    MapEventParticipantEntity fresh = new MapEventParticipantEntity();
-                    fresh.setId(id);
-                    fresh.setOwnerId(currentUserId);
-                    // An event that vets its line-up gets a pending row; otherwise the car is in.
-                    fresh.setStatus(event.isRequiresParticipantApproval()
-                            ? MapEventParticipantEntity.PENDING
-                            : MapEventParticipantEntity.ACCEPTED);
-                    return fresh;
-                });
+        MapEventParticipantEntity participant = participantRepository.findById(id).orElse(null);
+        if (participant == null) {
+            // The cap applies to brand new entries only — re-sending an existing registration is a
+            // no-op, not a new claim on a slot.
+            Integer capacity = event.getMaxParticipantCapacity();
+            if (capacity != null && event.getAttendingCarsCount() >= capacity) {
+                throw new EventClosedException("This event has reached its participant capacity");
+            }
+            participant = new MapEventParticipantEntity();
+            participant.setId(id);
+            participant.setOwnerId(currentUserId);
+            // An event that vets its line-up gets a pending row; otherwise the car is in.
+            participant.setStatus(event.isRequiresParticipantApproval()
+                    ? MapEventParticipantEntity.PENDING
+                    : MapEventParticipantEntity.ACCEPTED);
+        }
         participantRepository.save(participant);
 
         // Only worth telling the organizers when there is actually a decision waiting for them.
@@ -621,6 +699,13 @@ class MapEventsServiceImpl implements MapEventsService {
             if (!participant.getOwnerId().equals(currentUserId)) {
                 throw new CarNotOwnedException(carId);
             }
+            // Nothing was ever confirmed, so there is nothing to ask an organizer's leave to
+            // undo. An accepted registration must go through requestWithdrawal instead.
+            if (!MapEventParticipantEntity.PENDING.equals(participant.getStatus())) {
+                throw new InvalidMapEventException(
+                        "Only a pending registration can be withdrawn directly; "
+                                + "an accepted entry must go through a withdrawal request");
+            }
             participantRepository.delete(participant);
         });
     }
@@ -637,6 +722,11 @@ class MapEventsServiceImpl implements MapEventsService {
                 .orElseThrow(() -> new InvalidMapEventException(
                         "That car is not registered for this event: " + carId));
 
+        if (MapEventParticipantEntity.WITHDRAWN.equals(participant.getStatus())) {
+            throw new InvalidMapEventException(
+                    "This entry has a pending withdrawal request; use the withdrawal review endpoints instead");
+        }
+
         participant.setStatus(normalised);
         participantRepository.save(participant);
 
@@ -652,6 +742,135 @@ class MapEventsServiceImpl implements MapEventsService {
 
         CarSummaryDto car = resolveCars(List.of(carId)).get(carId);
         return new MapEventParticipantDto(car, participant.getStatus(), participant.getCreatedAt());
+    }
+
+    // ==================================================================
+    // Withdrawal requests
+    // ==================================================================
+
+    @Override
+    @Transactional
+    public List<MapEventParticipantDto> requestWithdrawal(UUID currentUserId, UUID eventId, String note) {
+        MapEventEntity event = loadApprovedEvent(eventId);
+        if (event.hasFinished(Instant.now())) {
+            throw new EventClosedException("This event has finished; withdrawal is closed");
+        }
+
+        List<MapEventParticipantEntity> rows = participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                eventId, currentUserId, MapEventParticipantEntity.ACCEPTED);
+        if (rows.isEmpty()) {
+            throw new InvalidMapEventException(
+                    "You have no accepted registration to withdraw from this event");
+        }
+
+        String trimmedNote = (note == null || note.isBlank()) ? null : note.trim();
+        for (MapEventParticipantEntity row : rows) {
+            row.setStatus(MapEventParticipantEntity.WITHDRAWN);
+            row.setWithdrawNote(trimmedNote);
+        }
+        participantRepository.saveAll(rows);
+
+        List<UUID> organizers = individualOrganizerIds(eventId).stream()
+                .filter(organizerId -> !organizerId.equals(currentUserId))
+                .toList();
+        if (!organizers.isEmpty()) {
+            events.publishEvent(new MapEventWithdrawalRequestedEvent(
+                    eventId, event.getTitle(), currentUserId, trimmedNote, organizers));
+        }
+
+        return toParticipantDtos(rows);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MapEventWithdrawalRequestDto> listWithdrawalRequests(UUID currentUserId, UUID eventId) {
+        MapEventEntity event = loadEvent(eventId);
+        requireOrganizer(event, currentUserId);
+
+        List<MapEventParticipantEntity> rows = participantRepository.findByIdEventIdAndStatus(
+                eventId, MapEventParticipantEntity.WITHDRAWN);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, CarSummaryDto> cars = resolveCars(
+                rows.stream().map(row -> row.getId().getCarId()).toList());
+        Map<UUID, ProfileSearchResultDto> owners = resolveProfiles(
+                rows.stream().map(MapEventParticipantEntity::getOwnerId).toList());
+
+        Map<UUID, List<MapEventParticipantEntity>> byOwner = rows.stream()
+                .collect(Collectors.groupingBy(
+                        MapEventParticipantEntity::getOwnerId, LinkedHashMap::new, Collectors.toList()));
+
+        List<MapEventWithdrawalRequestDto> requests = new ArrayList<>(byOwner.size());
+        for (Map.Entry<UUID, List<MapEventParticipantEntity>> entry : byOwner.entrySet()) {
+            ProfileSearchResultDto owner = owners.get(entry.getKey());
+            // A profile that no longer resolves is dropped rather than rendered as a blank row.
+            if (owner == null) {
+                continue;
+            }
+            List<CarSummaryDto> ownerCars = entry.getValue().stream()
+                    .map(row -> cars.get(row.getId().getCarId()))
+                    .filter(Objects::nonNull)
+                    .toList();
+            // Every row for one owner was set together in requestWithdrawal, so they share a note.
+            String note = entry.getValue().get(0).getWithdrawNote();
+            requests.add(new MapEventWithdrawalRequestDto(owner, ownerCars, note));
+        }
+        return requests;
+    }
+
+    @Override
+    @Transactional
+    public void approveWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId) {
+        MapEventEntity event = loadEvent(eventId);
+        requireOrganizer(event, currentUserId);
+
+        List<MapEventParticipantEntity> rows = withdrawalRequestOrThrow(eventId, ownerId);
+        participantRepository.deleteAll(rows);
+
+        if (!ownerId.equals(currentUserId)) {
+            events.publishEvent(new MapEventWithdrawalDecidedEvent(eventId, event.getTitle(), true, ownerId));
+        }
+    }
+
+    @Override
+    @Transactional
+    public List<MapEventParticipantDto> rejectWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId) {
+        MapEventEntity event = loadEvent(eventId);
+        requireOrganizer(event, currentUserId);
+
+        List<MapEventParticipantEntity> rows = withdrawalRequestOrThrow(eventId, ownerId);
+        // withdraw_note is left as-is: a historical record of the last attempt, overwritten only
+        // by the owner's next withdrawal request.
+        for (MapEventParticipantEntity row : rows) {
+            row.setStatus(MapEventParticipantEntity.ACCEPTED);
+        }
+        participantRepository.saveAll(rows);
+
+        if (!ownerId.equals(currentUserId)) {
+            events.publishEvent(new MapEventWithdrawalDecidedEvent(eventId, event.getTitle(), false, ownerId));
+        }
+
+        return toParticipantDtos(rows);
+    }
+
+    private List<MapEventParticipantEntity> withdrawalRequestOrThrow(UUID eventId, UUID ownerId) {
+        List<MapEventParticipantEntity> rows = participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                eventId, ownerId, MapEventParticipantEntity.WITHDRAWN);
+        if (rows.isEmpty()) {
+            throw new InvalidMapEventException("No pending withdrawal request from that participant");
+        }
+        return rows;
+    }
+
+    private List<MapEventParticipantDto> toParticipantDtos(List<MapEventParticipantEntity> rows) {
+        Map<UUID, CarSummaryDto> cars = resolveCars(rows.stream().map(row -> row.getId().getCarId()).toList());
+        return rows.stream()
+                .map(row -> new MapEventParticipantDto(
+                        cars.get(row.getId().getCarId()), row.getStatus(), row.getCreatedAt()))
+                .filter(dto -> dto.car() != null)
+                .toList();
     }
 
     // ==================================================================
@@ -734,6 +953,7 @@ class MapEventsServiceImpl implements MapEventsService {
      */
     private MapEventDto assemble(MapEventEntity event, UUID viewerId, boolean viewerIsOrganizer) {
         List<MapEventOrganizerDto> organizers = resolveOrganizers(event.getId());
+        List<MapEventRuleDto> rules = resolveRules(event.getId());
         CarMeetDetailsDto carMeet = MapEventCategoryEntity.CAR_MEET.equals(event.getCategory().getId())
                 ? getCarMeetDetails(event.getId())
                 : null;
@@ -755,9 +975,11 @@ class MapEventsServiceImpl implements MapEventsService {
                 // Why an event was turned down is between the admins and the people running it.
                 viewerIsOrganizer ? event.getRejectionReason() : null,
                 event.isRequiresParticipantApproval(),
+                event.getMaxParticipantCapacity(),
                 event.getAttendeesCount(),
                 event.getAttendingCarsCount(),
                 organizers,
+                rules,
                 carMeet,
                 viewerState(event, viewerId, viewerIsOrganizer, carMeet),
                 event.getCreatedAt());
@@ -846,6 +1068,13 @@ class MapEventsServiceImpl implements MapEventsService {
         return credits;
     }
 
+    private List<MapEventRuleDto> resolveRules(UUID eventId) {
+        return ruleRepository.findByEventIdOrderBySortOrderAsc(eventId)
+                .stream()
+                .map(row -> new MapEventRuleDto(row.getId(), row.getRule(), row.getSortOrder()))
+                .toList();
+    }
+
     private MapEventPageDto<MapEventSummaryDto> toSummaryPage(List<MapEventEntity> rows, int pageSize) {
         boolean hasMore = rows.size() > pageSize;
         List<MapEventEntity> page = hasMore ? rows.subList(0, pageSize) : rows;
@@ -868,6 +1097,7 @@ class MapEventsServiceImpl implements MapEventsService {
                         event.getStatus(),
                         event.getApprovalStatus(),
                         event.getRejectionReason(),
+                        event.getMaxParticipantCapacity(),
                         event.getAttendeesCount(),
                         event.getAttendingCarsCount(),
                         creators.get(event.getCreatedBy()),
@@ -1077,17 +1307,18 @@ class MapEventsServiceImpl implements MapEventsService {
         return trimmed;
     }
 
-    /** A missing filter means the public line-up, which is the accepted cars. */
-    private String normaliseParticipantStatus(String status, boolean defaultToAccepted) {
+    /** {@code null} means "no filter", resolved by the caller to the public line-up. */
+    private String normaliseParticipantStatus(String status) {
         if (status == null || status.isBlank()) {
-            return defaultToAccepted ? MapEventParticipantEntity.ACCEPTED : null;
+            return null;
         }
         String trimmed = status.trim().toLowerCase();
         if (!Set.of(MapEventParticipantEntity.PENDING,
                     MapEventParticipantEntity.ACCEPTED,
-                    MapEventParticipantEntity.REJECTED).contains(trimmed)) {
+                    MapEventParticipantEntity.REJECTED,
+                    MapEventParticipantEntity.WITHDRAWN).contains(trimmed)) {
             throw new InvalidMapEventException(
-                    "Participant status must be 'pending', 'accepted' or 'rejected'");
+                    "Participant status must be 'pending', 'accepted', 'rejected' or 'withdrawn'");
         }
         return trimmed;
     }

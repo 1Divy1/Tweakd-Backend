@@ -46,8 +46,9 @@ in the business's own `timezone`:
 
 `findNearby` is a native PostGIS query. `ST_DWithin` on the `geography` column is index-aware, so
 Postgres uses the GiST index `business_accounts_location_idx`; a bare `ST_Distance(...) < x`
-comparison would force a sequential scan over every business. `ST_Distance` on `geography` returns
-metres along the spheroid, so kilometres are a plain division.
+comparison would force a sequential scan over every business. Results are ordered by `id`, not
+distance — the map renders every pin at its own coordinates regardless of array order, so `id` is
+just there to make `limit` deterministic if a radius ever has more matches than the limit allows.
 
 The **centre point is supplied by the client**: the user's realtime location when they granted
 location permission, otherwise the coordinates of their home city (already available client-side

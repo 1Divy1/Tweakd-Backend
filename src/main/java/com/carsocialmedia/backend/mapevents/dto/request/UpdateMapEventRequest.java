@@ -1,5 +1,6 @@
 package com.carsocialmedia.backend.mapevents.dto.request;
 
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -22,6 +23,7 @@ import java.time.Instant;
  * @param startsAt                    new start time; must be in the future
  * @param endsAt                      new end time; must be after the (new) start
  * @param requiresParticipantApproval new car-approval toggle
+ * @param maxParticipantCapacity      new cap on accepted cars; {@code null} leaves it unchanged
  * @param registrationDeadline        car meets only: new registration deadline
  */
 public record UpdateMapEventRequest(
@@ -33,5 +35,6 @@ public record UpdateMapEventRequest(
         Instant startsAt,
         Instant endsAt,
         Boolean requiresParticipantApproval,
+        @Positive Integer maxParticipantCapacity,
         Instant registrationDeadline
 ) {}

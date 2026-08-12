@@ -104,5 +104,6 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.car_event_participant_status_options (id, status) VALUES
     ('pending', 'Pending'),
     ('accepted', 'Accepted'),
-    ('rejected', 'Rejected')
+    ('rejected', 'Rejected'),
+    ('withdrawn', 'Withdrawn')
 ON CONFLICT (id) DO NOTHING;

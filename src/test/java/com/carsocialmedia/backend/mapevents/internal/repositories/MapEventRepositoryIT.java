@@ -96,7 +96,7 @@ class MapEventRepositoryIT extends AbstractPostgresIT {
     // ---- radius search ------------------------------------------------------
 
     @Test
-    void returnsOnlyEventsInsideTheRadiusNearestFirst() {
+    void returnsOnlyEventsInsideTheRadius() {
         visibleEvent("Centre meet", CENTRE_LAT, CENTRE_LNG);
         // ~11 km north of the centre: inside 25 km, outside 5 km.
         visibleEvent("Nearby meet", CENTRE_LAT + 0.1, CENTRE_LNG);
@@ -104,18 +104,17 @@ class MapEventRepositoryIT extends AbstractPostgresIT {
         visibleEvent("Far meet", 44.4268, 26.1025);
 
         assertThat(nearbyTitles(RADIUS_25_KM, null))
-                .containsExactly("Centre meet", "Nearby meet");
+                .containsExactlyInAnyOrder("Centre meet", "Nearby meet");
 
         assertThat(nearbyTitles(5_000, null)).containsExactly("Centre meet");
     }
 
     @Test
-    void reportsDistanceInKilometresFromTheSearchCentre() {
+    void reportsCoordinatesInTheRightOrder() {
         visibleEvent("Centre meet", CENTRE_LAT, CENTRE_LNG);
 
         var row = eventRepository.findVisibleNearby(CENTRE_LAT, CENTRE_LNG, RADIUS_25_KM, null, 100).getFirst();
 
-        assertThat(row.getDistanceKm()).isCloseTo(0.0, org.assertj.core.data.Offset.offset(0.01));
         // Guards against a swapped lat/lng in the projection, which would still parse.
         assertThat(row.getLat()).isCloseTo(CENTRE_LAT, org.assertj.core.data.Offset.offset(0.0001));
         assertThat(row.getLng()).isCloseTo(CENTRE_LNG, org.assertj.core.data.Offset.offset(0.0001));

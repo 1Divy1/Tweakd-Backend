@@ -118,7 +118,6 @@ class BusinessServiceImplLogoTest {
         public BigDecimal getAverageRating() { return new BigDecimal("5.0"); }
         public int getReviewCount() { return 100; }
         public String getTimezone() { return "Europe/Bucharest"; }
-        public double getDistanceKm() { return 1.8894; }
     }
 
     private static BusinessAccountEntity entity(String logoUrl) {
