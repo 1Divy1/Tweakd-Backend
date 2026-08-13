@@ -66,6 +66,10 @@ public class MapEventParticipantEntity {
     @Column(name = "withdraw_note")
     private String withdrawNote;
 
+    /** Why the organizer turned this car down. Set on {@link #REJECTED}, cleared on acceptance. */
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
+
     /** DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

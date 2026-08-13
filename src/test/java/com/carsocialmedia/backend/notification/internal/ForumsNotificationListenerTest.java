@@ -56,7 +56,7 @@ class ForumsNotificationListenerTest {
         notificationService = mock(NotificationService.class);
         listener = new ForumsNotificationListener(profileService, notificationService);
         when(profileService.findByIds(anyCollection()))
-                .thenReturn(List.of(new ProfileSearchResultDto(ACTOR, "marius_dev", null)));
+                .thenReturn(List.of(new ProfileSearchResultDto(ACTOR, "Marius", "marius_dev", null)));
     }
 
     @Test

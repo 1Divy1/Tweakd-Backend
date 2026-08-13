@@ -279,12 +279,21 @@ class MapEventsServiceImpl implements MapEventsService {
                 .map(row -> new MapEventParticipantDto(
                         cars.get(row.getId().getCarId()),
                         row.getStatus(),
-                        row.getCreatedAt()))
+                        row.getCreatedAt(),
+                        row.getRejectionReason()))
                 .filter(dto -> dto.car() != null)
                 .toList();
 
         return new MapEventPageDto<>(items, nextCursor(hasMore, page,
                 MapEventParticipantEntity::getCreatedAt, row -> row.getId().getCarId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MapEventParticipantDto> listMyParticipants(UUID currentUserId, UUID eventId) {
+        requireVisible(currentUserId, eventId);
+        List<MapEventParticipantEntity> rows = participantRepository.findByIdEventIdAndOwnerId(eventId, currentUserId);
+        return toParticipantDtos(rows);
     }
 
     @Override
@@ -585,11 +594,11 @@ class MapEventsServiceImpl implements MapEventsService {
 
         Stream<OrganizerCandidateDto> individuals = profileService.searchByUsername(query).stream()
                 .map(profile -> new OrganizerCandidateDto(
-                        MapEventOrganizerDto.INDIVIDUAL, profile.id(), profile.username(), profile.avatarUrl()));
+                        MapEventOrganizerDto.INDIVIDUAL, profile.id(), profile.name(), profile.username(), profile.avatarUrl()));
 
         Stream<OrganizerCandidateDto> businesses = businessService.searchByName(query).stream()
                 .map(business -> new OrganizerCandidateDto(
-                        MapEventOrganizerDto.BUSINESS, business.id(), business.name(), business.logoUrl()));
+                        MapEventOrganizerDto.BUSINESS, business.id(), business.name(), null, business.logoUrl()));
 
         return Stream.concat(individuals, businesses).toList();
     }
@@ -639,7 +648,7 @@ class MapEventsServiceImpl implements MapEventsService {
 
     @Override
     @Transactional
-    public MapEventParticipantDto registerCar(UUID currentUserId, UUID eventId, UUID carId) {
+    public MapEventDto registerCar(UUID currentUserId, UUID eventId, UUID carId) {
         MapEventEntity event = loadApprovedEvent(eventId);
 
         UUID owner = garageService.findCarOwnerIds(List.of(carId)).get(carId);
@@ -687,13 +696,12 @@ class MapEventsServiceImpl implements MapEventsService {
             }
         }
 
-        CarSummaryDto car = resolveCars(List.of(carId)).get(carId);
-        return new MapEventParticipantDto(car, participant.getStatus(), participant.getCreatedAt());
+        return reloadAndAssemble(eventId, currentUserId);
     }
 
     @Override
     @Transactional
-    public void withdrawCar(UUID currentUserId, UUID eventId, UUID carId) {
+    public MapEventDto withdrawCar(UUID currentUserId, UUID eventId, UUID carId) {
         MapEventParticipantId id = new MapEventParticipantId(eventId, carId);
         participantRepository.findById(id).ifPresent(participant -> {
             if (!participant.getOwnerId().equals(currentUserId)) {
@@ -708,11 +716,12 @@ class MapEventsServiceImpl implements MapEventsService {
             }
             participantRepository.delete(participant);
         });
+        return reloadAndAssemble(eventId, currentUserId);
     }
 
     @Override
     @Transactional
-    public MapEventParticipantDto decideParticipant(UUID currentUserId, UUID eventId, UUID carId, String status) {
+    public MapEventDto decideParticipant(UUID currentUserId, UUID eventId, UUID carId, String status, String reason) {
         MapEventEntity event = loadEvent(eventId);
         requireOrganizer(event, currentUserId);
 
@@ -727,7 +736,14 @@ class MapEventsServiceImpl implements MapEventsService {
                     "This entry has a pending withdrawal request; use the withdrawal review endpoints instead");
         }
 
+        String trimmedReason = (reason == null || reason.isBlank()) ? null : reason.trim();
+        if (MapEventParticipantEntity.REJECTED.equals(normalised) && trimmedReason == null) {
+            throw new InvalidMapEventException("A rejection reason is required");
+        }
+
         participant.setStatus(normalised);
+        // Accepting clears any reason left over from a past rejection of the same car.
+        participant.setRejectionReason(MapEventParticipantEntity.REJECTED.equals(normalised) ? trimmedReason : null);
         participantRepository.save(participant);
 
         // An organizer deciding on their own car does not need telling.
@@ -737,11 +753,11 @@ class MapEventsServiceImpl implements MapEventsService {
                     event.getTitle(),
                     carId,
                     MapEventParticipantEntity.ACCEPTED.equals(normalised),
+                    participant.getRejectionReason(),
                     participant.getOwnerId()));
         }
 
-        CarSummaryDto car = resolveCars(List.of(carId)).get(carId);
-        return new MapEventParticipantDto(car, participant.getStatus(), participant.getCreatedAt());
+        return reloadAndAssemble(eventId, currentUserId);
     }
 
     // ==================================================================
@@ -750,7 +766,7 @@ class MapEventsServiceImpl implements MapEventsService {
 
     @Override
     @Transactional
-    public List<MapEventParticipantDto> requestWithdrawal(UUID currentUserId, UUID eventId, String note) {
+    public MapEventDto requestWithdrawal(UUID currentUserId, UUID eventId, String note) {
         MapEventEntity event = loadApprovedEvent(eventId);
         if (event.hasFinished(Instant.now())) {
             throw new EventClosedException("This event has finished; withdrawal is closed");
@@ -778,7 +794,7 @@ class MapEventsServiceImpl implements MapEventsService {
                     eventId, event.getTitle(), currentUserId, trimmedNote, organizers));
         }
 
-        return toParticipantDtos(rows);
+        return reloadAndAssemble(eventId, currentUserId);
     }
 
     @Override
@@ -822,7 +838,7 @@ class MapEventsServiceImpl implements MapEventsService {
 
     @Override
     @Transactional
-    public void approveWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId) {
+    public MapEventDto approveWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId) {
         MapEventEntity event = loadEvent(eventId);
         requireOrganizer(event, currentUserId);
 
@@ -832,11 +848,13 @@ class MapEventsServiceImpl implements MapEventsService {
         if (!ownerId.equals(currentUserId)) {
             events.publishEvent(new MapEventWithdrawalDecidedEvent(eventId, event.getTitle(), true, ownerId));
         }
+
+        return reloadAndAssemble(eventId, currentUserId);
     }
 
     @Override
     @Transactional
-    public List<MapEventParticipantDto> rejectWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId) {
+    public MapEventDto rejectWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId) {
         MapEventEntity event = loadEvent(eventId);
         requireOrganizer(event, currentUserId);
 
@@ -852,7 +870,7 @@ class MapEventsServiceImpl implements MapEventsService {
             events.publishEvent(new MapEventWithdrawalDecidedEvent(eventId, event.getTitle(), false, ownerId));
         }
 
-        return toParticipantDtos(rows);
+        return reloadAndAssemble(eventId, currentUserId);
     }
 
     private List<MapEventParticipantEntity> withdrawalRequestOrThrow(UUID eventId, UUID ownerId) {
@@ -868,7 +886,7 @@ class MapEventsServiceImpl implements MapEventsService {
         Map<UUID, CarSummaryDto> cars = resolveCars(rows.stream().map(row -> row.getId().getCarId()).toList());
         return rows.stream()
                 .map(row -> new MapEventParticipantDto(
-                        cars.get(row.getId().getCarId()), row.getStatus(), row.getCreatedAt()))
+                        cars.get(row.getId().getCarId()), row.getStatus(), row.getCreatedAt(), row.getRejectionReason()))
                 .filter(dto -> dto.car() != null)
                 .toList();
     }
@@ -1050,6 +1068,7 @@ class MapEventsServiceImpl implements MapEventsService {
                         MapEventOrganizerDto.INDIVIDUAL,
                         row.getRole(),
                         row.getIndividualOrganizerId(),
+                        profile == null ? null : profile.name(),
                         profile == null ? null : profile.username(),
                         profile == null ? null : profile.avatarUrl()));
             } else {
@@ -1062,6 +1081,7 @@ class MapEventsServiceImpl implements MapEventsService {
                         row.getRole(),
                         row.getBusinessOrganizerId(),
                         business == null ? null : business.name(),
+                        null,
                         business == null ? null : business.logoUrl()));
             }
         }

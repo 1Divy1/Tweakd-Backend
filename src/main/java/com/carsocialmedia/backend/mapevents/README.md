@@ -64,7 +64,10 @@ permissions. Every permission check looks at *individual* organizers.
 - **Participants** (`car_event_participants`) are **cars**, entered by their owner. Only the owner
   may enter a car. Registration closes at `event_car_meet.registration_deadline`. With
   `requires_participant_approval` the row starts `pending` and an organizer accepts/rejects it;
-  otherwise it is `accepted` outright.
+  otherwise it is `accepted` outright. Rejecting requires a `rejection_reason` (same rule as
+  rejecting an event), cleared if the car is later accepted. `listParticipants` hides
+  `pending`/`rejected` rows from everyone but an organizer, so the owner reads their own standing —
+  including the reason — through `listMyParticipants` instead.
 
 `car_events.max_participant_capacity` is an optional cap (`null` = no limit) on the **accepted**
 line-up. `registerCar` rejects a brand-new entry once `attending_cars_count` reaches the cap
@@ -130,6 +133,7 @@ claim another's upload.
 | `getEvent(userId, eventId)` | `GET /{eventId}` | full page + the viewer's own standing |
 | `listAttendees(...)` | `GET /{eventId}/attendees?status=&cursor=&size=` | keyset page |
 | `listParticipants(...)` | `GET /{eventId}/cars?status=&cursor=&size=` | defaults to the accepted line-up |
+| `listMyParticipants(...)` | `GET /{eventId}/cars/mine` | the caller's own rows, any status — the only way to see your own pending/rejected entry |
 | `getMyEvents(...)` | `GET /mine?cursor=&size=` | includes pending / rejected |
 | `createEvent(...)` | `POST /` → 201 | submitted as `pending` |
 | `updateEvent(...)` | `PATCH /{eventId}` | pending/rejected only |
@@ -139,9 +143,13 @@ claim another's upload.
 | `deleteEvent(...)` | `DELETE /{eventId}` → 204 | **creator only** |
 | `addOrganizer(...)` / `removeOrganizer(...)` | `POST /{eventId}/organizers`, `DELETE /{eventId}/organizers/{id}` | creator only |
 | `searchOrganizerCandidates(query)` | `GET /organizers/search?q=` | merged user + business search, for the add-organizer picker |
-| `setAttendance(...)` / `removeAttendance(...)` | `PUT` / `DELETE /{eventId}/attendance` | |
-| `registerCar(...)` / `withdrawCar(...)` | `POST /{eventId}/cars` → 201, `DELETE /{eventId}/cars/{carId}` | |
-| `decideParticipant(...)` | `PATCH /{eventId}/cars/{carId}` | organizer verdict |
+| `setAttendance(...)` / `removeAttendance(...)` | `PUT` / `DELETE /{eventId}/attendance` | returns the full `MapEventDto`, freshly reloaded |
+| `registerCar(...)` / `withdrawCar(...)` | `POST /{eventId}/cars` → 201, `DELETE /{eventId}/cars/{carId}` | returns the full `MapEventDto`, not the participant row — `attending_cars_count` and `viewer.my_registered_car_ids` both move as a result, so one response saves a follow-up `GET` |
+| `decideParticipant(...)` | `PATCH /{eventId}/cars/{carId}` | organizer verdict; `reason` required when rejecting; returns the full `MapEventDto` |
+| `requestWithdrawal(...)` | `POST /{eventId}/withdraw` | flags every accepted row of the caller's as `withdrawn`, not removed; returns the full `MapEventDto` |
+| `listWithdrawalRequests(...)` | `GET /{eventId}/withdrawals` | organizer only, one entry per requesting owner |
+| `approveWithdrawal(...)` | `POST /{eventId}/withdrawals/{ownerId}/approve` | organizer only; hard-deletes the rows; returns the full `MapEventDto` |
+| `rejectWithdrawal(...)` | `POST /{eventId}/withdrawals/{ownerId}/reject` | organizer only; rows revert to `accepted`; returns the full `MapEventDto` |
 
 Base path `/api/v1/map-events`. All endpoints require authentication; none are under `/public/**`.
 
@@ -166,7 +174,8 @@ An unapproved event is visible only to its organizers (and to admins via `getEve
 Everyone else gets `MapEventNotFoundException` — the *same* 404 as a nonexistent id, so pending and
 rejected submissions cannot be discovered by probing ids. `rejection_reason` is stripped from the
 DTO for non-organizers. Pending/rejected car entries are organizer-only for the same reason: they
-would otherwise reveal whose car was turned away.
+would otherwise reveal whose car was turned away. The owner of a pending/rejected car still sees
+their own row (status, and the rejection reason if any) through `listMyParticipants`.
 
 ## Notifications
 
@@ -178,7 +187,7 @@ back on `notification` (no Modulith cycle), and a rolled-back approval never not
 |---|---|---|---|
 | `map_event_approved` | an admin approves your event | creator | none |
 | `map_event_rejected` | an admin rejects it (reason in `body`) | creator | none |
-| `map_event_car_decided` | an organizer accepts/rejects your car | car owner | none |
+| `map_event_car_decided` | an organizer accepts/rejects your car (reason in `body` when rejected) | car owner | none |
 | `map_event_car_registered` | a car is entered and needs a decision | individual organizers, minus the actor | `event_organizer_enabled` |
 | `map_event_organizer_added` | you are credited as a co-organizer | the added user | `event_organizer_enabled` |
 
@@ -218,6 +227,8 @@ migration (all tables were empty at the time):
 - `rejection_reason` and `updated_at` added.
 - `canceled` seeded into `car_event_status_options`.
 - Indexes added: `(approval_status, status, starts_at)`, `starts_at`, `car_event_participants(owner_id)`.
+- `car_event_participants.rejection_reason` (nullable text) added by
+  `add_rejection_reason_to_car_event_participants`, mirroring `car_events.rejection_reason`.
 
 `car_events` has **RLS enabled with no policies**, and the other `car_event*` tables have no table
 grants, so the whole feature is backend-gated — the same posture as `business`.

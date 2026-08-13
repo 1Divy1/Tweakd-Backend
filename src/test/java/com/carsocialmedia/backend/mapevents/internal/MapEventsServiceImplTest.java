@@ -61,6 +61,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -388,12 +389,15 @@ class MapEventsServiceImplTest {
         existing(vets);
         when(garageService.findCarOwnerIds(List.of(CAR_ID))).thenReturn(Map.of(CAR_ID, STRANGER));
         when(participantRepository.findById(any())).thenReturn(Optional.empty());
-        when(garageService.findCarsByIds(any())).thenReturn(List.of());
 
-        assertThat(service.registerCar(STRANGER, EVENT_ID, CAR_ID).status()).isEqualTo("pending");
-
+        service.registerCar(STRANGER, EVENT_ID, CAR_ID);
         vets.setRequiresParticipantApproval(false);
-        assertThat(service.registerCar(STRANGER, EVENT_ID, CAR_ID).status()).isEqualTo("accepted");
+        service.registerCar(STRANGER, EVENT_ID, CAR_ID);
+
+        ArgumentCaptor<MapEventParticipantEntity> captor = ArgumentCaptor.forClass(MapEventParticipantEntity.class);
+        verify(participantRepository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).extracting(MapEventParticipantEntity::getStatus)
+                .containsExactly("pending", "accepted");
     }
 
     @Test
@@ -416,11 +420,13 @@ class MapEventsServiceImplTest {
         ReflectionTestUtils.setField(capped, "attendingCarsCount", 2);
         existing(capped);
         when(garageService.findCarOwnerIds(List.of(CAR_ID))).thenReturn(Map.of(CAR_ID, STRANGER));
-        when(participantRepository.findById(any()))
-                .thenReturn(Optional.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.ACCEPTED)));
-        when(garageService.findCarsByIds(any())).thenReturn(List.of());
+        MapEventParticipantEntity existingRow = participant(STRANGER, CAR_ID, MapEventParticipantEntity.ACCEPTED);
+        when(participantRepository.findById(any())).thenReturn(Optional.of(existingRow));
 
-        assertThat(service.registerCar(STRANGER, EVENT_ID, CAR_ID).status()).isEqualTo("accepted");
+        service.registerCar(STRANGER, EVENT_ID, CAR_ID);
+
+        verify(participantRepository).save(existingRow);
+        assertThat(existingRow.getStatus()).isEqualTo("accepted");
     }
 
     @Test
@@ -428,7 +434,7 @@ class MapEventsServiceImplTest {
         existing(approvedUpcoming());
 
         assertThatExceptionOfType(NotEventOrganizerException.class)
-                .isThrownBy(() -> service.decideParticipant(STRANGER, EVENT_ID, CAR_ID, "accepted"));
+                .isThrownBy(() -> service.decideParticipant(STRANGER, EVENT_ID, CAR_ID, "accepted", null));
     }
 
     @Test
@@ -436,7 +442,7 @@ class MapEventsServiceImplTest {
         existing(approvedUpcoming());
 
         assertThatExceptionOfType(InvalidMapEventException.class)
-                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "pending"));
+                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "pending", null));
     }
 
     @Test
@@ -446,13 +452,67 @@ class MapEventsServiceImplTest {
                 .thenReturn(Optional.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.WITHDRAWN)));
 
         assertThatExceptionOfType(InvalidMapEventException.class)
-                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected"));
+                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected", "not a fit"));
+    }
+
+    @Test
+    void rejectingAnEnteredCarRequiresAReason() {
+        existing(approvedUpcoming());
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.PENDING)));
+
+        assertThatExceptionOfType(InvalidMapEventException.class)
+                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected", "  "));
+    }
+
+    @Test
+    void rejectingAnEnteredCarStoresTheReasonAndTellsTheOwner() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.PENDING);
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(row));
+
+        service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected", "not a fit");
+
+        assertThat(row.getStatus()).isEqualTo("rejected");
+        assertThat(row.getRejectionReason()).isEqualTo("not a fit");
+        verify(events).publishEvent(any(com.carsocialmedia.backend.mapevents.MapEventCarDecidedEvent.class));
+    }
+
+    @Test
+    void acceptingAnEnteredCarClearsAnyPriorRejectionReason() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.REJECTED);
+        row.setRejectionReason("not a fit");
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(row));
+
+        service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "accepted", null);
+
+        assertThat(row.getStatus()).isEqualTo("accepted");
+        assertThat(row.getRejectionReason()).isNull();
+    }
+
+    @Test
+    void listMyParticipantsReturnsTheCallersOwnRowsWhateverTheirStatus() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity rejected = participant(STRANGER, CAR_ID, MapEventParticipantEntity.REJECTED);
+        rejected.setRejectionReason("not a fit");
+        when(participantRepository.findByIdEventIdAndOwnerId(EVENT_ID, STRANGER)).thenReturn(List.of(rejected));
+        when(garageService.findCarsByIds(any())).thenReturn(List.of(carSummary(CAR_ID)));
+
+        List<MapEventParticipantDto> mine = service.listMyParticipants(STRANGER, EVENT_ID);
+
+        assertThat(mine).hasSize(1);
+        assertThat(mine.get(0).status()).isEqualTo("rejected");
+        assertThat(mine.get(0).rejectionReason()).isEqualTo("not a fit");
     }
 
     // ---- withdrawing a still-pending registration ----------------------------
 
     @Test
     void aPendingRegistrationCanBeWithdrawnDirectly() {
+        existing(approvedUpcoming());
         MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.PENDING);
         when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
                 .thenReturn(Optional.of(row));
@@ -499,14 +559,11 @@ class MapEventsServiceImplTest {
         MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.ACCEPTED);
         when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
                 EVENT_ID, STRANGER, MapEventParticipantEntity.ACCEPTED)).thenReturn(List.of(row));
-        when(garageService.findCarsByIds(any())).thenReturn(List.of(carSummary(CAR_ID)));
 
-        List<MapEventParticipantDto> result = service.requestWithdrawal(STRANGER, EVENT_ID, "  can't make it  ");
+        service.requestWithdrawal(STRANGER, EVENT_ID, "  can't make it  ");
 
         assertThat(row.getStatus()).isEqualTo(MapEventParticipantEntity.WITHDRAWN);
         assertThat(row.getWithdrawNote()).isEqualTo("can't make it");
-        assertThat(result).extracting(MapEventParticipantDto::status)
-                .containsExactly(MapEventParticipantEntity.WITHDRAWN);
         verify(participantRepository, never()).delete(any());
         verify(participantRepository, never()).deleteAll(any());
         // CREATOR is the only individual organizer and is not the actor, so they get notified.
@@ -552,8 +609,8 @@ class MapEventsServiceImplTest {
         when(garageService.findCarsByIds(any())).thenReturn(List.of(
                 carSummary(CAR_ID), carSummary(otherCar), carSummary(coOrganizerRow.getId().getCarId())));
         when(profileService.findByIds(any())).thenReturn(List.of(
-                new ProfileSearchResultDto(STRANGER, "stranger", null),
-                new ProfileSearchResultDto(CO_ORGANIZER, "co_organizer", null)));
+                new ProfileSearchResultDto(STRANGER, "Stranger Name", "stranger", null),
+                new ProfileSearchResultDto(CO_ORGANIZER, "Co Organizer Name", "co_organizer", null)));
 
         List<MapEventWithdrawalRequestDto> requests = service.listWithdrawalRequests(CREATOR, EVENT_ID);
 
@@ -605,15 +662,12 @@ class MapEventsServiceImplTest {
         row.setWithdrawNote("changed my mind about leaving");
         when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
                 EVENT_ID, STRANGER, MapEventParticipantEntity.WITHDRAWN)).thenReturn(List.of(row));
-        when(garageService.findCarsByIds(any())).thenReturn(List.of(carSummary(CAR_ID)));
 
-        List<MapEventParticipantDto> result = service.rejectWithdrawal(CREATOR, EVENT_ID, STRANGER);
+        service.rejectWithdrawal(CREATOR, EVENT_ID, STRANGER);
 
         assertThat(row.getStatus()).isEqualTo(MapEventParticipantEntity.ACCEPTED);
         // The note is a historical record of the attempt — kept, not cleared, on rejection.
         assertThat(row.getWithdrawNote()).isEqualTo("changed my mind about leaving");
-        assertThat(result).extracting(MapEventParticipantDto::status)
-                .containsExactly(MapEventParticipantEntity.ACCEPTED);
         verify(participantRepository, never()).delete(any());
         verify(events).publishEvent(any(MapEventWithdrawalDecidedEvent.class));
     }

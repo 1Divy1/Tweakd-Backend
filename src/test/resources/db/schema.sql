@@ -1356,7 +1356,8 @@ CREATE TABLE public.car_event_participants (
     car_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
-    withdraw_note text
+    withdraw_note text,
+    rejection_reason text
 );
 
 

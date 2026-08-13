@@ -90,7 +90,7 @@ class MapEventsNotificationListener {
                 event.accepted()
                         ? "Your car is in the line-up for \"" + event.title() + "\""
                         : "Your car was not accepted for \"" + event.title() + "\"",
-                null,
+                event.accepted() ? null : event.reason(),
                 payload);
     }
 

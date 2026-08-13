@@ -88,6 +88,13 @@ public interface MapEventsService {
                                                              String cursor, int size);
 
     /**
+     * Every one of the caller's own cars entered into an event, whatever their status — the one
+     * place a participant can see a {@code pending} or {@code rejected} entry of their own, since
+     * {@link #listParticipants} hides those from anyone but an organizer.
+     */
+    List<MapEventParticipantDto> listMyParticipants(UUID currentUserId, UUID eventId);
+
+    /**
      * One keyset page of the events the caller created or co-organizes, newest first — including
      * their pending and rejected ones, which is the point of the screen.
      */
@@ -206,30 +213,37 @@ public interface MapEventsService {
 
     /**
      * Enters one of the caller's own cars into the event. Starts {@code pending} when the event
-     * requires organizer approval, otherwise {@code accepted}. Idempotent per car.
+     * requires organizer approval, otherwise {@code accepted}. Idempotent per car. Returns the full
+     * event page, not just the new entry, since {@code attending_cars_count} and the caller's
+     * {@code viewer.myRegisteredCarIds} both change and are trigger-owned — one response saves the
+     * client an immediate follow-up {@code GET}.
      *
      * @throws com.carsocialmedia.backend.mapevents.exception.CarNotOwnedException if the car is not the caller's
      * @throws com.carsocialmedia.backend.mapevents.exception.EventClosedException if the registration deadline has passed
      */
-    MapEventParticipantDto registerCar(UUID currentUserId, UUID eventId, UUID carId);
+    MapEventDto registerCar(UUID currentUserId, UUID eventId, UUID carId);
 
     /**
      * Withdraws one of the caller's cars from the event outright. Idempotent, and only allowed
      * while the registration is still {@code pending} — nothing has been confirmed yet, so there is
      * nothing to ask an organizer's leave to undo. An {@code accepted} car must go through
-     * {@link #requestWithdrawal} instead.
+     * {@link #requestWithdrawal} instead. Returns the full event page (see {@link #registerCar}).
      *
      * @throws com.carsocialmedia.backend.mapevents.exception.CarNotOwnedException if the car is not the caller's
      * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if the registration is already {@code accepted}
      */
-    void withdrawCar(UUID currentUserId, UUID eventId, UUID carId);
+    MapEventDto withdrawCar(UUID currentUserId, UUID eventId, UUID carId);
 
     /**
-     * An organizer's verdict on an entered car: {@code accepted} or {@code rejected}.
+     * An organizer's verdict on an entered car: {@code accepted} or {@code rejected}. Returns the
+     * full event page (see {@link #registerCar}) as seen by the deciding organizer.
      *
+     * @param reason required when rejecting — the owner sees it on their own entry; ignored (and
+     *               cleared) when accepting
      * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
+     * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if rejecting without a reason
      */
-    MapEventParticipantDto decideParticipant(UUID currentUserId, UUID eventId, UUID carId, String status);
+    MapEventDto decideParticipant(UUID currentUserId, UUID eventId, UUID carId, String status, String reason);
 
     // ===================== Withdrawal requests =====================
 
@@ -239,11 +253,13 @@ public interface MapEventsService {
      * removed — the caller stays on the entry list, with the pending withdrawal visible via their
      * {@code status}, until an organizer decides.
      *
+     * Returns the full event page (see {@link #registerCar}).
+     *
      * @param note optional context for the organizer, or {@code null}
      * @throws com.carsocialmedia.backend.mapevents.exception.EventClosedException if the event has finished
      * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if the caller has no accepted registration on this event
      */
-    List<MapEventParticipantDto> requestWithdrawal(UUID currentUserId, UUID eventId, String note);
+    MapEventDto requestWithdrawal(UUID currentUserId, UUID eventId, String note);
 
     /**
      * The event's pending withdrawal requests, one entry per requesting owner. Organizer only.
@@ -254,22 +270,24 @@ public interface MapEventsService {
 
     /**
      * Approves a participant's withdrawal request: every one of their rows for this event is
-     * hard-deleted, actually taking them off the entry list.
+     * hard-deleted, actually taking them off the entry list. Returns the full event page (see
+     * {@link #registerCar}) as seen by the deciding organizer.
      *
      * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
      * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if that owner has no pending withdrawal request
      */
-    void approveWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId);
+    MapEventDto approveWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId);
 
     /**
      * Rejects a participant's withdrawal request: every one of their rows for this event reverts to
      * {@code accepted}, staying in the line-up. {@code withdraw_note} is left as a historical record
-     * of the attempt rather than cleared.
+     * of the attempt rather than cleared. Returns the full event page (see {@link #registerCar}) as
+     * seen by the deciding organizer.
      *
      * @throws com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException if the caller does not organize the event
      * @throws com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException if that owner has no pending withdrawal request
      */
-    List<MapEventParticipantDto> rejectWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId);
+    MapEventDto rejectWithdrawal(UUID currentUserId, UUID eventId, UUID ownerId);
 
     // ===================== Admin (called by the admin module) =====================
 

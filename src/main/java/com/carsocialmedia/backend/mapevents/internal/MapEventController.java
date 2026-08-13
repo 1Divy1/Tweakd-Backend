@@ -111,6 +111,13 @@ class MapEventController {
         return mapEventsService.listParticipants(userId(jwt), eventId, status, cursor, size);
     }
 
+    /** The caller's own entered cars for this event, whatever their status — including pending/rejected. */
+    @GetMapping("/{eventId}/cars/mine")
+    public List<MapEventParticipantDto> listMyParticipants(@AuthenticationPrincipal Jwt jwt,
+                                                            @PathVariable UUID eventId) {
+        return mapEventsService.listMyParticipants(userId(jwt), eventId);
+    }
+
     // ----- Authoring -----
 
     /**
@@ -211,43 +218,50 @@ class MapEventController {
 
     // ----- Participating cars -----
 
-    /** Enters one of the caller's own cars into the event. */
+    /**
+     * Enters one of the caller's own cars into the event. Returns the full event page — not just
+     * the new entry — since {@code attending_cars_count} and the caller's own registered-car list
+     * both change as a result.
+     */
     @PostMapping("/{eventId}/cars")
     @ResponseStatus(HttpStatus.CREATED)
-    public MapEventParticipantDto registerCar(@AuthenticationPrincipal Jwt jwt,
-                                              @PathVariable UUID eventId,
-                                              @Valid @RequestBody RegisterCarRequest request) {
+    public MapEventDto registerCar(@AuthenticationPrincipal Jwt jwt,
+                                   @PathVariable UUID eventId,
+                                   @Valid @RequestBody RegisterCarRequest request) {
         return mapEventsService.registerCar(userId(jwt), eventId, request.carId());
     }
 
-    /** Withdraws a still-pending registration outright. An accepted one must use {@link #requestWithdrawal}. */
+    /**
+     * Withdraws a still-pending registration outright. An accepted one must use
+     * {@link #requestWithdrawal}. Returns the full event page (see {@link #registerCar}).
+     */
     @DeleteMapping("/{eventId}/cars/{carId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void withdrawCar(@AuthenticationPrincipal Jwt jwt,
-                            @PathVariable UUID eventId,
-                            @PathVariable UUID carId) {
-        mapEventsService.withdrawCar(userId(jwt), eventId, carId);
+    public MapEventDto withdrawCar(@AuthenticationPrincipal Jwt jwt,
+                                   @PathVariable UUID eventId,
+                                   @PathVariable UUID carId) {
+        return mapEventsService.withdrawCar(userId(jwt), eventId, carId);
     }
 
-    /** An organizer's verdict on an entered car. */
+    /** An organizer's verdict on an entered car. Returns the full event page (see {@link #registerCar}). */
     @PatchMapping("/{eventId}/cars/{carId}")
-    public MapEventParticipantDto decideParticipant(@AuthenticationPrincipal Jwt jwt,
-                                                    @PathVariable UUID eventId,
-                                                    @PathVariable UUID carId,
-                                                    @Valid @RequestBody ParticipantDecisionRequest request) {
-        return mapEventsService.decideParticipant(userId(jwt), eventId, carId, request.status());
+    public MapEventDto decideParticipant(@AuthenticationPrincipal Jwt jwt,
+                                         @PathVariable UUID eventId,
+                                         @PathVariable UUID carId,
+                                         @Valid @RequestBody ParticipantDecisionRequest request) {
+        return mapEventsService.decideParticipant(userId(jwt), eventId, carId, request.status(), request.reason());
     }
 
     // ----- Withdrawal requests -----
 
     /**
      * Requests withdrawal from the event: every one of the caller's accepted cars is flagged, not
-     * removed, pending an organizer's decision.
+     * removed, pending an organizer's decision. Returns the full event page (see
+     * {@link #registerCar}).
      */
     @PostMapping("/{eventId}/withdraw")
-    public List<MapEventParticipantDto> requestWithdrawal(@AuthenticationPrincipal Jwt jwt,
-                                                           @PathVariable UUID eventId,
-                                                           @Valid @RequestBody WithdrawParticipationRequest request) {
+    public MapEventDto requestWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                         @PathVariable UUID eventId,
+                                         @Valid @RequestBody WithdrawParticipationRequest request) {
         return mapEventsService.requestWithdrawal(userId(jwt), eventId, request.note());
     }
 
@@ -258,20 +272,25 @@ class MapEventController {
         return mapEventsService.listWithdrawalRequests(userId(jwt), eventId);
     }
 
-    /** Approves a withdrawal request: the owner's cars are removed from the event outright. */
+    /**
+     * Approves a withdrawal request: the owner's cars are removed from the event outright. Returns
+     * the full event page (see {@link #registerCar}).
+     */
     @PostMapping("/{eventId}/withdrawals/{ownerId}/approve")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void approveWithdrawal(@AuthenticationPrincipal Jwt jwt,
-                                  @PathVariable UUID eventId,
-                                  @PathVariable UUID ownerId) {
-        mapEventsService.approveWithdrawal(userId(jwt), eventId, ownerId);
+    public MapEventDto approveWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                         @PathVariable UUID eventId,
+                                         @PathVariable UUID ownerId) {
+        return mapEventsService.approveWithdrawal(userId(jwt), eventId, ownerId);
     }
 
-    /** Rejects a withdrawal request: the owner's cars stay in the line-up as accepted. */
+    /**
+     * Rejects a withdrawal request: the owner's cars stay in the line-up as accepted. Returns the
+     * full event page (see {@link #registerCar}).
+     */
     @PostMapping("/{eventId}/withdrawals/{ownerId}/reject")
-    public List<MapEventParticipantDto> rejectWithdrawal(@AuthenticationPrincipal Jwt jwt,
-                                                          @PathVariable UUID eventId,
-                                                          @PathVariable UUID ownerId) {
+    public MapEventDto rejectWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                        @PathVariable UUID eventId,
+                                        @PathVariable UUID ownerId) {
         return mapEventsService.rejectWithdrawal(userId(jwt), eventId, ownerId);
     }
 

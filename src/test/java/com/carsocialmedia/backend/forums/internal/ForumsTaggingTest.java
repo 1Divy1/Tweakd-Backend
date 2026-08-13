@@ -146,7 +146,7 @@ class ForumsTaggingTest {
     /** Stubs the profile-existence check for the given tagged people. */
     private void profilesExist(UUID... ids) {
         List<ProfileSearchResultDto> found = java.util.Arrays.stream(ids)
-                .map(id -> new ProfileSearchResultDto(id, "user-" + id, null))
+                .map(id -> new ProfileSearchResultDto(id, "User " + id, "user-" + id, null))
                 .toList();
         when(profileService.findByIds(anyCollection())).thenAnswer(invocation -> {
             Collection<?> requested = invocation.getArgument(0);

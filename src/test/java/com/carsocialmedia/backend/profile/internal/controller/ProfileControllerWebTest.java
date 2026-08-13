@@ -387,10 +387,11 @@ class ProfileControllerWebTest {
     @Test
     void searchDelegatesTheQueryAndReturnsSnakeCaseResults() throws Exception {
         when(profileService.searchByUsername("rac"))
-                .thenReturn(List.of(new ProfileSearchResultDto(ID, "racer", "http://a/x.png")));
+                .thenReturn(List.of(new ProfileSearchResultDto(ID, "Race Car Rick", "racer", "http://a/x.png")));
 
         mockMvc.perform(get("/api/v1/profile/search").param("q", "rac").with(TestJwts.user()))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Race Car Rick"))
                 .andExpect(jsonPath("$[0].username").value("racer"))
                 .andExpect(jsonPath("$[0].avatar_url").value("http://a/x.png"));
 

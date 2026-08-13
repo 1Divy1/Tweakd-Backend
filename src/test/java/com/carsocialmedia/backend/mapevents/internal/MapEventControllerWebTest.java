@@ -2,8 +2,10 @@ package com.carsocialmedia.backend.mapevents.internal;
 
 import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.mapevents.MapEventsService;
+import com.carsocialmedia.backend.mapevents.dto.MapEventDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventParticipantDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventPinDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventViewerStateDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.carsocialmedia.backend.mapevents.exception.EventClosedException;
 import com.carsocialmedia.backend.mapevents.exception.EventNotEditableException;
@@ -32,6 +34,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -193,24 +196,86 @@ class MapEventControllerWebTest {
     private static final UUID CAR_ID = UUID.fromString("00000000-0000-0000-0000-0000000000b1");
     private static final UUID OWNER_ID = UUID.fromString("00000000-0000-0000-0000-0000000000e1");
 
-    private static MapEventParticipantDto withdrawnParticipant() {
-        return new MapEventParticipantDto(
-                new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null),
-                "withdrawn", Instant.parse("2026-08-01T12:00:00Z"));
+    /** A minimal event page, standing in for whatever {@code reloadAndAssemble} would build. */
+    private static MapEventDto sampleEvent() {
+        return new MapEventDto(
+                EVENT_ID, "Sunday meet", "Come along", "car_meet", "Car meet",
+                "Iulius Mall", 46.7712, 23.6236,
+                Instant.parse("2026-08-10T10:00:00Z"), null, null,
+                "upcoming", "accepted", null,
+                true, null, 3, 2,
+                List.of(), List.of(), null,
+                new MapEventViewerStateDto(false, false, false, null, true, true, List.of(CAR_ID)),
+                Instant.parse("2026-08-01T09:00:00Z"));
+    }
+
+    // ---- my participation ------------------------------------------------------
+
+    @Test
+    void myParticipantsReturnsTheSnakeCaseShapeIncludingTheRejectionReason() throws Exception {
+        when(mapEventsService.listMyParticipants(USER_ID, EVENT_ID)).thenReturn(List.of(
+                new MapEventParticipantDto(
+                        new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null),
+                        "rejected", Instant.parse("2026-08-01T12:00:00Z"), "not a fit")));
+
+        mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/cars/mine").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("rejected"))
+                .andExpect(jsonPath("$[0].rejection_reason").value("not a fit"))
+                .andExpect(jsonPath("$[0].car.id").value(CAR_ID.toString()));
+    }
+
+    // ---- participating cars -----------------------------------------------------
+
+    @Test
+    void registeringACarReturnsTheUpdatedEventNotJustTheEntry() throws Exception {
+        when(mapEventsService.registerCar(USER_ID, EVENT_ID, CAR_ID)).thenReturn(sampleEvent());
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/cars")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"car_id\":\"" + CAR_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()))
+                .andExpect(jsonPath("$.attending_cars_count").value(2))
+                .andExpect(jsonPath("$.viewer.my_registered_car_ids[0]").value(CAR_ID.toString()));
     }
 
     @Test
-    void requestingWithdrawalReturnsTheSnakeCaseParticipantShape() throws Exception {
+    void withdrawingACarReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.withdrawCar(USER_ID, EVENT_ID, CAR_ID)).thenReturn(sampleEvent());
+
+        mockMvc.perform(delete("/api/v1/map-events/" + EVENT_ID + "/cars/" + CAR_ID)
+                        .with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
+    }
+
+    @Test
+    void decidingOnAnEnteredCarReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.decideParticipant(USER_ID, EVENT_ID, CAR_ID, "rejected", "not a fit"))
+                .thenReturn(sampleEvent());
+
+        mockMvc.perform(patch("/api/v1/map-events/" + EVENT_ID + "/cars/" + CAR_ID)
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"rejected\",\"reason\":\"not a fit\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
+    }
+
+    @Test
+    void requestingWithdrawalReturnsTheUpdatedEvent() throws Exception {
         when(mapEventsService.requestWithdrawal(eq(USER_ID), eq(EVENT_ID), any()))
-                .thenReturn(List.of(withdrawnParticipant()));
+                .thenReturn(sampleEvent());
 
         mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdraw")
                         .with(TestJwts.user(USER_ID))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"note\":\"can't make it\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].status").value("withdrawn"))
-                .andExpect(jsonPath("$[0].car.id").value(CAR_ID.toString()));
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()))
+                .andExpect(jsonPath("$.attending_cars_count").value(2));
 
         verify(mapEventsService).requestWithdrawal(USER_ID, EVENT_ID, "can't make it");
     }
@@ -242,7 +307,7 @@ class MapEventControllerWebTest {
     void listingWithdrawalRequestsReturnsTheSnakeCaseShape() throws Exception {
         when(mapEventsService.listWithdrawalRequests(USER_ID, EVENT_ID)).thenReturn(List.of(
                 new MapEventWithdrawalRequestDto(
-                        new ProfileSearchResultDto(OWNER_ID, "owner_username", null),
+                        new ProfileSearchResultDto(OWNER_ID, "Owner Name", "owner_username", null),
                         List.of(new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null)),
                         "moving away")));
 
@@ -264,25 +329,25 @@ class MapEventControllerWebTest {
     }
 
     @Test
-    void approvingAWithdrawalReturns204() throws Exception {
+    void approvingAWithdrawalReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.approveWithdrawal(USER_ID, EVENT_ID, OWNER_ID)).thenReturn(sampleEvent());
+
         mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdrawals/" + OWNER_ID + "/approve")
                         .with(TestJwts.user(USER_ID)))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
 
         verify(mapEventsService).approveWithdrawal(USER_ID, EVENT_ID, OWNER_ID);
     }
 
     @Test
-    void rejectingAWithdrawalReturnsTheRevertedParticipants() throws Exception {
-        when(mapEventsService.rejectWithdrawal(USER_ID, EVENT_ID, OWNER_ID)).thenReturn(List.of(
-                new MapEventParticipantDto(
-                        new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null),
-                        "accepted", Instant.parse("2026-08-01T12:00:00Z"))));
+    void rejectingAWithdrawalReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.rejectWithdrawal(USER_ID, EVENT_ID, OWNER_ID)).thenReturn(sampleEvent());
 
         mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdrawals/" + OWNER_ID + "/reject")
                         .with(TestJwts.user(USER_ID)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].status").value("accepted"));
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
     }
 
     @Test
