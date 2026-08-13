@@ -343,7 +343,9 @@ class MapEventsServiceImpl implements MapEventsService {
         event.setMaxParticipantCapacity(request.maxParticipantCapacity());
         event.setCreatedBy(currentUserId);
 
-        eventRepository.saveAndFlush(event);
+        // event.id is set client-side, so save() merges rather than persists, returning a new
+        // managed instance — reassign, since the original `event` reference stays detached.
+        event = eventRepository.saveAndFlush(event);
         // created_at is DB-managed (DEFAULT now()), so the in-memory entity does not have it until
         // we read it back. The create response carries it, hence the refresh.
         entityManager.refresh(event);
