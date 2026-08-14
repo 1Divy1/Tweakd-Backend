@@ -2,9 +2,11 @@ package com.carsocialmedia.backend.mapevents.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Payload for creating a car event. Everything else — id, creator, status, approval state, counts —
@@ -28,7 +30,11 @@ import java.time.Instant;
  * @param startsAt                    when the event starts; must be in the future
  * @param endsAt                      optional end time; must be after {@code startsAt}
  * @param requiresParticipantApproval whether entered cars need an organizer's approval (default true)
+ * @param maxParticipantCapacity      optional cap on accepted cars; {@code null} means no limit
  * @param registrationDeadline        car meets: last moment a car may be entered; must not be after {@code startsAt}
+ * @param rules                       optional ordered list of organizer rules, saved in the same
+ *                                     transaction as the event; may also be set or replaced later via
+ *                                     {@code PUT /{eventId}/rules}
  */
 public record CreateMapEventRequest(
         @NotBlank String categoryId,
@@ -40,5 +46,7 @@ public record CreateMapEventRequest(
         @NotNull Instant startsAt,
         Instant endsAt,
         Boolean requiresParticipantApproval,
-        Instant registrationDeadline
+        @Positive Integer maxParticipantCapacity,
+        Instant registrationDeadline,
+        @Size(max = 50) List<@NotBlank @Size(max = 300) String> rules
 ) {}

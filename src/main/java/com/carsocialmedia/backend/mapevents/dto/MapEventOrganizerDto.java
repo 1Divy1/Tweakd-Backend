@@ -4,8 +4,8 @@ import java.util.UUID;
 
 /**
  * One organizer credit on the event page. An organizer is either an app user or a business account,
- * never both — {@link #type} says which, and the id/name/image fields are filled from whichever it
- * is.
+ * never both — {@link #type} says which, and the id/name/username/image fields are filled from
+ * whichever it is.
  *
  * <p>Business organizers are <strong>credit only</strong>: business accounts have no login yet, so
  * a business is displayed and linked but cannot act on the event.
@@ -14,7 +14,8 @@ import java.util.UUID;
  * @param type         {@code individual} or {@code business}
  * @param role         {@code creator} or {@code organizer}
  * @param referenceId  the profile id or business id this credit points at
- * @param name         username (individual) or business name
+ * @param name         display name (individual) or business name; never a username
+ * @param username     the individual's {@code @username}; {@code null} for a business organizer
  * @param imageUrl     avatar URL (individual) or logo URL (business); {@code null} if none
  */
 public record MapEventOrganizerDto(
@@ -23,6 +24,7 @@ public record MapEventOrganizerDto(
         String role,
         UUID referenceId,
         String name,
+        String username,
         String imageUrl
 ) {
     /** {@link #type} value for an app user organizer. */

@@ -62,6 +62,6 @@ class ProfileDtoMapper {
     }
 
     ProfileSearchResultDto toSearchResultDto(ProfileEntity p) {
-        return new ProfileSearchResultDto(p.getId(), p.getUsername(), resolveAvatarUrl(p.getAvatarUrl()));
+        return new ProfileSearchResultDto(p.getId(), p.getName(), p.getUsername(), resolveAvatarUrl(p.getAvatarUrl()));
     }
 }

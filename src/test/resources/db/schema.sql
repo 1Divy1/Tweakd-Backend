@@ -842,9 +842,14 @@ CREATE FUNCTION public.update_car_event_attending_cars_count() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  -- 'withdrawn' means a withdrawal request is pending organizer review: the participant is
+  -- still counted as attending until the organizer approves the withdrawal (which hard-deletes
+  -- the row) or rejects it (which reverts the row to 'accepted'). So both 'accepted' and
+  -- 'withdrawn' are "counted" states; only a transition into/out of that set changes the count.
+
   -- INSERT: new row added directly as 'accepted' (e.g. open events, no approval needed)
   IF TG_OP = 'INSERT' THEN
-    IF NEW.status = 'accepted' THEN
+    IF NEW.status IN ('accepted', 'withdrawn') THEN
       UPDATE car_events
       SET attending_cars_count = attending_cars_count + 1
       WHERE id = NEW.event_id;
@@ -852,9 +857,9 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- DELETE: participation removed
+  -- DELETE: participation removed (organizer approving a withdrawal deletes 'withdrawn' rows)
   IF TG_OP = 'DELETE' THEN
-    IF OLD.status = 'accepted' THEN
+    IF OLD.status IN ('accepted', 'withdrawn') THEN
       UPDATE car_events
       SET attending_cars_count = attending_cars_count - 1
       WHERE id = OLD.event_id;
@@ -862,15 +867,15 @@ BEGIN
     RETURN OLD;
   END IF;
 
-  -- UPDATE: status transition (pending/rejected <-> accepted)
+  -- UPDATE: status transition (pending/rejected <-> accepted <-> withdrawn)
   IF TG_OP = 'UPDATE' THEN
-    IF OLD.status = NEW.status THEN
+    IF (OLD.status IN ('accepted', 'withdrawn')) = (NEW.status IN ('accepted', 'withdrawn')) THEN
       RETURN NEW;
     END IF;
 
-    IF OLD.status = 'accepted' AND NEW.status <> 'accepted' THEN
+    IF OLD.status IN ('accepted', 'withdrawn') AND NEW.status NOT IN ('accepted', 'withdrawn') THEN
       UPDATE car_events SET attending_cars_count = attending_cars_count - 1 WHERE id = NEW.event_id;
-    ELSIF OLD.status <> 'accepted' AND NEW.status = 'accepted' THEN
+    ELSIF OLD.status NOT IN ('accepted', 'withdrawn') AND NEW.status IN ('accepted', 'withdrawn') THEN
       UPDATE car_events SET attending_cars_count = attending_cars_count + 1 WHERE id = NEW.event_id;
     END IF;
 
@@ -1273,6 +1278,26 @@ COMMENT ON TABLE public.car_event_categories IS 'What type of events can occur o
 
 
 --
+-- Name: car_event_organizer_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_organizer_rules (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    rule text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    sort_order smallint NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_organizer_rules; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_organizer_rules IS 'Rules created by the event''s organizer(s)';
+
+
+--
 -- Name: car_event_organizers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1330,7 +1355,9 @@ CREATE TABLE public.car_event_participants (
     owner_id uuid NOT NULL,
     car_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    status text DEFAULT 'pending'::text NOT NULL
+    status text DEFAULT 'pending'::text NOT NULL,
+    withdraw_note text,
+    rejection_reason text
 );
 
 
@@ -1375,6 +1402,7 @@ CREATE TABLE public.car_events (
     created_by uuid NOT NULL,
     rejection_reason text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    max_participant_capacity integer,
     CONSTRAINT car_events_attendees_count_check CHECK ((attendees_count >= 0))
 );
 
@@ -1405,6 +1433,13 @@ COMMENT ON COLUMN public.car_events.attending_cars_count IS 'The number of atten
 --
 
 COMMENT ON COLUMN public.car_events.rejection_reason IS 'Why an admin rejected the event. Set when approval_status = rejected, cleared when the organizer resubmits.';
+
+
+--
+-- Name: COLUMN car_events.max_participant_capacity; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_events.max_participant_capacity IS '(Optional) Max number of participants';
 
 
 --
@@ -3463,6 +3498,22 @@ ALTER TABLE ONLY public.car_event_attendees_list
 
 
 --
+-- Name: car_event_organizer_rules car_event_organizer_rules_event_position_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizer_rules
+    ADD CONSTRAINT car_event_organizer_rules_event_position_unique UNIQUE (event_id, sort_order);
+
+
+--
+-- Name: car_event_organizer_rules car_event_organizer_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizer_rules
+    ADD CONSTRAINT car_event_organizer_rules_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: car_event_organizers car_event_organizers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4368,6 +4419,13 @@ CREATE INDEX forum_topics_thread_count_idx ON public.forum_thread_topic_options 
 
 
 --
+-- Name: idx_car_event_organizer_rules_event_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_car_event_organizer_rules_event_id ON public.car_event_organizer_rules USING btree (event_id);
+
+
+--
 -- Name: idx_car_models_brand_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5111,6 +5169,14 @@ ALTER TABLE ONLY public.car_event_attendees_list
 
 ALTER TABLE ONLY public.car_event_attendees_list
     ADD CONSTRAINT car_event_attendees_list_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_organizer_rules car_event_organizer_rules_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizer_rules
+    ADD CONSTRAINT car_event_organizer_rules_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6441,6 +6507,11 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: car_event_categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_organizer_rules; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 

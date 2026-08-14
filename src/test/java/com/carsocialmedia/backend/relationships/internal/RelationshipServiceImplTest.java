@@ -183,8 +183,8 @@ class RelationshipServiceImplTest {
         when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findAcceptedFollowerIds(TARGET)).thenReturn(List.of(F1, F2));
         when(profileService.findByIds(List.of(F1, F2))).thenReturn(List.of(
-                new ProfileSearchResultDto(F1, "alice", "alice.png"),
-                new ProfileSearchResultDto(F2, "bob", "bob.png")));
+                new ProfileSearchResultDto(F1, "Alice", "alice", "alice.png"),
+                new ProfileSearchResultDto(F2, "Bob", "bob", "bob.png")));
         // Viewer already follows F2, not F1.
         when(relationshipRepository.findAcceptedFollowingIdsIn(VIEWER, List.of(F1, F2)))
                 .thenReturn(List.of(F2));
@@ -212,7 +212,7 @@ class RelationshipServiceImplTest {
         when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findAcceptedFollowingIds(TARGET)).thenReturn(List.of(F1));
         when(profileService.findByIds(List.of(F1))).thenReturn(List.of(
-                new ProfileSearchResultDto(F1, "alice", "alice.png")));
+                new ProfileSearchResultDto(F1, "Alice", "alice", "alice.png")));
         when(relationshipRepository.findAcceptedFollowingIdsIn(VIEWER, List.of(F1)))
                 .thenReturn(List.of());
 
@@ -228,7 +228,7 @@ class RelationshipServiceImplTest {
         when(relationshipRepository.findAcceptedFollowerIds(TARGET)).thenReturn(List.of(F1, F2));
         // Only F1 hydrates (F2's profile is missing / gone).
         when(profileService.findByIds(List.of(F1, F2))).thenReturn(List.of(
-                new ProfileSearchResultDto(F1, "alice", "alice.png")));
+                new ProfileSearchResultDto(F1, "Alice", "alice", "alice.png")));
         when(relationshipRepository.findAcceptedFollowingIdsIn(VIEWER, List.of(F1, F2)))
                 .thenReturn(List.of());
 

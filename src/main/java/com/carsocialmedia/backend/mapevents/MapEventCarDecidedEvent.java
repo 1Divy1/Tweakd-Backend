@@ -9,6 +9,7 @@ import java.util.UUID;
  * @param title       its title, for the notification text
  * @param carId       the car that was decided on
  * @param accepted    {@code true} when the car made the line-up, {@code false} when it was turned down
+ * @param reason      why it was turned down; {@code null} when {@code accepted}
  * @param recipientId the car's owner
  */
 public record MapEventCarDecidedEvent(
@@ -16,5 +17,6 @@ public record MapEventCarDecidedEvent(
         String title,
         UUID carId,
         boolean accepted,
+        String reason,
         UUID recipientId
 ) {}

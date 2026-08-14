@@ -21,7 +21,7 @@ import java.util.UUID;
  * @param status             lifecycle status ({@code upcoming} / {@code live})
  * @param attendeesCount     how many people have RSVP'd
  * @param attendingCarsCount how many cars are in the line-up
- * @param distanceKm         great-circle distance from the search centre, in kilometres
+ * @param maxParticipantCapacity cap on accepted cars, or {@code null} for no limit
  */
 public record MapEventPinDto(
         UUID id,
@@ -37,5 +37,5 @@ public record MapEventPinDto(
         String status,
         int attendeesCount,
         int attendingCarsCount,
-        double distanceKm
+        Integer maxParticipantCapacity
 ) {}

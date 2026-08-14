@@ -2,8 +2,14 @@ package com.carsocialmedia.backend.mapevents.internal;
 
 import com.carsocialmedia.backend.business.BusinessService;
 import com.carsocialmedia.backend.garage.GarageService;
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
+import com.carsocialmedia.backend.mapevents.MapEventWithdrawalDecidedEvent;
+import com.carsocialmedia.backend.mapevents.MapEventWithdrawalRequestedEvent;
 import com.carsocialmedia.backend.mapevents.dto.MapEventDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventParticipantDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
+import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.UpdateMapEventRequest;
 import com.carsocialmedia.backend.mapevents.exception.CarNotOwnedException;
 import com.carsocialmedia.backend.mapevents.exception.EventClosedException;
@@ -16,19 +22,25 @@ import com.carsocialmedia.backend.mapevents.internal.entities.CarMeetEntity;
 import com.carsocialmedia.backend.mapevents.internal.entities.MapEventCategoryEntity;
 import com.carsocialmedia.backend.mapevents.internal.entities.MapEventEntity;
 import com.carsocialmedia.backend.mapevents.internal.entities.MapEventOrganizerEntity;
+import com.carsocialmedia.backend.mapevents.internal.entities.MapEventParticipantEntity;
+import com.carsocialmedia.backend.mapevents.internal.entities.MapEventParticipantId;
+import com.carsocialmedia.backend.mapevents.internal.entities.MapEventRuleEntity;
 import com.carsocialmedia.backend.mapevents.internal.repositories.CarMeetRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventAttendeeRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventCategoryRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventOrganizerRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventParticipantRepository;
 import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventRepository;
+import com.carsocialmedia.backend.mapevents.internal.repositories.MapEventRuleRepository;
 import com.carsocialmedia.backend.profile.ProfileService;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.shared.geo.GeoSupport;
 import com.carsocialmedia.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -46,8 +58,10 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,11 +90,13 @@ class MapEventsServiceImplTest {
     @Mock private MapEventOrganizerRepository organizerRepository;
     @Mock private MapEventAttendeeRepository attendeeRepository;
     @Mock private MapEventParticipantRepository participantRepository;
+    @Mock private MapEventRuleRepository ruleRepository;
     @Mock private ProfileService profileService;
     @Mock private GarageService garageService;
     @Mock private BusinessService businessService;
     @Mock private StorageService storageService;
     @Mock private ApplicationEventPublisher events;
+    @Mock private MapboxGeocodingClient mapboxGeocodingClient;
 
     private MapEventsServiceImpl service;
 
@@ -88,8 +104,8 @@ class MapEventsServiceImplTest {
     void setUp() {
         service = new MapEventsServiceImpl(
                 eventRepository, categoryRepository, carMeetRepository, organizerRepository,
-                attendeeRepository, participantRepository, profileService, garageService,
-                businessService, storageService, events);
+                attendeeRepository, participantRepository, ruleRepository, profileService, garageService,
+                businessService, storageService, events, mapboxGeocodingClient);
         // @PersistenceContext is field-injected, so a pure unit test has to supply it by hand.
         ReflectionTestUtils.setField(service, "entityManager", mock(EntityManager.class));
 
@@ -102,6 +118,7 @@ class MapEventsServiceImplTest {
         when(participantRepository.findByIdEventIdAndOwnerId(any(), any())).thenReturn(List.of());
         when(attendeeRepository.findById(any())).thenReturn(Optional.empty());
         when(profileService.findByIds(any())).thenReturn(List.of());
+        when(ruleRepository.findByEventIdOrderBySortOrderAsc(any())).thenReturn(List.of());
     }
 
     // ---- fixtures -----------------------------------------------------------
@@ -148,6 +165,18 @@ class MapEventsServiceImplTest {
 
     private void existing(MapEventEntity event) {
         when(eventRepository.findWithCategoryById(EVENT_ID)).thenReturn(Optional.of(event));
+    }
+
+    private static MapEventParticipantEntity participant(UUID ownerId, UUID carId, String status) {
+        MapEventParticipantEntity row = new MapEventParticipantEntity();
+        row.setId(new MapEventParticipantId(EVENT_ID, carId));
+        row.setOwnerId(ownerId);
+        row.setStatus(status);
+        return row;
+    }
+
+    private static CarSummaryDto carSummary(UUID carId) {
+        return new CarSummaryDto(carId, "Brand", "Model", null, null, null);
     }
 
     // ---- visibility ---------------------------------------------------------
@@ -198,7 +227,7 @@ class MapEventsServiceImplTest {
 
         assertThatExceptionOfType(EventNotEditableException.class)
                 .isThrownBy(() -> service.updateEvent(CREATOR, EVENT_ID,
-                        new UpdateMapEventRequest("New title", null, null, null, null, null, null, null, null)));
+                        new UpdateMapEventRequest("New title", null, null, null, null, null, null, null, null, null)));
     }
 
     @Test
@@ -208,7 +237,7 @@ class MapEventsServiceImplTest {
         existing(pending);
 
         service.updateEvent(CO_ORGANIZER, EVENT_ID,
-                new UpdateMapEventRequest("New title", null, null, null, null, null, null, null, null));
+                new UpdateMapEventRequest("New title", null, null, null, null, null, null, null, null, null));
 
         assertThat(pending.getTitle()).isEqualTo("New title");
     }
@@ -221,7 +250,7 @@ class MapEventsServiceImplTest {
         existing(rejected);
 
         service.updateEvent(CREATOR, EVENT_ID,
-                new UpdateMapEventRequest(null, null, "Central car park", null, null, null, null, null, null));
+                new UpdateMapEventRequest(null, null, "Central car park", null, null, null, null, null, null, null));
 
         assertThat(rejected.getApprovalStatus()).isEqualTo(MapEventEntity.APPROVAL_PENDING);
         assertThat(rejected.getRejectionReason()).isNull();
@@ -234,7 +263,7 @@ class MapEventsServiceImplTest {
 
         assertThatExceptionOfType(NotEventOrganizerException.class)
                 .isThrownBy(() -> service.updateEvent(STRANGER, EVENT_ID,
-                        new UpdateMapEventRequest("Hijacked", null, null, null, null, null, null, null, null)));
+                        new UpdateMapEventRequest("Hijacked", null, null, null, null, null, null, null, null, null)));
     }
 
     // ---- creator-only powers ------------------------------------------------
@@ -361,12 +390,44 @@ class MapEventsServiceImplTest {
         existing(vets);
         when(garageService.findCarOwnerIds(List.of(CAR_ID))).thenReturn(Map.of(CAR_ID, STRANGER));
         when(participantRepository.findById(any())).thenReturn(Optional.empty());
-        when(garageService.findCarsByIds(any())).thenReturn(List.of());
 
-        assertThat(service.registerCar(STRANGER, EVENT_ID, CAR_ID).status()).isEqualTo("pending");
-
+        service.registerCar(STRANGER, EVENT_ID, CAR_ID);
         vets.setRequiresParticipantApproval(false);
-        assertThat(service.registerCar(STRANGER, EVENT_ID, CAR_ID).status()).isEqualTo("accepted");
+        service.registerCar(STRANGER, EVENT_ID, CAR_ID);
+
+        ArgumentCaptor<MapEventParticipantEntity> captor = ArgumentCaptor.forClass(MapEventParticipantEntity.class);
+        verify(participantRepository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).extracting(MapEventParticipantEntity::getStatus)
+                .containsExactly("pending", "accepted");
+    }
+
+    @Test
+    void registrationIsClosedOnceTheAcceptedLineUpHitsCapacity() {
+        MapEventEntity capped = approvedUpcoming();
+        capped.setMaxParticipantCapacity(2);
+        ReflectionTestUtils.setField(capped, "attendingCarsCount", 2);
+        existing(capped);
+        when(garageService.findCarOwnerIds(List.of(CAR_ID))).thenReturn(Map.of(CAR_ID, STRANGER));
+        when(participantRepository.findById(any())).thenReturn(Optional.empty());
+
+        assertThatExceptionOfType(EventClosedException.class)
+                .isThrownBy(() -> service.registerCar(STRANGER, EVENT_ID, CAR_ID));
+    }
+
+    @Test
+    void reRegisteringAnExistingEntryIgnoresCapacity() {
+        MapEventEntity capped = approvedUpcoming();
+        capped.setMaxParticipantCapacity(2);
+        ReflectionTestUtils.setField(capped, "attendingCarsCount", 2);
+        existing(capped);
+        when(garageService.findCarOwnerIds(List.of(CAR_ID))).thenReturn(Map.of(CAR_ID, STRANGER));
+        MapEventParticipantEntity existingRow = participant(STRANGER, CAR_ID, MapEventParticipantEntity.ACCEPTED);
+        when(participantRepository.findById(any())).thenReturn(Optional.of(existingRow));
+
+        service.registerCar(STRANGER, EVENT_ID, CAR_ID);
+
+        verify(participantRepository).save(existingRow);
+        assertThat(existingRow.getStatus()).isEqualTo("accepted");
     }
 
     @Test
@@ -374,7 +435,7 @@ class MapEventsServiceImplTest {
         existing(approvedUpcoming());
 
         assertThatExceptionOfType(NotEventOrganizerException.class)
-                .isThrownBy(() -> service.decideParticipant(STRANGER, EVENT_ID, CAR_ID, "accepted"));
+                .isThrownBy(() -> service.decideParticipant(STRANGER, EVENT_ID, CAR_ID, "accepted", null));
     }
 
     @Test
@@ -382,7 +443,265 @@ class MapEventsServiceImplTest {
         existing(approvedUpcoming());
 
         assertThatExceptionOfType(InvalidMapEventException.class)
-                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "pending"));
+                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "pending", null));
+    }
+
+    @Test
+    void decideParticipantRefusesARowWithAPendingWithdrawal() {
+        existing(approvedUpcoming());
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.WITHDRAWN)));
+
+        assertThatExceptionOfType(InvalidMapEventException.class)
+                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected", "not a fit"));
+    }
+
+    @Test
+    void rejectingAnEnteredCarRequiresAReason() {
+        existing(approvedUpcoming());
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.PENDING)));
+
+        assertThatExceptionOfType(InvalidMapEventException.class)
+                .isThrownBy(() -> service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected", "  "));
+    }
+
+    @Test
+    void rejectingAnEnteredCarStoresTheReasonAndTellsTheOwner() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.PENDING);
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(row));
+
+        service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "rejected", "not a fit");
+
+        assertThat(row.getStatus()).isEqualTo("rejected");
+        assertThat(row.getRejectionReason()).isEqualTo("not a fit");
+        verify(events).publishEvent(any(com.carsocialmedia.backend.mapevents.MapEventCarDecidedEvent.class));
+    }
+
+    @Test
+    void acceptingAnEnteredCarClearsAnyPriorRejectionReason() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.REJECTED);
+        row.setRejectionReason("not a fit");
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(row));
+
+        service.decideParticipant(CREATOR, EVENT_ID, CAR_ID, "accepted", null);
+
+        assertThat(row.getStatus()).isEqualTo("accepted");
+        assertThat(row.getRejectionReason()).isNull();
+    }
+
+    @Test
+    void listMyParticipantsReturnsTheCallersOwnRowsWhateverTheirStatus() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity rejected = participant(STRANGER, CAR_ID, MapEventParticipantEntity.REJECTED);
+        rejected.setRejectionReason("not a fit");
+        when(participantRepository.findByIdEventIdAndOwnerId(EVENT_ID, STRANGER)).thenReturn(List.of(rejected));
+        when(garageService.findCarsByIds(any())).thenReturn(List.of(carSummary(CAR_ID)));
+
+        List<MapEventParticipantDto> mine = service.listMyParticipants(STRANGER, EVENT_ID);
+
+        assertThat(mine).hasSize(1);
+        assertThat(mine.get(0).status()).isEqualTo("rejected");
+        assertThat(mine.get(0).rejectionReason()).isEqualTo("not a fit");
+    }
+
+    // ---- withdrawing a still-pending registration ----------------------------
+
+    @Test
+    void aPendingRegistrationCanBeWithdrawnDirectly() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.PENDING);
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(row));
+
+        service.withdrawCar(STRANGER, EVENT_ID, CAR_ID);
+
+        verify(participantRepository).delete(row);
+    }
+
+    @Test
+    void anAcceptedRegistrationCannotBeWithdrawnDirectly() {
+        when(participantRepository.findById(new MapEventParticipantId(EVENT_ID, CAR_ID)))
+                .thenReturn(Optional.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.ACCEPTED)));
+
+        assertThatExceptionOfType(InvalidMapEventException.class)
+                .isThrownBy(() -> service.withdrawCar(STRANGER, EVENT_ID, CAR_ID));
+        verify(participantRepository, never()).delete(any());
+    }
+
+    // ---- withdrawal requests --------------------------------------------------
+
+    @Test
+    void requestingWithdrawalRequiresAnAcceptedRegistration() {
+        existing(approvedUpcoming());
+        when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                EVENT_ID, STRANGER, MapEventParticipantEntity.ACCEPTED)).thenReturn(List.of());
+
+        assertThatExceptionOfType(InvalidMapEventException.class)
+                .isThrownBy(() -> service.requestWithdrawal(STRANGER, EVENT_ID, "can't make it"));
+    }
+
+    @Test
+    void requestingWithdrawalIsClosedOnceTheEventHasFinished() {
+        existing(event(MapEventEntity.APPROVAL_ACCEPTED, MapEventEntity.STATUS_PREVIOUS,
+                Instant.now().minus(5, ChronoUnit.HOURS), null));
+
+        assertThatExceptionOfType(EventClosedException.class)
+                .isThrownBy(() -> service.requestWithdrawal(STRANGER, EVENT_ID, null));
+    }
+
+    @Test
+    void requestingWithdrawalFlagsEveryAcceptedRowWithoutDeletingThem() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.ACCEPTED);
+        when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                EVENT_ID, STRANGER, MapEventParticipantEntity.ACCEPTED)).thenReturn(List.of(row));
+
+        service.requestWithdrawal(STRANGER, EVENT_ID, "  can't make it  ");
+
+        assertThat(row.getStatus()).isEqualTo(MapEventParticipantEntity.WITHDRAWN);
+        assertThat(row.getWithdrawNote()).isEqualTo("can't make it");
+        verify(participantRepository, never()).delete(any());
+        verify(participantRepository, never()).deleteAll(any());
+        // CREATOR is the only individual organizer and is not the actor, so they get notified.
+        verify(events).publishEvent(any(MapEventWithdrawalRequestedEvent.class));
+    }
+
+    @Test
+    void requestingWithdrawalDoesNotNotifyWhenTheActorIsTheOnlyOrganizer() {
+        existing(approvedUpcoming());
+        when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                EVENT_ID, CREATOR, MapEventParticipantEntity.ACCEPTED))
+                .thenReturn(List.of(participant(CREATOR, CAR_ID, MapEventParticipantEntity.ACCEPTED)));
+        when(garageService.findCarsByIds(any())).thenReturn(List.of());
+
+        service.requestWithdrawal(CREATOR, EVENT_ID, null);
+
+        verify(events, never()).publishEvent(any(MapEventWithdrawalRequestedEvent.class));
+    }
+
+    // ---- organizer review of withdrawal requests -------------------------------
+
+    @Test
+    void onlyAnOrganizerCanListWithdrawalRequests() {
+        existing(approvedUpcoming());
+
+        assertThatExceptionOfType(NotEventOrganizerException.class)
+                .isThrownBy(() -> service.listWithdrawalRequests(STRANGER, EVENT_ID));
+    }
+
+    @Test
+    void withdrawalRequestsAreGroupedByOwner() {
+        existing(approvedUpcoming());
+        UUID otherCar = UUID.randomUUID();
+        MapEventParticipantEntity strangerRow = participant(STRANGER, CAR_ID, MapEventParticipantEntity.WITHDRAWN);
+        strangerRow.setWithdrawNote("moving away");
+        MapEventParticipantEntity strangerSecondCarRow =
+                participant(STRANGER, otherCar, MapEventParticipantEntity.WITHDRAWN);
+        strangerSecondCarRow.setWithdrawNote("moving away");
+        MapEventParticipantEntity coOrganizerRow =
+                participant(CO_ORGANIZER, UUID.randomUUID(), MapEventParticipantEntity.WITHDRAWN);
+        when(participantRepository.findByIdEventIdAndStatus(EVENT_ID, MapEventParticipantEntity.WITHDRAWN))
+                .thenReturn(List.of(strangerRow, strangerSecondCarRow, coOrganizerRow));
+        when(garageService.findCarsByIds(any())).thenReturn(List.of(
+                carSummary(CAR_ID), carSummary(otherCar), carSummary(coOrganizerRow.getId().getCarId())));
+        when(profileService.findByIds(any())).thenReturn(List.of(
+                new ProfileSearchResultDto(STRANGER, "Stranger Name", "stranger", null),
+                new ProfileSearchResultDto(CO_ORGANIZER, "Co Organizer Name", "co_organizer", null)));
+
+        List<MapEventWithdrawalRequestDto> requests = service.listWithdrawalRequests(CREATOR, EVENT_ID);
+
+        assertThat(requests).hasSize(2);
+        MapEventWithdrawalRequestDto strangerRequest = requests.stream()
+                .filter(r -> r.owner().id().equals(STRANGER)).findFirst().orElseThrow();
+        assertThat(strangerRequest.cars()).hasSize(2);
+        assertThat(strangerRequest.note()).isEqualTo("moving away");
+    }
+
+    @Test
+    void approvingAWithdrawalRequiresOneToExist() {
+        existing(approvedUpcoming());
+        when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                EVENT_ID, STRANGER, MapEventParticipantEntity.WITHDRAWN)).thenReturn(List.of());
+
+        assertThatExceptionOfType(InvalidMapEventException.class)
+                .isThrownBy(() -> service.approveWithdrawal(CREATOR, EVENT_ID, STRANGER));
+    }
+
+    @Test
+    void approvingAWithdrawalHardDeletesTheRowsAndNotifiesTheOwner() {
+        existing(approvedUpcoming());
+        List<MapEventParticipantEntity> rows =
+                List.of(participant(STRANGER, CAR_ID, MapEventParticipantEntity.WITHDRAWN));
+        when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                EVENT_ID, STRANGER, MapEventParticipantEntity.WITHDRAWN)).thenReturn(rows);
+
+        service.approveWithdrawal(CREATOR, EVENT_ID, STRANGER);
+
+        verify(participantRepository).deleteAll(rows);
+        verify(events).publishEvent(any(MapEventWithdrawalDecidedEvent.class));
+    }
+
+    @Test
+    void onlyAnOrganizerCanDecideAWithdrawalRequest() {
+        existing(approvedUpcoming());
+
+        assertThatExceptionOfType(NotEventOrganizerException.class)
+                .isThrownBy(() -> service.approveWithdrawal(STRANGER, EVENT_ID, CO_ORGANIZER));
+        assertThatExceptionOfType(NotEventOrganizerException.class)
+                .isThrownBy(() -> service.rejectWithdrawal(STRANGER, EVENT_ID, CO_ORGANIZER));
+    }
+
+    @Test
+    void rejectingAWithdrawalRevertsToAcceptedAndKeepsTheNote() {
+        existing(approvedUpcoming());
+        MapEventParticipantEntity row = participant(STRANGER, CAR_ID, MapEventParticipantEntity.WITHDRAWN);
+        row.setWithdrawNote("changed my mind about leaving");
+        when(participantRepository.findByIdEventIdAndOwnerIdAndStatus(
+                EVENT_ID, STRANGER, MapEventParticipantEntity.WITHDRAWN)).thenReturn(List.of(row));
+
+        service.rejectWithdrawal(CREATOR, EVENT_ID, STRANGER);
+
+        assertThat(row.getStatus()).isEqualTo(MapEventParticipantEntity.ACCEPTED);
+        // The note is a historical record of the attempt — kept, not cleared, on rejection.
+        assertThat(row.getWithdrawNote()).isEqualTo("changed my mind about leaving");
+        verify(participantRepository, never()).delete(any());
+        verify(events).publishEvent(any(MapEventWithdrawalDecidedEvent.class));
+    }
+
+    // ---- the public entry list still shows pending withdrawals ----------------
+
+    @Test
+    void theDefaultParticipantListIncludesWithdrawnCarsAlongsideAccepted() {
+        existing(approvedUpcoming());
+        when(participantRepository.findLineupPage(eq(EVENT_ID), any(), any(), any())).thenReturn(List.of());
+
+        service.listParticipants(STRANGER, EVENT_ID, null, null, 20);
+
+        verify(participantRepository).findLineupPage(eq(EVENT_ID), any(), any(), any());
+        verify(participantRepository, never()).findPage(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void aNonOrganizerMayFilterTheListToWithdrawnOnly() {
+        existing(approvedUpcoming());
+        when(participantRepository.findPage(eq(EVENT_ID), eq(MapEventParticipantEntity.WITHDRAWN), any(), any(), any()))
+                .thenReturn(List.of());
+
+        service.listParticipants(STRANGER, EVENT_ID, "withdrawn", null, 20);
+        // No exception: a pending withdrawal carries no stigma, unlike pending/rejected entries.
+    }
+
+    @Test
+    void aNonOrganizerCannotFilterTheListToPending() {
+        existing(approvedUpcoming());
+
+        assertThatExceptionOfType(NotEventOrganizerException.class)
+                .isThrownBy(() -> service.listParticipants(STRANGER, EVENT_ID, "pending", null, 20));
     }
 
     // ---- cover image --------------------------------------------------------
@@ -408,6 +727,110 @@ class MapEventsServiceImplTest {
         service.saveCoverImageKey(CREATOR, EVENT_ID, key);
 
         assertThat(pending.getCoverImageKey()).isEqualTo(key);
+    }
+
+    // ---- rules ----------------------------------------------------------------
+
+    private static MapEventCategoryEntity socialCategory() {
+        MapEventCategoryEntity category = new MapEventCategoryEntity();
+        category.setId("social");
+        category.setLabel("Social");
+        category.setAvailable(true);
+        return category;
+    }
+
+    private static CreateMapEventRequest createRequest(List<String> rules) {
+        return new CreateMapEventRequest(
+                "social", "Cars & Coffee", "Casual meetup", "Central park",
+                46.77, 23.62, Instant.now().plus(2, ChronoUnit.DAYS), null,
+                null, null, null, rules);
+    }
+
+    @Test
+    void creatingAnEventWithRulesSavesThemInTheSameTransaction() {
+        when(categoryRepository.findById("social")).thenReturn(Optional.of(socialCategory()));
+
+        service.createEvent(CREATOR, createRequest(List.of("No burnouts", "Park in marked bays")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MapEventRuleEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ruleRepository).saveAll(captor.capture());
+        assertThat(captor.getValue()).extracting(MapEventRuleEntity::getRule)
+                .containsExactly("No burnouts", "Park in marked bays");
+        assertThat(captor.getValue()).extracting(MapEventRuleEntity::getSortOrder)
+                .containsExactly((short) 0, (short) 1);
+        // No separate PUT /rules call needed: creation and rules land in the one transaction.
+        verify(ruleRepository, never()).deleteByEventId(any());
+    }
+
+    @Test
+    void creatingAnEventWithoutRulesDoesNotTouchTheRuleRepository() {
+        when(categoryRepository.findById("social")).thenReturn(Optional.of(socialCategory()));
+
+        service.createEvent(CREATOR, createRequest(null));
+
+        verify(ruleRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void rulesCanBeReplacedWhileTheEventIsEditable() {
+        MapEventEntity pending = event(MapEventEntity.APPROVAL_PENDING, MapEventEntity.STATUS_UPCOMING,
+                Instant.now().plus(2, ChronoUnit.DAYS), null);
+        existing(pending);
+
+        service.replaceRules(CREATOR, EVENT_ID, List.of("No burnouts", "Park in marked bays"));
+
+        verify(ruleRepository).deleteByEventId(EVENT_ID);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MapEventRuleEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ruleRepository).saveAll(captor.capture());
+        List<MapEventRuleEntity> saved = captor.getValue();
+        assertThat(saved).extracting(MapEventRuleEntity::getRule)
+                .containsExactly("No burnouts", "Park in marked bays");
+        assertThat(saved).extracting(MapEventRuleEntity::getSortOrder)
+                .containsExactly((short) 0, (short) 1);
+        assertThat(saved).allMatch(row -> row.getEventId().equals(EVENT_ID));
+    }
+
+    @Test
+    void replacingRulesWithAnEmptyListClearsThem() {
+        existing(event(MapEventEntity.APPROVAL_PENDING, MapEventEntity.STATUS_UPCOMING,
+                Instant.now().plus(2, ChronoUnit.DAYS), null));
+
+        service.replaceRules(CREATOR, EVENT_ID, List.of());
+
+        verify(ruleRepository).deleteByEventId(EVENT_ID);
+        verify(ruleRepository).saveAll(List.of());
+    }
+
+    @Test
+    void rulesCannotBeReplacedOnAnApprovedEvent() {
+        existing(approvedUpcoming());
+
+        assertThatExceptionOfType(EventNotEditableException.class)
+                .isThrownBy(() -> service.replaceRules(CREATOR, EVENT_ID, List.of("New rule")));
+        verify(ruleRepository, never()).deleteByEventId(any());
+    }
+
+    @Test
+    void aStrangerCannotReplaceRules() {
+        existing(event(MapEventEntity.APPROVAL_PENDING, MapEventEntity.STATUS_UPCOMING,
+                Instant.now().plus(2, ChronoUnit.DAYS), null));
+
+        assertThatExceptionOfType(NotEventOrganizerException.class)
+                .isThrownBy(() -> service.replaceRules(STRANGER, EVENT_ID, List.of("Sneaky rule")));
+        verify(ruleRepository, never()).deleteByEventId(any());
+    }
+
+    @Test
+    void aCoOrganizerCanReplaceRules() {
+        MapEventEntity pending = event(MapEventEntity.APPROVAL_PENDING, MapEventEntity.STATUS_UPCOMING,
+                Instant.now().plus(2, ChronoUnit.DAYS), null);
+        existing(pending);
+
+        service.replaceRules(CO_ORGANIZER, EVENT_ID, List.of("No burnouts"));
+
+        verify(ruleRepository).deleteByEventId(EVENT_ID);
     }
 
     // ---- map search bounds --------------------------------------------------

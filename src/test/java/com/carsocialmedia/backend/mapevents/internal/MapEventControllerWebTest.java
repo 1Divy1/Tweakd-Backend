@@ -1,11 +1,18 @@
 package com.carsocialmedia.backend.mapevents.internal;
 
+import com.carsocialmedia.backend.garage.dto.CarSummaryDto;
 import com.carsocialmedia.backend.mapevents.MapEventsService;
+import com.carsocialmedia.backend.mapevents.dto.MapEventDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventParticipantDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventPinDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventViewerStateDto;
+import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.carsocialmedia.backend.mapevents.exception.EventClosedException;
 import com.carsocialmedia.backend.mapevents.exception.EventNotEditableException;
+import com.carsocialmedia.backend.mapevents.exception.InvalidMapEventException;
 import com.carsocialmedia.backend.mapevents.exception.MapEventNotFoundException;
 import com.carsocialmedia.backend.mapevents.exception.NotEventOrganizerException;
+import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.testsupport.AppWebMvcTest;
 import com.carsocialmedia.backend.testsupport.TestJwts;
 import org.junit.jupiter.api.Test;
@@ -27,6 +34,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -58,7 +66,7 @@ class MapEventControllerWebTest {
                 "https://cdn.example/cover.webp",
                 Instant.parse("2026-09-01T17:00:00Z"),
                 Instant.parse("2026-09-01T21:00:00Z"),
-                "upcoming", 42, 7, 1.8342);
+                "upcoming", 42, 7, 20);
     }
 
     // ---- auth ---------------------------------------------------------------
@@ -87,7 +95,7 @@ class MapEventControllerWebTest {
                 .andExpect(jsonPath("$[0].starts_at").exists())
                 .andExpect(jsonPath("$[0].attendees_count").value(42))
                 .andExpect(jsonPath("$[0].attending_cars_count").value(7))
-                .andExpect(jsonPath("$[0].distance_km").value(1.8342));
+                .andExpect(jsonPath("$[0].max_participant_capacity").value(20));
     }
 
     @Test
@@ -181,5 +189,231 @@ class MapEventControllerWebTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"category_id\":\"car_meet\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    // ---- withdrawal requests --------------------------------------------------
+
+    private static final UUID CAR_ID = UUID.fromString("00000000-0000-0000-0000-0000000000b1");
+    private static final UUID OWNER_ID = UUID.fromString("00000000-0000-0000-0000-0000000000e1");
+
+    /** A minimal event page, standing in for whatever {@code reloadAndAssemble} would build. */
+    private static MapEventDto sampleEvent() {
+        return new MapEventDto(
+                EVENT_ID, "Sunday meet", "Come along", "car_meet", "Car meet",
+                "Iulius Mall", 46.7712, 23.6236,
+                Instant.parse("2026-08-10T10:00:00Z"), null, null,
+                "upcoming", "accepted", null,
+                true, null, 3, 2,
+                List.of(), List.of(), null,
+                new MapEventViewerStateDto(false, false, false, null, true, true, List.of(CAR_ID)),
+                Instant.parse("2026-08-01T09:00:00Z"));
+    }
+
+    // ---- my participation ------------------------------------------------------
+
+    @Test
+    void myParticipantsReturnsTheSnakeCaseShapeIncludingTheRejectionReason() throws Exception {
+        when(mapEventsService.listMyParticipants(USER_ID, EVENT_ID)).thenReturn(List.of(
+                new MapEventParticipantDto(
+                        new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null),
+                        "rejected", Instant.parse("2026-08-01T12:00:00Z"), "not a fit")));
+
+        mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/cars/mine").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("rejected"))
+                .andExpect(jsonPath("$[0].rejection_reason").value("not a fit"))
+                .andExpect(jsonPath("$[0].car.id").value(CAR_ID.toString()));
+    }
+
+    // ---- participating cars -----------------------------------------------------
+
+    @Test
+    void registeringACarReturnsTheUpdatedEventNotJustTheEntry() throws Exception {
+        when(mapEventsService.registerCar(USER_ID, EVENT_ID, CAR_ID)).thenReturn(sampleEvent());
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/cars")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"car_id\":\"" + CAR_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()))
+                .andExpect(jsonPath("$.attending_cars_count").value(2))
+                .andExpect(jsonPath("$.viewer.my_registered_car_ids[0]").value(CAR_ID.toString()));
+    }
+
+    @Test
+    void withdrawingACarReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.withdrawCar(USER_ID, EVENT_ID, CAR_ID)).thenReturn(sampleEvent());
+
+        mockMvc.perform(delete("/api/v1/map-events/" + EVENT_ID + "/cars/" + CAR_ID)
+                        .with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
+    }
+
+    @Test
+    void decidingOnAnEnteredCarReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.decideParticipant(USER_ID, EVENT_ID, CAR_ID, "rejected", "not a fit"))
+                .thenReturn(sampleEvent());
+
+        mockMvc.perform(patch("/api/v1/map-events/" + EVENT_ID + "/cars/" + CAR_ID)
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"rejected\",\"reason\":\"not a fit\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
+    }
+
+    @Test
+    void requestingWithdrawalReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.requestWithdrawal(eq(USER_ID), eq(EVENT_ID), any()))
+                .thenReturn(sampleEvent());
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdraw")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"note\":\"can't make it\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()))
+                .andExpect(jsonPath("$.attending_cars_count").value(2));
+
+        verify(mapEventsService).requestWithdrawal(USER_ID, EVENT_ID, "can't make it");
+    }
+
+    @Test
+    void requestingWithdrawalWithNoAcceptedRegistrationIs400() throws Exception {
+        doThrow(new InvalidMapEventException("You have no accepted registration to withdraw from this event"))
+                .when(mapEventsService).requestWithdrawal(eq(USER_ID), eq(EVENT_ID), any());
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdraw")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void aWithdrawalNoteOverTheLengthLimitIsRejectedBeforeReachingTheService() throws Exception {
+        String tooLong = "x".repeat(1001);
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdraw")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"note\":\"" + tooLong + "\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listingWithdrawalRequestsReturnsTheSnakeCaseShape() throws Exception {
+        when(mapEventsService.listWithdrawalRequests(USER_ID, EVENT_ID)).thenReturn(List.of(
+                new MapEventWithdrawalRequestDto(
+                        new ProfileSearchResultDto(OWNER_ID, "Owner Name", "owner_username", null),
+                        List.of(new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null)),
+                        "moving away")));
+
+        mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/withdrawals").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].owner.id").value(OWNER_ID.toString()))
+                .andExpect(jsonPath("$[0].owner.username").value("owner_username"))
+                .andExpect(jsonPath("$[0].cars[0].id").value(CAR_ID.toString()))
+                .andExpect(jsonPath("$[0].note").value("moving away"));
+    }
+
+    @Test
+    void listingWithdrawalRequestsAsANonOrganizerIs403() throws Exception {
+        doThrow(new NotEventOrganizerException("You do not organize this event"))
+                .when(mapEventsService).listWithdrawalRequests(USER_ID, EVENT_ID);
+
+        mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/withdrawals").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void approvingAWithdrawalReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.approveWithdrawal(USER_ID, EVENT_ID, OWNER_ID)).thenReturn(sampleEvent());
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdrawals/" + OWNER_ID + "/approve")
+                        .with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
+
+        verify(mapEventsService).approveWithdrawal(USER_ID, EVENT_ID, OWNER_ID);
+    }
+
+    @Test
+    void rejectingAWithdrawalReturnsTheUpdatedEvent() throws Exception {
+        when(mapEventsService.rejectWithdrawal(USER_ID, EVENT_ID, OWNER_ID)).thenReturn(sampleEvent());
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdrawals/" + OWNER_ID + "/reject")
+                        .with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EVENT_ID.toString()));
+    }
+
+    @Test
+    void decidingAWithdrawalRequestThatDoesNotExistIs400() throws Exception {
+        doThrow(new InvalidMapEventException("No pending withdrawal request from that participant"))
+                .when(mapEventsService).approveWithdrawal(USER_ID, EVENT_ID, OWNER_ID);
+
+        mockMvc.perform(post("/api/v1/map-events/" + EVENT_ID + "/withdrawals/" + OWNER_ID + "/approve")
+                        .with(TestJwts.user(USER_ID)))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ---- rules ----------------------------------------------------------------
+
+    @Test
+    void replacingRulesPassesTheOrderedListThrough() throws Exception {
+        mockMvc.perform(put("/api/v1/map-events/" + EVENT_ID + "/rules")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rules\":[\"No burnouts\",\"Park in marked bays\"]}"))
+                .andExpect(status().isOk());
+
+        verify(mapEventsService).replaceRules(USER_ID, EVENT_ID, List.of("No burnouts", "Park in marked bays"));
+    }
+
+    @Test
+    void replacingRulesWithAnEmptyListIsAccepted() throws Exception {
+        mockMvc.perform(put("/api/v1/map-events/" + EVENT_ID + "/rules")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rules\":[]}"))
+                .andExpect(status().isOk());
+
+        verify(mapEventsService).replaceRules(USER_ID, EVENT_ID, List.of());
+    }
+
+    @Test
+    void aBlankRuleIsRejectedBeforeReachingTheService() throws Exception {
+        mockMvc.perform(put("/api/v1/map-events/" + EVENT_ID + "/rules")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rules\":[\"\"]}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void replacingRulesOnAnApprovedEventIs409() throws Exception {
+        doThrow(new EventNotEditableException("An approved event can no longer be edited"))
+                .when(mapEventsService).replaceRules(eq(USER_ID), eq(EVENT_ID), any());
+
+        mockMvc.perform(put("/api/v1/map-events/" + EVENT_ID + "/rules")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rules\":[\"No burnouts\"]}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void replacingRulesAsANonOrganizerIs403() throws Exception {
+        doThrow(new NotEventOrganizerException("You do not organize this event"))
+                .when(mapEventsService).replaceRules(eq(USER_ID), eq(EVENT_ID), any());
+
+        mockMvc.perform(put("/api/v1/map-events/" + EVENT_ID + "/rules")
+                        .with(TestJwts.user(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rules\":[\"No burnouts\"]}"))
+                .andExpect(status().isForbidden());
     }
 }

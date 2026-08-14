@@ -5,6 +5,9 @@ supabase:
   auth:
     issuer: ${SUPABASE_URL}/auth/v1
 
+mapbox:
+  access-token: ${MAPBOX_ACCESS_TOKEN}
+
 cloudflare:
   r2:
     account-id: ${CLOUDFLARE_ACCOUNT_ID}

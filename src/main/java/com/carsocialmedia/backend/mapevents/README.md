@@ -10,8 +10,8 @@ Users create events from the app; **an admin must approve one before it appears 
 The module is "map events" (it is a map feature) and lives at `/api/v1/map-events`; the Supabase
 tables it owns are named `car_event*`. Types here carry the `MapEvent` prefix and name their table
 explicitly. Tables owned: `car_events`, `car_event_categories`, `car_event_organizers`,
-`car_event_attendees_list`, `car_event_participants`, `event_car_meet`, plus the three status
-reference tables.
+`car_event_organizer_rules`, `car_event_attendees_list`, `car_event_participants`, `event_car_meet`,
+plus the three status reference tables.
 
 ## Two independent states
 
@@ -40,6 +40,7 @@ clears its `rejection_reason` and resubmits it as `pending`.
 |---|:--:|:--:|:--:|:--:|
 | Edit (while pending/rejected) | ✅ | ✅ | ❌ | ❌ |
 | Attach / replace cover | ✅ | ✅ | ❌ | ❌ |
+| Replace rules (while pending/rejected) | ✅ | ✅ | ❌ | ❌ |
 | Cancel, mark finished | ✅ | ✅ | ❌ | ❌ |
 | Accept / reject entered cars | ✅ | ✅ | ❌ | ❌ |
 | Add / remove organizers | ✅ | ❌ | ❌ | ❌ |
@@ -63,7 +64,17 @@ permissions. Every permission check looks at *individual* organizers.
 - **Participants** (`car_event_participants`) are **cars**, entered by their owner. Only the owner
   may enter a car. Registration closes at `event_car_meet.registration_deadline`. With
   `requires_participant_approval` the row starts `pending` and an organizer accepts/rejects it;
-  otherwise it is `accepted` outright.
+  otherwise it is `accepted` outright. Rejecting requires a `rejection_reason` (same rule as
+  rejecting an event), cleared if the car is later accepted. `listParticipants` hides
+  `pending`/`rejected` rows from everyone but an organizer, so the owner reads their own standing —
+  including the reason — through `listMyParticipants` instead.
+
+`car_events.max_participant_capacity` is an optional cap (`null` = no limit) on the **accepted**
+line-up. `registerCar` rejects a brand-new entry once `attending_cars_count` reaches the cap
+(`EventClosedException`); re-sending an already-registered car is a no-op and is never blocked by
+it. A `pending` entry submitted before the cap was hit is left alone — the cap does not retroactively
+reject it, and an organizer may still accept or reject it — so `attending_cars_count` can briefly
+exceed the cap by one if an organizer accepts a pending car after the line-up filled up.
 
 Both counts (`attendees_count`, `attending_cars_count`) are **trigger-owned**
 (`trg_update_car_event_attendees_count`, `trg_update_car_event_attending_cars_count`); this module
@@ -76,6 +87,23 @@ the response shows the new total rather than the stale one in the session.
 gets its own detail table — the car meet's is `event_car_meet` (`registration_deadline`).
 `is_available` gates a category on the create screen without invalidating existing events.
 `CarMeetDetailsDto` is the first of what will be one detail DTO per subcategory.
+
+## Rules
+
+`car_event_organizer_rules` holds an organizer's free-text rules for the event ("no burnouts", "park
+in marked bays"), ordered by `sort_order`. Despite the table name, this is a plain event feature, not
+car-meet specific — `rules` sits alongside `organizers` at the top level of `MapEventDto`, not nested
+under `carMeet`.
+
+`CreateMapEventRequest.rules` is optional and, when non-empty, is saved in the **same transaction**
+as the event — one `POST /` covers title, description, timings and rules together; no follow-up call
+needed (rules have no dependency that would force a second request, unlike the cover image below).
+
+There is no per-rule endpoint: `PUT /{eventId}/rules` replaces the whole list in one call, in the
+order given, deleting the old rows and re-inserting with `sort_order` set from list position (the
+`(event_id, sort_order)` unique index means the delete must land before the insert). It's how rules
+get added after creation, reordered, or cleared (empty list). Same lock as the rest of the event:
+organizer only, and only while pending/rejected.
 
 ## Cover images
 
@@ -96,25 +124,69 @@ the CDN can never serve a stale copy; the previous object is deleted after the t
 `saveCoverImageKey` **requires the key to start with `events/{eventId}/`**, so one event cannot
 claim another's upload.
 
+## Location search (geocoding)
+
+The create-event location picker has dedicated address fields (street, number, city, region,
+postcode, country) rather than a single free-text box, so the map can recentre on the address the
+organizer actually means. That means calling Mapbox's forward-geocoding API, and — like every other
+Mapbox REST call this app makes — it is proxied through `geocode`/`MapboxGeocodingClient` rather
+than called directly from Flutter: the access token (`mapbox.access-token`, from
+`MAPBOX_ACCESS_TOKEN`) never reaches the client, and request volume stays under this backend's
+control instead of whatever the app does.
+
+`MapboxGeocodingClient` is a plain `RestClient` wrapper (same shape as `admin`'s
+`SupabaseAuthAdminClient`), hitting the **Geocoding v6** `/search/geocode/v6/forward` endpoint in
+its **structured input** mode — separate query params per address component, rather than one search
+string — which Mapbox documents as materially more accurate, especially for machine-entered data
+like this picker's. `GeocodeQuery.isBlank()` (every field null/blank) short-circuits to `[]` without
+a Mapbox request, same idea as blank `q` used to be for `searchOrganizerCandidates`.
+`proximity_lat`/`proximity_lng` are still optional and only applied as a bias when *both* are
+present and valid coordinates — an invalid or lone value is silently dropped rather than failing the
+search, since it's only a relevance hint, not a validated field. The request also always sets
+`autocomplete=false` (Mapbox's own recommendation for structured input) and `limit=5`.
+
+**Always queried with `permanent=false`.** Mapbox's ToS distinguishes results a caller intends to
+store long-term (`permanent=true`, needs billing on the Mapbox account) from ones used transiently.
+Here, the candidate the organizer taps only recentres and zooms the map — it does not get written to
+`car_events.location` as-is. The organizer then drops their own pin on the map, and *that* coordinate
+(the user's own input, not Mapbox's result) is what gets saved, so `permanent=false` applies.
+
+`geocode` deliberately carries no `@Transactional`: it touches no repository, only an outbound HTTP
+call, and the datasource pool is sized to 2 connections (`application.yaml`) — holding one idle for
+a Mapbox round-trip would be a bad trade. There is no caching or per-user rate limiting yet; the
+proxy itself is the control point, and either can be added later without a contract change.
+
+Response candidates carry `feature_type` (`address`, `street`, `place`, ...) and `accuracy`
+(`rooftop`, `parcel`, ... — only meaningful for `address`-level hits) alongside `place_name`, so the
+picker's result list can show what kind of match each candidate is, not just its formatted text.
+
 ## Public API — `MapEventsService`
 
 | Method | REST | Notes |
 |---|---|---|
 | `findNearby(lat, lng, radiusKm, categoryId, limit)` | `GET /nearby?lat=&lng=&radius_km=25&category=&limit=200` | `MapEventPinDto` list, nearest first |
 | `listCategories()` | `GET /categories` | subcategory reference data |
+| `geocode(query, proximityLat, proximityLng)` | `GET /geocode?address_line1=&address_number=&street=&block=&place=&region=&postcode=&locality=&neighborhood=&country=&proximity_lat=&proximity_lng=` | `GeocodeCandidateDto` list, best match first, up to 5 — proxies Mapbox Geocoding v6 structured input |
 | `getEvent(userId, eventId)` | `GET /{eventId}` | full page + the viewer's own standing |
 | `listAttendees(...)` | `GET /{eventId}/attendees?status=&cursor=&size=` | keyset page |
 | `listParticipants(...)` | `GET /{eventId}/cars?status=&cursor=&size=` | defaults to the accepted line-up |
+| `listMyParticipants(...)` | `GET /{eventId}/cars/mine` | the caller's own rows, any status — the only way to see your own pending/rejected entry |
 | `getMyEvents(...)` | `GET /mine?cursor=&size=` | includes pending / rejected |
 | `createEvent(...)` | `POST /` → 201 | submitted as `pending` |
 | `updateEvent(...)` | `PATCH /{eventId}` | pending/rejected only |
 | `saveCoverImageKey(...)` | `PATCH /{eventId}/cover` | |
+| `replaceRules(...)` | `PUT /{eventId}/rules` | whole-list replace, pending/rejected only |
 | `cancelEvent(...)` / `markFinished(...)` | `POST /{eventId}/cancel` / `/finish` | organizer, idempotent |
 | `deleteEvent(...)` | `DELETE /{eventId}` → 204 | **creator only** |
 | `addOrganizer(...)` / `removeOrganizer(...)` | `POST /{eventId}/organizers`, `DELETE /{eventId}/organizers/{id}` | creator only |
-| `setAttendance(...)` / `removeAttendance(...)` | `PUT` / `DELETE /{eventId}/attendance` | |
-| `registerCar(...)` / `withdrawCar(...)` | `POST /{eventId}/cars` → 201, `DELETE /{eventId}/cars/{carId}` | |
-| `decideParticipant(...)` | `PATCH /{eventId}/cars/{carId}` | organizer verdict |
+| `searchOrganizerCandidates(query)` | `GET /organizers/search?q=` | merged user + business search, for the add-organizer picker |
+| `setAttendance(...)` / `removeAttendance(...)` | `PUT` / `DELETE /{eventId}/attendance` | returns the full `MapEventDto`, freshly reloaded |
+| `registerCar(...)` / `withdrawCar(...)` | `POST /{eventId}/cars` → 201, `DELETE /{eventId}/cars/{carId}` | returns the full `MapEventDto`, not the participant row — `attending_cars_count` and `viewer.my_registered_car_ids` both move as a result, so one response saves a follow-up `GET` |
+| `decideParticipant(...)` | `PATCH /{eventId}/cars/{carId}` | organizer verdict; `reason` required when rejecting; returns the full `MapEventDto` |
+| `requestWithdrawal(...)` | `POST /{eventId}/withdraw` | flags every accepted row of the caller's as `withdrawn`, not removed; returns the full `MapEventDto` |
+| `listWithdrawalRequests(...)` | `GET /{eventId}/withdrawals` | organizer only, one entry per requesting owner |
+| `approveWithdrawal(...)` | `POST /{eventId}/withdrawals/{ownerId}/approve` | organizer only; hard-deletes the rows; returns the full `MapEventDto` |
+| `rejectWithdrawal(...)` | `POST /{eventId}/withdrawals/{ownerId}/reject` | organizer only; rows revert to `accepted`; returns the full `MapEventDto` |
 
 Base path `/api/v1/map-events`. All endpoints require authentication; none are under `/public/**`.
 
@@ -139,7 +211,8 @@ An unapproved event is visible only to its organizers (and to admins via `getEve
 Everyone else gets `MapEventNotFoundException` — the *same* 404 as a nonexistent id, so pending and
 rejected submissions cannot be discovered by probing ids. `rejection_reason` is stripped from the
 DTO for non-organizers. Pending/rejected car entries are organizer-only for the same reason: they
-would otherwise reveal whose car was turned away.
+would otherwise reveal whose car was turned away. The owner of a pending/rejected car still sees
+their own row (status, and the rejection reason if any) through `listMyParticipants`.
 
 ## Notifications
 
@@ -151,7 +224,7 @@ back on `notification` (no Modulith cycle), and a rolled-back approval never not
 |---|---|---|---|
 | `map_event_approved` | an admin approves your event | creator | none |
 | `map_event_rejected` | an admin rejects it (reason in `body`) | creator | none |
-| `map_event_car_decided` | an organizer accepts/rejects your car | car owner | none |
+| `map_event_car_decided` | an organizer accepts/rejects your car (reason in `body` when rejected) | car owner | none |
 | `map_event_car_registered` | a car is entered and needs a decision | individual organizers, minus the actor | `event_organizer_enabled` |
 | `map_event_organizer_added` | you are credited as a co-organizer | the added user | `event_organizer_enabled` |
 
@@ -191,6 +264,8 @@ migration (all tables were empty at the time):
 - `rejection_reason` and `updated_at` added.
 - `canceled` seeded into `car_event_status_options`.
 - Indexes added: `(approval_status, status, starts_at)`, `starts_at`, `car_event_participants(owner_id)`.
+- `car_event_participants.rejection_reason` (nullable text) added by
+  `add_rejection_reason_to_car_event_participants`, mirroring `car_events.rejection_reason`.
 
 `car_events` has **RLS enabled with no policies**, and the other `car_event*` tables have no table
 grants, so the whole feature is backend-gated — the same posture as `business`.

@@ -11,6 +11,10 @@ supabase:
   auth:
     issuer: ${supabase.url}/auth/v1
 
+mapbox:
+  # Dummy value; MapboxGeocodingClient is constructed but never called in tests.
+  access-token: test-mapbox-token
+
 cloudflare:
   r2:
     account-id: test-account

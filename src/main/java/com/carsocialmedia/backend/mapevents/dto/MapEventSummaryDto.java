@@ -25,6 +25,7 @@ import java.util.UUID;
  * @param status             upcoming / live / previous / hidden / canceled
  * @param approvalStatus     pending / accepted / rejected
  * @param rejectionReason    why it was rejected, or {@code null}
+ * @param maxParticipantCapacity cap on accepted cars, or {@code null} for no limit
  * @param attendeesCount     RSVP count
  * @param attendingCarsCount accepted cars in the line-up
  * @param creator            the user who created it — the person an admin is reviewing
@@ -44,6 +45,7 @@ public record MapEventSummaryDto(
         String status,
         String approvalStatus,
         String rejectionReason,
+        Integer maxParticipantCapacity,
         int attendeesCount,
         int attendingCarsCount,
         ProfileSearchResultDto creator,

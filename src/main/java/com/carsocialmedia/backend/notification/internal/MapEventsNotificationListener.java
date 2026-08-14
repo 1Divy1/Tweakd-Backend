@@ -5,6 +5,8 @@ import com.carsocialmedia.backend.mapevents.MapEventCarDecidedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventCarRegisteredEvent;
 import com.carsocialmedia.backend.mapevents.MapEventOrganizerAddedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventRejectedEvent;
+import com.carsocialmedia.backend.mapevents.MapEventWithdrawalDecidedEvent;
+import com.carsocialmedia.backend.mapevents.MapEventWithdrawalRequestedEvent;
 import com.carsocialmedia.backend.notification.NotificationService;
 import com.carsocialmedia.backend.profile.ProfileService;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
@@ -27,15 +29,16 @@ import java.util.UUID;
  *
  * <h2>Which of these are preference-gated</h2>
  * <ul>
- *   <li><strong>Ungated</strong> — {@code map_event_approved}, {@code map_event_rejected} and
- *       {@code map_event_car_decided}. These are decisions about the recipient's <em>own</em>
- *       submission, so they follow {@code feedback_status} and {@code moderation_warning}: you do
- *       not opt out of being told what happened to something you submitted.</li>
+ *   <li><strong>Ungated</strong> — {@code map_event_approved}, {@code map_event_rejected},
+ *       {@code map_event_car_decided} and {@code map_event_withdrawal_decided}. These are decisions
+ *       about the recipient's <em>own</em> submission, so they follow {@code feedback_status} and
+ *       {@code moderation_warning}: you do not opt out of being told what happened to something you
+ *       submitted.</li>
  *   <li><strong>Gated on {@code event_organizer_enabled}</strong> —
- *       {@code map_event_car_registered} and {@code map_event_organizer_added}, the
- *       running-an-event notifications aimed at organizers. {@code organized_events_enabled} is
- *       reserved for attendee-facing event logistics (delays, cancellations) and has no producer
- *       yet.</li>
+ *       {@code map_event_car_registered}, {@code map_event_organizer_added} and
+ *       {@code map_event_withdrawal_requested}, the running-an-event notifications aimed at
+ *       organizers. {@code organized_events_enabled} is reserved for attendee-facing event logistics
+ *       (delays, cancellations) and has no producer yet.</li>
  * </ul>
  */
 @Component
@@ -87,7 +90,7 @@ class MapEventsNotificationListener {
                 event.accepted()
                         ? "Your car is in the line-up for \"" + event.title() + "\""
                         : "Your car was not accepted for \"" + event.title() + "\"",
-                null,
+                event.accepted() ? null : event.reason(),
                 payload);
     }
 
@@ -135,6 +138,45 @@ class MapEventsNotificationListener {
                 username + " added you as an organizer of \"" + event.title() + "\"",
                 null,
                 payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(MapEventWithdrawalRequestedEvent event) {
+        List<UUID> recipients = event.recipientIds().stream()
+                .filter(id -> profileService.getNotificationPreferencesOrDefault(id).eventOrganizerEnabled())
+                .toList();
+        if (recipients.isEmpty()) {
+            return;
+        }
+
+        String username = resolveUsername(event.actorId());
+        Map<String, Object> payload = payload(event.eventId());
+        payload.put("actor_id", event.actorId().toString());
+        payload.put("actor_username", username);
+        payload.put("note", event.note());
+
+        notificationService.pushToAll(
+                recipients,
+                "map_event_withdrawal_requested",
+                username + " asked to withdraw from \"" + event.title() + "\"",
+                event.note(),
+                payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(MapEventWithdrawalDecidedEvent event) {
+        notificationService.push(
+                event.recipientId(),
+                "map_event_withdrawal_decided",
+                event.approved()
+                        ? "Your withdrawal from \"" + event.title() + "\" was approved"
+                        : "Your withdrawal from \"" + event.title() + "\" was declined",
+                null,
+                payload(event.eventId()));
     }
 
     /**

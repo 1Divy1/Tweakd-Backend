@@ -55,4 +55,13 @@ public interface BusinessService {
      * @param ids the business ids to resolve; empty input returns an empty list
      */
     List<BusinessRefDto> findBusinessRefsByIds(Collection<UUID> ids);
+
+    /**
+     * Active, verified businesses whose name starts with {@code prefix} (case-insensitive),
+     * alphabetical, capped at 20 — the business counterpart of
+     * {@code ProfileService.searchByUsername}.
+     *
+     * @param prefix search text; blank or {@code null} returns an empty list
+     */
+    List<BusinessRefDto> searchByName(String prefix);
 }

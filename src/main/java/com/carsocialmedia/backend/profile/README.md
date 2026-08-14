@@ -39,7 +39,7 @@ onboarding reference/selection tables: `community_role_options`, `car_category_o
 |---|---|---|
 | `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding | Own-profile responses |
 | `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness | Public profile view (no `requiresOnboarding`) |
-| `ProfileSearchResultDto` | id, username, avatarUrl | Search results and cross-module hydration |
+| `ProfileSearchResultDto` | id, name, username, avatarUrl | Search results and cross-module hydration |
 | `OnboardingRequest` | username (required), bio, cityId, discoveryRadiusKm, categoryIds, roleIds (all optional) | POST /onboarding body |
 | `LocationRequest` | cityId, discoveryRadiusKm (all optional) | PATCH /me/location body |
 | `RealtimeLocationRequest` | lat, lng (required) | PATCH /me/realtime-location body |

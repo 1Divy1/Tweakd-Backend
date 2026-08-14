@@ -24,9 +24,11 @@ import java.util.UUID;
  * @param approvalStatus                pending / accepted / rejected
  * @param rejectionReason               why it was rejected — only ever sent to an organizer
  * @param requiresParticipantApproval   whether entered cars need an organizer's approval
+ * @param maxParticipantCapacity        cap on accepted cars, or {@code null} for no limit
  * @param attendeesCount                RSVP count
  * @param attendingCarsCount            accepted cars in the line-up
  * @param organizers                    the creator plus any co-organizers, creator first
+ * @param rules                         the organizer's rules for the event, in display order
  * @param carMeet                       car-meet specific detail, or {@code null} for other categories
  * @param viewer                        what the calling user may do here and where they stand
  * @param createdAt                     when the event was submitted
@@ -47,9 +49,11 @@ public record MapEventDto(
         String approvalStatus,
         String rejectionReason,
         boolean requiresParticipantApproval,
+        Integer maxParticipantCapacity,
         int attendeesCount,
         int attendingCarsCount,
         List<MapEventOrganizerDto> organizers,
+        List<MapEventRuleDto> rules,
         CarMeetDetailsDto carMeet,
         MapEventViewerStateDto viewer,
         Instant createdAt

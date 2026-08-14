@@ -19,7 +19,6 @@ import java.util.UUID;
  * @param reviewCount   number of reviews the average is based on
  * @param isOpenNow     whether the business is open at request time, derived from its opening
  *                      hours in its own timezone
- * @param distanceKm    great-circle distance from the search centre, in kilometres
  */
 public record BusinessMapPinDto(
         UUID id,
@@ -31,6 +30,5 @@ public record BusinessMapPinDto(
         String logoUrl,
         double averageRating,
         int reviewCount,
-        boolean isOpenNow,
-        double distanceKm
+        boolean isOpenNow
 ) {}

@@ -19,6 +19,7 @@ import com.carsocialmedia.backend.shared.geo.CityRepository;
 import com.carsocialmedia.backend.shared.geo.GeoSupport;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -102,8 +103,7 @@ class BusinessServiceImpl implements BusinessService {
                         OpeningHours.isOpenAt(
                                 hoursByBusiness.getOrDefault(row.getId(), List.of()),
                                 row.getTimezone(),
-                                now),
-                        row.getDistanceKm()))
+                                now)))
                 .toList();
     }
 
@@ -164,6 +164,21 @@ class BusinessServiceImpl implements BusinessService {
             return List.of();
         }
         return businessRepository.findVisibleByIds(ids)
+                .stream()
+                .map(business -> new BusinessRefDto(
+                        business.getId(),
+                        business.getName(),
+                        resolveLogoUrl(business.getLogoUrl())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<BusinessRefDto> searchByName(String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return List.of();
+        }
+        return businessRepository.searchVisibleByNameStartingWith(prefix.trim(), PageRequest.of(0, 20))
                 .stream()
                 .map(business -> new BusinessRefDto(
                         business.getId(),
