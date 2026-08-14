@@ -124,12 +124,49 @@ the CDN can never serve a stale copy; the previous object is deleted after the t
 `saveCoverImageKey` **requires the key to start with `events/{eventId}/`**, so one event cannot
 claim another's upload.
 
+## Location search (geocoding)
+
+The create-event location picker has dedicated address fields (street, number, city, region,
+postcode, country) rather than a single free-text box, so the map can recentre on the address the
+organizer actually means. That means calling Mapbox's forward-geocoding API, and — like every other
+Mapbox REST call this app makes — it is proxied through `geocode`/`MapboxGeocodingClient` rather
+than called directly from Flutter: the access token (`mapbox.access-token`, from
+`MAPBOX_ACCESS_TOKEN`) never reaches the client, and request volume stays under this backend's
+control instead of whatever the app does.
+
+`MapboxGeocodingClient` is a plain `RestClient` wrapper (same shape as `admin`'s
+`SupabaseAuthAdminClient`), hitting the **Geocoding v6** `/search/geocode/v6/forward` endpoint in
+its **structured input** mode — separate query params per address component, rather than one search
+string — which Mapbox documents as materially more accurate, especially for machine-entered data
+like this picker's. `GeocodeQuery.isBlank()` (every field null/blank) short-circuits to `[]` without
+a Mapbox request, same idea as blank `q` used to be for `searchOrganizerCandidates`.
+`proximity_lat`/`proximity_lng` are still optional and only applied as a bias when *both* are
+present and valid coordinates — an invalid or lone value is silently dropped rather than failing the
+search, since it's only a relevance hint, not a validated field. The request also always sets
+`autocomplete=false` (Mapbox's own recommendation for structured input) and `limit=5`.
+
+**Always queried with `permanent=false`.** Mapbox's ToS distinguishes results a caller intends to
+store long-term (`permanent=true`, needs billing on the Mapbox account) from ones used transiently.
+Here, the candidate the organizer taps only recentres and zooms the map — it does not get written to
+`car_events.location` as-is. The organizer then drops their own pin on the map, and *that* coordinate
+(the user's own input, not Mapbox's result) is what gets saved, so `permanent=false` applies.
+
+`geocode` deliberately carries no `@Transactional`: it touches no repository, only an outbound HTTP
+call, and the datasource pool is sized to 2 connections (`application.yaml`) — holding one idle for
+a Mapbox round-trip would be a bad trade. There is no caching or per-user rate limiting yet; the
+proxy itself is the control point, and either can be added later without a contract change.
+
+Response candidates carry `feature_type` (`address`, `street`, `place`, ...) and `accuracy`
+(`rooftop`, `parcel`, ... — only meaningful for `address`-level hits) alongside `place_name`, so the
+picker's result list can show what kind of match each candidate is, not just its formatted text.
+
 ## Public API — `MapEventsService`
 
 | Method | REST | Notes |
 |---|---|---|
 | `findNearby(lat, lng, radiusKm, categoryId, limit)` | `GET /nearby?lat=&lng=&radius_km=25&category=&limit=200` | `MapEventPinDto` list, nearest first |
 | `listCategories()` | `GET /categories` | subcategory reference data |
+| `geocode(query, proximityLat, proximityLng)` | `GET /geocode?address_line1=&address_number=&street=&block=&place=&region=&postcode=&locality=&neighborhood=&country=&proximity_lat=&proximity_lng=` | `GeocodeCandidateDto` list, best match first, up to 5 — proxies Mapbox Geocoding v6 structured input |
 | `getEvent(userId, eventId)` | `GET /{eventId}` | full page + the viewer's own standing |
 | `listAttendees(...)` | `GET /{eventId}/attendees?status=&cursor=&size=` | keyset page |
 | `listParticipants(...)` | `GET /{eventId}/cars?status=&cursor=&size=` | defaults to the accepted line-up |

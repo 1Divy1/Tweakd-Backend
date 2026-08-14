@@ -96,6 +96,7 @@ class MapEventsServiceImplTest {
     @Mock private BusinessService businessService;
     @Mock private StorageService storageService;
     @Mock private ApplicationEventPublisher events;
+    @Mock private MapboxGeocodingClient mapboxGeocodingClient;
 
     private MapEventsServiceImpl service;
 
@@ -104,7 +105,7 @@ class MapEventsServiceImplTest {
         service = new MapEventsServiceImpl(
                 eventRepository, categoryRepository, carMeetRepository, organizerRepository,
                 attendeeRepository, participantRepository, ruleRepository, profileService, garageService,
-                businessService, storageService, events);
+                businessService, storageService, events, mapboxGeocodingClient);
         // @PersistenceContext is field-injected, so a pure unit test has to supply it by hand.
         ReflectionTestUtils.setField(service, "entityManager", mock(EntityManager.class));
 

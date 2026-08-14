@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.mapevents.internal;
 
 import com.carsocialmedia.backend.mapevents.MapEventsService;
+import com.carsocialmedia.backend.mapevents.dto.GeocodeCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventAttendeeDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventCategoryDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventDto;
@@ -14,6 +15,7 @@ import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.AttendanceRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CoverImageKeyRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
+import com.carsocialmedia.backend.mapevents.dto.request.GeocodeQuery;
 import com.carsocialmedia.backend.mapevents.dto.request.ParticipantDecisionRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.RegisterCarRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.ReplaceMapEventRulesRequest;
@@ -71,6 +73,30 @@ class MapEventController {
     @GetMapping("/categories")
     public List<MapEventCategoryDto> listCategories() {
         return mapEventsService.listCategories();
+    }
+
+    /**
+     * Forward-geocodes the create-event location picker's structured address fields, so the map
+     * can recentre on whichever candidate the user taps. Proxied through Mapbox (Geocoding v6, in
+     * structured-input mode) so the access token stays server-side. A query with every field
+     * blank short-circuits to an empty list without a Mapbox request.
+     */
+    @GetMapping("/geocode")
+    public List<GeocodeCandidateDto> geocode(@RequestParam(name = "address_line1", required = false) String addressLine1,
+                                             @RequestParam(name = "address_number", required = false) String addressNumber,
+                                             @RequestParam(required = false) String street,
+                                             @RequestParam(required = false) String block,
+                                             @RequestParam(required = false) String place,
+                                             @RequestParam(required = false) String region,
+                                             @RequestParam(required = false) String postcode,
+                                             @RequestParam(required = false) String locality,
+                                             @RequestParam(required = false) String neighborhood,
+                                             @RequestParam(required = false) String country,
+                                             @RequestParam(name = "proximity_lat", required = false) Double proximityLat,
+                                             @RequestParam(name = "proximity_lng", required = false) Double proximityLng) {
+        GeocodeQuery query = new GeocodeQuery(addressLine1, addressNumber, street, block, place,
+                region, postcode, locality, neighborhood, country);
+        return mapEventsService.geocode(query, proximityLat, proximityLng);
     }
 
     /** The caller's own events, including the ones still pending or rejected. */

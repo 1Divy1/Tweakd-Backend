@@ -13,6 +13,8 @@
  *   <li>{@link com.carsocialmedia.backend.mapevents.dto.request.RegisterCarRequest} /
  *       {@link com.carsocialmedia.backend.mapevents.dto.request.ParticipantDecisionRequest} —
  *       entering a car, and the organizer's verdict on it</li>
+ *   <li>{@link com.carsocialmedia.backend.mapevents.dto.request.GeocodeQuery} — structured address
+ *       input for the location picker's forward-geocoding search</li>
  * </ul>
  */
 @NamedInterface("dto-request")

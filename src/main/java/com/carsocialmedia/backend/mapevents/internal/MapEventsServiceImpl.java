@@ -13,6 +13,7 @@ import com.carsocialmedia.backend.mapevents.MapEventWithdrawalDecidedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventWithdrawalRequestedEvent;
 import com.carsocialmedia.backend.mapevents.MapEventsService;
 import com.carsocialmedia.backend.mapevents.dto.CarMeetDetailsDto;
+import com.carsocialmedia.backend.mapevents.dto.GeocodeCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventAttendeeDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventCategoryDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventDto;
@@ -27,6 +28,7 @@ import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.carsocialmedia.backend.mapevents.dto.OrganizerCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
+import com.carsocialmedia.backend.mapevents.dto.request.GeocodeQuery;
 import com.carsocialmedia.backend.mapevents.dto.request.UpdateMapEventRequest;
 import com.carsocialmedia.backend.mapevents.exception.CarNotOwnedException;
 import com.carsocialmedia.backend.mapevents.exception.EventClosedException;
@@ -108,6 +110,7 @@ class MapEventsServiceImpl implements MapEventsService {
     private final BusinessService businessService;
     private final StorageService storageService;
     private final ApplicationEventPublisher events;
+    private final MapboxGeocodingClient mapboxGeocodingClient;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -123,7 +126,8 @@ class MapEventsServiceImpl implements MapEventsService {
                          GarageService garageService,
                          BusinessService businessService,
                          StorageService storageService,
-                         ApplicationEventPublisher events) {
+                         ApplicationEventPublisher events,
+                         MapboxGeocodingClient mapboxGeocodingClient) {
         this.eventRepository = eventRepository;
         this.categoryRepository = categoryRepository;
         this.carMeetRepository = carMeetRepository;
@@ -136,6 +140,7 @@ class MapEventsServiceImpl implements MapEventsService {
         this.businessService = businessService;
         this.storageService = storageService;
         this.events = events;
+        this.mapboxGeocodingClient = mapboxGeocodingClient;
     }
 
     // ==================================================================
@@ -175,6 +180,43 @@ class MapEventsServiceImpl implements MapEventsService {
         return categoryRepository.findByAvailableTrueOrderByLabelAsc()
                 .stream()
                 .map(category -> new MapEventCategoryDto(category.getId(), category.getLabel()))
+                .toList();
+    }
+
+    // No @Transactional here: this method never touches the database, only an outbound HTTP call
+    // to Mapbox, and the pool is sized to 2 connections (application.yaml) — holding one idle for
+    // the round-trip would be wasteful at best.
+    @Override
+    public List<GeocodeCandidateDto> geocode(GeocodeQuery query, Double proximityLat, Double proximityLng) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+
+        Double lat = sanitizeCoordinate(proximityLat, -90, 90);
+        Double lng = sanitizeCoordinate(proximityLng, -180, 180);
+        // Bias only applies when both halves of the pair check out; a lone or malformed value is
+        // dropped rather than failing the whole search, since it is only a relevance hint.
+        if (lat == null || lng == null) {
+            lat = null;
+            lng = null;
+        }
+
+        return mapboxGeocodingClient.forwardGeocode(query, lat, lng).stream()
+                .filter(feature -> feature.geometry() != null && feature.geometry().coordinates() != null
+                        && feature.geometry().coordinates().size() == 2 && feature.properties() != null)
+                .map(feature -> {
+                    MapboxGeocodingClient.MapboxProperties props = feature.properties();
+                    String placeName = props.fullAddress() != null ? props.fullAddress()
+                            : props.placeFormatted() != null ? props.placeFormatted()
+                            : props.name();
+                    String accuracy = props.coordinates() == null ? null : props.coordinates().accuracy();
+                    return new GeocodeCandidateDto(
+                            feature.geometry().coordinates().get(1),
+                            feature.geometry().coordinates().get(0),
+                            placeName,
+                            props.featureType(),
+                            accuracy);
+                })
                 .toList();
     }
 
@@ -1298,6 +1340,14 @@ class MapEventsServiceImpl implements MapEventsService {
                 || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
             throw new InvalidMapEventException("lat must be within -90..90 and lng within -180..180");
         }
+    }
+
+    /** Like {@link #validateCoordinates}, but for an optional hint: invalid input is dropped, not an error. */
+    private static Double sanitizeCoordinate(Double value, double min, double max) {
+        if (value == null || value.isNaN() || value.isInfinite() || value < min || value > max) {
+            return null;
+        }
+        return value;
     }
 
     private void validateTimings(Instant startsAt, Instant endsAt, Instant now) {

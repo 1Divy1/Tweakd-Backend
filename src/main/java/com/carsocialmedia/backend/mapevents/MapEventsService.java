@@ -1,6 +1,7 @@
 package com.carsocialmedia.backend.mapevents;
 
 import com.carsocialmedia.backend.mapevents.dto.CarMeetDetailsDto;
+import com.carsocialmedia.backend.mapevents.dto.GeocodeCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventAttendeeDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventCategoryDto;
 import com.carsocialmedia.backend.mapevents.dto.MapEventDto;
@@ -12,6 +13,7 @@ import com.carsocialmedia.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.carsocialmedia.backend.mapevents.dto.OrganizerCandidateDto;
 import com.carsocialmedia.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.carsocialmedia.backend.mapevents.dto.request.CreateMapEventRequest;
+import com.carsocialmedia.backend.mapevents.dto.request.GeocodeQuery;
 import com.carsocialmedia.backend.mapevents.dto.request.UpdateMapEventRequest;
 
 import java.util.List;
@@ -50,6 +52,30 @@ public interface MapEventsService {
 
     /** All selectable event subcategories (reference data), by label. */
     List<MapEventCategoryDto> listCategories();
+
+    /**
+     * Forward-geocodes a structured address into map coordinates — backs the create-event
+     * location picker's dedicated address fields (street, number, city, ...). Proxied through
+     * Mapbox's Geocoding v6 API, in its "structured input" mode, so the access token never
+     * reaches the client, request volume stays under this backend's control, and match accuracy
+     * is better than a single free-text string.
+     *
+     * <p>Always queried with {@code permanent=false}: a candidate the caller taps only recentres
+     * the map, it is not itself persisted — the event's actual location is a pin the user drops
+     * afterwards, their own input rather than Mapbox's.
+     *
+     * @param query        the structured address fields; blank (every field null or blank)
+     *                     returns an empty list without a Mapbox request, same idea as a blank
+     *                     {@code q} used to be for {@link #searchOrganizerCandidates}
+     * @param proximityLat optional bias latitude, typically the picker's current camera centre,
+     *                     -90..90 — applied only when {@code proximityLng} is also a valid
+     *                     coordinate; an invalid or lone value is dropped rather than failing the
+     *                     search, since it is only a relevance hint
+     * @param proximityLng optional bias longitude, -180..180; see {@code proximityLat}
+     * @return candidates ordered by relevance, best match first, up to 5 of them. The client
+     *         shows all of them as a tappable list rather than flying to the first hit.
+     */
+    List<GeocodeCandidateDto> geocode(GeocodeQuery query, Double proximityLat, Double proximityLng);
 
     // ===================== Event page =====================
 
