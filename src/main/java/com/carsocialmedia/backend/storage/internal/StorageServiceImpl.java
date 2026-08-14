@@ -103,6 +103,18 @@ public class StorageServiceImpl implements StorageService {
         return new PostImagesUploadUrlsResponse(uploads);
     }
 
+    // === MAP EVENTS ===
+    // events/{eventId}/{uuid}.webp
+    // A random suffix rather than a fixed "cover.webp": replacing a cover writes a new key, so the
+    // CDN can never serve a stale copy of the old one, and the previous object can be deleted.
+    @Override
+    public UploadUrlResponse eventCoverUploadUrlRequest(UUID eventId) {
+        String key = "events/" + eventId +
+                "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
+
+        return buildUploadUrlResponse(config.getMapEvents(), key, FileFormat.WEBP);
+    }
+
     @Override
     public String publicUrl(StorageBucket bucket, String key) {
         if (key == null || key.isBlank()) {

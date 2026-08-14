@@ -787,6 +787,107 @@ end $$;
 
 
 --
+-- Name: update_car_event_attendees_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_car_event_attendees_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  -- INSERT: new row added (either 'interested' or 'attending')
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status = 'attending' THEN
+      UPDATE car_events
+      SET attendees_count = attendees_count + 1
+      WHERE id = NEW.event_id;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- DELETE: user removed their RSVP (hard delete)
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status = 'attending' THEN
+      UPDATE car_events
+      SET attendees_count = attendees_count - 1
+      WHERE id = OLD.event_id;
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  -- UPDATE: only realistic transition is interested <-> attending
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.status = NEW.status THEN
+      RETURN NEW; -- nothing relevant changed
+    END IF;
+
+    IF OLD.status = 'attending' AND NEW.status = 'interested' THEN
+      UPDATE car_events SET attendees_count = attendees_count - 1 WHERE id = NEW.event_id;
+    ELSIF OLD.status = 'interested' AND NEW.status = 'attending' THEN
+      UPDATE car_events SET attendees_count = attendees_count + 1 WHERE id = NEW.event_id;
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: update_car_event_attending_cars_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_car_event_attending_cars_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  -- 'withdrawn' means a withdrawal request is pending organizer review: the participant is
+  -- still counted as attending until the organizer approves the withdrawal (which hard-deletes
+  -- the row) or rejects it (which reverts the row to 'accepted'). So both 'accepted' and
+  -- 'withdrawn' are "counted" states; only a transition into/out of that set changes the count.
+
+  -- INSERT: new row added directly as 'accepted' (e.g. open events, no approval needed)
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status IN ('accepted', 'withdrawn') THEN
+      UPDATE car_events
+      SET attending_cars_count = attending_cars_count + 1
+      WHERE id = NEW.event_id;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- DELETE: participation removed (organizer approving a withdrawal deletes 'withdrawn' rows)
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status IN ('accepted', 'withdrawn') THEN
+      UPDATE car_events
+      SET attending_cars_count = attending_cars_count - 1
+      WHERE id = OLD.event_id;
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  -- UPDATE: status transition (pending/rejected <-> accepted <-> withdrawn)
+  IF TG_OP = 'UPDATE' THEN
+    IF (OLD.status IN ('accepted', 'withdrawn')) = (NEW.status IN ('accepted', 'withdrawn')) THEN
+      RETURN NEW;
+    END IF;
+
+    IF OLD.status IN ('accepted', 'withdrawn') AND NEW.status NOT IN ('accepted', 'withdrawn') THEN
+      UPDATE car_events SET attending_cars_count = attending_cars_count - 1 WHERE id = NEW.event_id;
+    ELSIF OLD.status NOT IN ('accepted', 'withdrawn') AND NEW.status IN ('accepted', 'withdrawn') THEN
+      UPDATE car_events SET attending_cars_count = attending_cars_count + 1 WHERE id = NEW.event_id;
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
+
+
+--
 -- Name: update_comment_reply_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1100,6 +1201,245 @@ CREATE TABLE public.car_drivetrain_options (
     id text NOT NULL,
     name text NOT NULL
 );
+
+
+--
+-- Name: car_event_approval_status_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_approval_status_options (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_approval_status_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_approval_status_options IS 'An event''s status, updated by the admin team.';
+
+
+--
+-- Name: car_event_attendee_status; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_attendee_status (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_attendee_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_attendee_status IS 'Reference table';
+
+
+--
+-- Name: car_event_attendees_list; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_attendees_list (
+    user_id uuid NOT NULL,
+    event_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_attendees_list; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_attendees_list IS 'The list of spectators for a specific event.';
+
+
+--
+-- Name: car_event_categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_categories (
+    id text NOT NULL,
+    category text NOT NULL,
+    is_available boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_categories; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_categories IS 'What type of events can occur on the virtual map of the app (eg: car meets, convoys, track days, etc.)';
+
+
+--
+-- Name: car_event_organizer_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_organizer_rules (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    rule text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    sort_order smallint NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_organizer_rules; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_organizer_rules IS 'Rules created by the event''s organizer(s)';
+
+
+--
+-- Name: car_event_organizers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_organizers (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    event_id uuid NOT NULL,
+    individual_organizer_id uuid,
+    business_organizer_id uuid,
+    role text DEFAULT 'organizer'::text NOT NULL,
+    CONSTRAINT car_event_organizers_creator_is_individual_check CHECK (((role <> 'creator'::text) OR (individual_organizer_id IS NOT NULL))),
+    CONSTRAINT car_event_organizers_exactly_one_organizer_check CHECK ((num_nonnulls(individual_organizer_id, business_organizer_id) = 1)),
+    CONSTRAINT car_event_organizers_role_check CHECK ((role = ANY (ARRAY['creator'::text, 'organizer'::text])))
+);
+
+
+--
+-- Name: TABLE car_event_organizers; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_organizers IS 'The organizers of a car event: either individual profiles or business accounts or both. At least one, can be multiple.';
+
+
+--
+-- Name: COLUMN car_event_organizers.individual_organizer_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_organizers.individual_organizer_id IS 'An individual account as the organizer';
+
+
+--
+-- Name: COLUMN car_event_organizers.business_organizer_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_organizers.business_organizer_id IS 'A business account as the event''s organizer, or one of them.';
+
+
+--
+-- Name: car_event_participant_status_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_participant_status_options (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: car_event_participants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_participants (
+    event_id uuid NOT NULL,
+    owner_id uuid NOT NULL,
+    car_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    withdraw_note text,
+    rejection_reason text
+);
+
+
+--
+-- Name: TABLE car_event_participants; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_participants IS 'A list with owners and their cars that are attending an event - NOT spectators';
+
+
+--
+-- Name: car_event_status_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_status_options (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: car_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    event_type text NOT NULL,
+    title text NOT NULL,
+    description text NOT NULL,
+    location_name text NOT NULL,
+    starts_at timestamp with time zone NOT NULL,
+    ends_at timestamp with time zone,
+    cover_image_url text,
+    location public.geography(Point,4326) NOT NULL,
+    status text DEFAULT 'upcoming'::text NOT NULL,
+    attendees_count integer DEFAULT 0 NOT NULL,
+    requires_participant_approval boolean DEFAULT true NOT NULL,
+    approval_status text DEFAULT 'pending'::text NOT NULL,
+    attending_cars_count integer DEFAULT 0 NOT NULL,
+    created_by uuid NOT NULL,
+    rejection_reason text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    max_participant_capacity integer,
+    CONSTRAINT car_events_attendees_count_check CHECK ((attendees_count >= 0))
+);
+
+
+--
+-- Name: COLUMN car_events.cover_image_url; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_events.cover_image_url IS 'R2 object key in the MAP_EVENTS bucket (map-events/{eventId}/cover.webp), not a URL. Resolved to a public URL on read via StorageService.publicUrl.';
+
+
+--
+-- Name: COLUMN car_events.attendees_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_events.attendees_count IS 'How many spectators will be present at the event - NOT participants with their cars.';
+
+
+--
+-- Name: COLUMN car_events.attending_cars_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_events.attending_cars_count IS 'The number of attending cars to a specific event.';
+
+
+--
+-- Name: COLUMN car_events.rejection_reason; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_events.rejection_reason IS 'Why an admin rejected the event. Set when approval_status = rejected, cleared when the organizer resubmits.';
+
+
+--
+-- Name: COLUMN car_events.max_participant_capacity; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_events.max_participant_capacity IS '(Optional) Max number of participants';
 
 
 --
@@ -1652,6 +1992,31 @@ COMMENT ON TABLE public.dream_cars IS 'Contains individual car models that the u
 
 
 --
+-- Name: event_car_meet; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.event_car_meet (
+    event_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    registration_deadline timestamp with time zone NOT NULL
+);
+
+
+--
+-- Name: TABLE event_car_meet; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.event_car_meet IS 'Specific information regarding a car meet.';
+
+
+--
+-- Name: COLUMN event_car_meet.registration_deadline; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.event_car_meet.registration_deadline IS 'The deadline for registering as a participant to a car meet.';
+
+
+--
 -- Name: feedback; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2187,7 +2552,8 @@ CREATE TABLE public.notification_preferences (
     updated_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     organized_events_enabled boolean NOT NULL,
     tags_enabled boolean DEFAULT true NOT NULL,
-    service_reminders_enabled boolean DEFAULT true NOT NULL
+    service_reminders_enabled boolean DEFAULT true NOT NULL,
+    event_organizer_enabled boolean DEFAULT true NOT NULL
 );
 
 
@@ -2224,6 +2590,13 @@ COMMENT ON COLUMN public.notification_preferences.tags_enabled IS 'Whether the u
 --
 
 COMMENT ON COLUMN public.notification_preferences.service_reminders_enabled IS 'Reminder-e pentru service-uri programate și documente care expiră (carte de service).';
+
+
+--
+-- Name: COLUMN notification_preferences.event_organizer_enabled; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.notification_preferences.event_organizer_enabled IS 'Whether the user receives notifications about running events they organize (car registered, added as organizer). Distinct from organized_events_enabled, which covers attendee-facing event logistics (delays, cancellations).';
 
 
 --
@@ -3085,6 +3458,110 @@ ALTER TABLE ONLY public.car_distance_units
 
 
 --
+-- Name: car_event_approval_status_options car_event_approval_status_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_approval_status_options
+    ADD CONSTRAINT car_event_approval_status_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_approval_status_options car_event_approval_status_options_status_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_approval_status_options
+    ADD CONSTRAINT car_event_approval_status_options_status_key UNIQUE (status);
+
+
+--
+-- Name: car_event_attendee_status car_event_attendee_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_attendee_status
+    ADD CONSTRAINT car_event_attendee_status_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_attendee_status car_event_attendee_status_status_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_attendee_status
+    ADD CONSTRAINT car_event_attendee_status_status_key UNIQUE (status);
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_attendees_list
+    ADD CONSTRAINT car_event_attendees_list_pkey PRIMARY KEY (user_id, event_id);
+
+
+--
+-- Name: car_event_organizer_rules car_event_organizer_rules_event_position_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizer_rules
+    ADD CONSTRAINT car_event_organizer_rules_event_position_unique UNIQUE (event_id, sort_order);
+
+
+--
+-- Name: car_event_organizer_rules car_event_organizer_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizer_rules
+    ADD CONSTRAINT car_event_organizer_rules_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_organizers car_event_organizers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizers
+    ADD CONSTRAINT car_event_organizers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_participant_status_options car_event_participant_status_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_participant_status_options
+    ADD CONSTRAINT car_event_participant_status_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_participants car_event_participants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_participants
+    ADD CONSTRAINT car_event_participants_pkey PRIMARY KEY (event_id, car_id);
+
+
+--
+-- Name: car_event_status_options car_event_status_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_status_options
+    ADD CONSTRAINT car_event_status_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_status_options car_event_status_options_status_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_status_options
+    ADD CONSTRAINT car_event_status_options_status_key UNIQUE (status);
+
+
+--
+-- Name: car_events car_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_events
+    ADD CONSTRAINT car_events_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: car_fuel_type_options car_fuel_type_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3293,6 +3770,14 @@ ALTER TABLE ONLY public.car_drivetrain_options
 
 
 --
+-- Name: event_car_meet event_car_meet_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.event_car_meet
+    ADD CONSTRAINT event_car_meet_pkey PRIMARY KEY (event_id);
+
+
+--
 -- Name: feedback_comments feedback_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3498,6 +3983,22 @@ ALTER TABLE ONLY public.garages
 
 ALTER TABLE ONLY public.garages
     ADD CONSTRAINT garages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_categories map_event_categories_category_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_categories
+    ADD CONSTRAINT map_event_categories_category_key UNIQUE (category);
+
+
+--
+-- Name: car_event_categories map_event_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_categories
+    ADD CONSTRAINT map_event_categories_pkey PRIMARY KEY (id);
 
 
 --
@@ -3778,6 +4279,76 @@ CREATE INDEX business_hours_business_id_idx ON public.business_hours USING btree
 
 
 --
+-- Name: car_event_attendees_list_event_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_attendees_list_event_id_idx ON public.car_event_attendees_list USING btree (event_id);
+
+
+--
+-- Name: car_event_attendees_list_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_attendees_list_status_idx ON public.car_event_attendees_list USING btree (status);
+
+
+--
+-- Name: car_event_organizers_one_creator; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_event_organizers_one_creator ON public.car_event_organizers USING btree (event_id) WHERE (role = 'creator'::text);
+
+
+--
+-- Name: car_event_organizers_unique_business; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_event_organizers_unique_business ON public.car_event_organizers USING btree (event_id, business_organizer_id) WHERE (business_organizer_id IS NOT NULL);
+
+
+--
+-- Name: car_event_organizers_unique_individual; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_event_organizers_unique_individual ON public.car_event_organizers USING btree (event_id, individual_organizer_id) WHERE (individual_organizer_id IS NOT NULL);
+
+
+--
+-- Name: car_event_participants_owner_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_participants_owner_id_idx ON public.car_event_participants USING btree (owner_id);
+
+
+--
+-- Name: car_events_created_by_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_events_created_by_idx ON public.car_events USING btree (created_by);
+
+
+--
+-- Name: car_events_location_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_events_location_idx ON public.car_events USING gist (location);
+
+
+--
+-- Name: car_events_map_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_events_map_idx ON public.car_events USING btree (approval_status, status, starts_at);
+
+
+--
+-- Name: car_events_starts_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_events_starts_at_idx ON public.car_events USING btree (starts_at);
+
+
+--
 -- Name: dm_conversations_user_b_a_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3845,6 +4416,13 @@ CREATE INDEX forum_thread_topics_thread_id_idx ON public.forum_thread_topics USI
 --
 
 CREATE INDEX forum_topics_thread_count_idx ON public.forum_thread_topic_options USING btree (thread_count);
+
+
+--
+-- Name: idx_car_event_organizer_rules_event_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_car_event_organizer_rules_event_id ON public.car_event_organizer_rules USING btree (event_id);
 
 
 --
@@ -4233,6 +4811,13 @@ CREATE INDEX notifications_user_created_idx ON public.notifications USING btree 
 
 
 --
+-- Name: notifications_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_user_id_idx ON public.notifications USING btree (user_id);
+
+
+--
 -- Name: notifications_user_unread_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4478,6 +5063,20 @@ CREATE TRIGGER trg_sync_post_shares_count AFTER INSERT OR DELETE ON public.post_
 
 
 --
+-- Name: car_event_attendees_list trg_update_car_event_attendees_count; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_update_car_event_attendees_count AFTER INSERT OR DELETE OR UPDATE ON public.car_event_attendees_list FOR EACH ROW EXECUTE FUNCTION public.update_car_event_attendees_count();
+
+
+--
+-- Name: car_event_participants trg_update_car_event_attending_cars_count; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_update_car_event_attending_cars_count AFTER INSERT OR DELETE OR UPDATE ON public.car_event_participants FOR EACH ROW EXECUTE FUNCTION public.update_car_event_attending_cars_count();
+
+
+--
 -- Name: vehicle_history_entries trg_vehicle_history_entries_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -4546,6 +5145,126 @@ ALTER TABLE ONLY public.business_accounts
 
 ALTER TABLE ONLY public.business_hours
     ADD CONSTRAINT business_hours_business_id_fkey FOREIGN KEY (business_id) REFERENCES public.business_accounts(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_attendees_list
+    ADD CONSTRAINT car_event_attendees_list_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_attendees_list
+    ADD CONSTRAINT car_event_attendees_list_status_fkey FOREIGN KEY (status) REFERENCES public.car_event_attendee_status(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_attendees_list
+    ADD CONSTRAINT car_event_attendees_list_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_organizer_rules car_event_organizer_rules_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizer_rules
+    ADD CONSTRAINT car_event_organizer_rules_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_organizers car_event_organizers_business_organizer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizers
+    ADD CONSTRAINT car_event_organizers_business_organizer_id_fkey FOREIGN KEY (business_organizer_id) REFERENCES public.business_accounts(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_organizers car_event_organizers_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizers
+    ADD CONSTRAINT car_event_organizers_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_organizers car_event_organizers_individual_organizer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_organizers
+    ADD CONSTRAINT car_event_organizers_individual_organizer_id_fkey FOREIGN KEY (individual_organizer_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_participants car_event_participants_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_participants
+    ADD CONSTRAINT car_event_participants_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_participants car_event_participants_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_participants
+    ADD CONSTRAINT car_event_participants_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_participants car_event_participants_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_participants
+    ADD CONSTRAINT car_event_participants_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_participants car_event_participants_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_participants
+    ADD CONSTRAINT car_event_participants_status_fkey FOREIGN KEY (status) REFERENCES public.car_event_participant_status_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: car_events car_events_approval_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_events
+    ADD CONSTRAINT car_events_approval_status_fkey FOREIGN KEY (approval_status) REFERENCES public.car_event_approval_status_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: car_events car_events_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_events
+    ADD CONSTRAINT car_events_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_events car_events_event_type_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_events
+    ADD CONSTRAINT car_events_event_type_fkey FOREIGN KEY (event_type) REFERENCES public.car_event_categories(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: car_events car_events_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_events
+    ADD CONSTRAINT car_events_status_fkey FOREIGN KEY (status) REFERENCES public.car_event_status_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
@@ -4850,6 +5569,14 @@ ALTER TABLE ONLY public.dream_cars
 
 ALTER TABLE ONLY public.dream_cars
     ADD CONSTRAINT dream_cars_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: event_car_meet event_car_meet_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.event_car_meet
+    ADD CONSTRAINT event_car_meet_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -5573,19 +6300,7 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: profiles Any logged in user can view someone else's profile; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: report_reasons Authenticated users can read report reasons; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profiles Users can edit only their own profile; Type: POLICY; Schema: public; Owner: -
 --
 
 
@@ -5743,6 +6458,116 @@ ALTER TABLE ONLY public.vehicle_history_entries
 -- Name: car_drivetrain_options car_drivetrain_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
+
+
+--
+-- Name: car_event_approval_status_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_attendee_status; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_attendee_status car_event_attendee_status_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_attendees_list; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_delete_own; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_insert_own; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_attendees_list car_event_attendees_list_update_own; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_organizer_rules; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_organizers; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_organizers car_event_organizers_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_participant_status_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_participant_status_options car_event_participant_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_participants; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_participants car_event_participants_delete_own; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_participants car_event_participants_insert_own_car; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_participants car_event_participants_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: car_event_status_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_events; Type: ROW SECURITY; Schema: public; Owner: -
+--
 
 
 --
@@ -5948,6 +6773,17 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: dream_cars dream_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: event_car_meet; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: event_car_meet event_car_meet_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
 
@@ -6374,6 +7210,18 @@ ALTER TABLE ONLY public.vehicle_history_entries
 --
 -- Name: profiles; Type: ROW SECURITY; Schema: public; Owner: -
 --
+
+
+--
+-- Name: profiles profiles_select_own; Type: POLICY; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: profiles profiles_update_own; Type: POLICY; Schema: public; Owner: -
+--
+
 
 
 --

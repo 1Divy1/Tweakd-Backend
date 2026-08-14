@@ -50,7 +50,7 @@ class BusinessControllerWebTest {
                 BUSINESS_ID, "Willy Wash", "car_wash", "Car wash",
                 46.7874479284246, 23.6308604799099,
                 "https://cdn.example/logo.png",
-                4.5, 12, true, 1.8342);
+                4.5, 12, true);
     }
 
     // ---- auth ---------------------------------------------------------------
@@ -80,8 +80,7 @@ class BusinessControllerWebTest {
                 .andExpect(jsonPath("$[0].logo_url").value("https://cdn.example/logo.png"))
                 .andExpect(jsonPath("$[0].average_rating").value(4.5))
                 .andExpect(jsonPath("$[0].review_count").value(12))
-                .andExpect(jsonPath("$[0].is_open_now").value(true))
-                .andExpect(jsonPath("$[0].distance_km").value(1.8342));
+                .andExpect(jsonPath("$[0].is_open_now").value(true));
     }
 
     @Test

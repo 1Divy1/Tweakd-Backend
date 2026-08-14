@@ -2,8 +2,10 @@ package com.carsocialmedia.backend.business;
 
 import com.carsocialmedia.backend.business.dto.BusinessDto;
 import com.carsocialmedia.backend.business.dto.BusinessMapPinDto;
+import com.carsocialmedia.backend.business.dto.BusinessRefDto;
 import com.carsocialmedia.backend.business.dto.BusinessTypeOptionDto;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,4 +43,25 @@ public interface BusinessService {
 
     /** All selectable business categories (reference data), alphabetically by label. */
     List<BusinessTypeOptionDto> listTypes();
+
+    /**
+     * Batch-resolves business ids to name + logo, for callers that only need to render a credit or
+     * a link — the business counterpart of {@code ProfileService.findByIds}.
+     *
+     * <p>Ids that do not resolve to an active, verified business are <strong>dropped</strong>, in
+     * keeping with this module's rule that hidden businesses are never exposed. Callers must
+     * therefore tolerate a result smaller than the input.
+     *
+     * @param ids the business ids to resolve; empty input returns an empty list
+     */
+    List<BusinessRefDto> findBusinessRefsByIds(Collection<UUID> ids);
+
+    /**
+     * Active, verified businesses whose name starts with {@code prefix} (case-insensitive),
+     * alphabetical, capped at 20 — the business counterpart of
+     * {@code ProfileService.searchByUsername}.
+     *
+     * @param prefix search text; blank or {@code null} returns an empty list
+     */
+    List<BusinessRefDto> searchByName(String prefix);
 }

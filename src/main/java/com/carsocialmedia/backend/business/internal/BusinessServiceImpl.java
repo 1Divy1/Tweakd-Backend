@@ -4,6 +4,7 @@ import com.carsocialmedia.backend.business.BusinessService;
 import com.carsocialmedia.backend.business.dto.BusinessDto;
 import com.carsocialmedia.backend.business.dto.BusinessHoursDto;
 import com.carsocialmedia.backend.business.dto.BusinessMapPinDto;
+import com.carsocialmedia.backend.business.dto.BusinessRefDto;
 import com.carsocialmedia.backend.business.dto.BusinessTypeOptionDto;
 import com.carsocialmedia.backend.business.exception.BusinessNotFoundException;
 import com.carsocialmedia.backend.business.exception.InvalidSearchAreaException;
@@ -18,6 +19,7 @@ import com.carsocialmedia.backend.shared.geo.CityRepository;
 import com.carsocialmedia.backend.shared.geo.GeoSupport;
 import com.carsocialmedia.backend.storage.StorageBucket;
 import com.carsocialmedia.backend.storage.StorageService;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -100,8 +103,7 @@ class BusinessServiceImpl implements BusinessService {
                         OpeningHours.isOpenAt(
                                 hoursByBusiness.getOrDefault(row.getId(), List.of()),
                                 row.getTimezone(),
-                                now),
-                        row.getDistanceKm()))
+                                now)))
                 .toList();
     }
 
@@ -152,6 +154,36 @@ class BusinessServiceImpl implements BusinessService {
                 .stream()
                 .map(BusinessTypeOptionEntity::toDto)
                 .sorted(Comparator.comparing(BusinessTypeOptionDto::label))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<BusinessRefDto> findBusinessRefsByIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return businessRepository.findVisibleByIds(ids)
+                .stream()
+                .map(business -> new BusinessRefDto(
+                        business.getId(),
+                        business.getName(),
+                        resolveLogoUrl(business.getLogoUrl())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<BusinessRefDto> searchByName(String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return List.of();
+        }
+        return businessRepository.searchVisibleByNameStartingWith(prefix.trim(), PageRequest.of(0, 20))
+                .stream()
+                .map(business -> new BusinessRefDto(
+                        business.getId(),
+                        business.getName(),
+                        resolveLogoUrl(business.getLogoUrl())))
                 .toList();
     }
 

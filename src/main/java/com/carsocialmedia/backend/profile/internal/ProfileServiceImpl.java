@@ -399,6 +399,7 @@ class ProfileServiceImpl implements ProfileService {
         prefs.setOrganizedEventsEnabled(request.organizedEventsEnabled());
         prefs.setPriceDropsEnabled(request.priceDropsEnabled());
         prefs.setTagsEnabled(request.tagsEnabled());
+        prefs.setEventOrganizerEnabled(request.eventOrganizerEnabled());
         prefs.setUpdatedAt(Instant.now());
         return notificationPreferencesRepository.save(prefs).toDto();
     }
@@ -411,7 +412,7 @@ class ProfileServiceImpl implements ProfileService {
         // never fails on a vanished recipient.
         return notificationPreferencesRepository.findById(userId)
                 .map(NotificationPreferencesEntity::toDto)
-                .orElseGet(() -> new NotificationPreferencesDto(true, true, true, true, true, true, true, true));
+                .orElseGet(() -> new NotificationPreferencesDto(true, true, true, true, true, true, true, true, true));
     }
 
     // ---- reporting ---------------------------------------------------------

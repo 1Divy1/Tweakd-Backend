@@ -11,6 +11,10 @@ supabase:
   auth:
     issuer: ${supabase.url}/auth/v1
 
+mapbox:
+  # Dummy value; MapboxGeocodingClient is constructed but never called in tests.
+  access-token: test-mapbox-token
+
 cloudflare:
   r2:
     account-id: test-account
@@ -26,6 +30,12 @@ cloudflare:
     avatars:
       bucket: test-avatars-bucket
       public-url: http://localhost:9000/test-avatars-bucket
+    business:
+      bucket: test-business-bucket
+      public-url: http://localhost:9000/test-business-bucket
+    map-events:
+      bucket: test-map-events-bucket
+      public-url: http://localhost:9000/test-map-events-bucket
 
 spring:
   application:

@@ -48,6 +48,8 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: controller, service impl (four-stream merge), cursor
 ├── business/         ← public API: BusinessService, DTOs (map pin / profile / hours / type). Read-only
 │   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, open-now derivation
+├── mapevents/        ← public API: MapEventsService, DTOs, domain events (approval / car / organizer)
+│   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, keyset cursor
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
     └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
@@ -68,7 +70,8 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
   `/ws/**` is also `permitAll` — the real authentication happens at the STOMP CONNECT frame
   (`shared/realtime/JwtChannelInterceptor`, same JWT validation as REST).
 - `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
-  module then applies fine-grained team-role capability checks (`admin_team_members`).
+  module then applies fine-grained team-role capability checks (`admin_team_members`). Approving
+  user-submitted map events is gated on `APPROVE_EVENTS`, held by `owner` and `senior_admin` only.
 - **Staff accounts are separate from app accounts**: dashboard staff are profile-less Supabase auth
   users (the `handle_new_user` trigger skips them), invited by email through the admin module's
   `SupabaseAuthAdminClient` (service-role key). Their identity lives on `admin_team_members`
@@ -107,6 +110,7 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`feed` module](src/main/java/com/carsocialmedia/backend/feed/README.md)
 - [`tags` module](src/main/java/com/carsocialmedia/backend/tags/README.md)
 - [`business` module](src/main/java/com/carsocialmedia/backend/business/README.md)
+- [`mapevents` module](src/main/java/com/carsocialmedia/backend/mapevents/README.md)
 - [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
 - [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
 - [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)

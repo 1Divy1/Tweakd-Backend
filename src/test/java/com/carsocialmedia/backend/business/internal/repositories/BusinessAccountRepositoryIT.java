@@ -19,9 +19,8 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * Real-SQL behaviour of the business tables in a PostGIS container: the {@code ST_DWithin} radius
- * search and its distance ordering, the active+verified visibility filter, and the schema
- * constraints the hardening migration added (one hours row per weekday, hours present iff the day
- * is open).
+ * search, the active+verified visibility filter, and the schema constraints the hardening
+ * migration added (one hours row per weekday, hours present iff the day is open).
  *
  * <p>The radius query is native PostGIS with an interface projection, so it is only ever verified
  * by running it — a mistyped alias or a swapped lat/lng would compile perfectly well.
@@ -90,24 +89,13 @@ class BusinessAccountRepositoryIT extends AbstractPostgresIT {
     }
 
     @Test
-    void ordersResultsNearestFirst() {
-        // ~0.09 degrees of latitude is ~10 km; ~0.045 is ~5 km.
-        visibleBusiness("Middle", CENTRE_LAT + 0.045, CENTRE_LNG);
-        visibleBusiness("Closest", CENTRE_LAT, CENTRE_LNG);
-        visibleBusiness("Furthest", CENTRE_LAT + 0.09, CENTRE_LNG);
-
-        assertThat(nearbyNames(50, null, 100)).containsExactly("Closest", "Middle", "Furthest");
-    }
-
-    @Test
-    void reportsDistanceInKilometresAndCoordinatesInTheRightOrder() {
+    void reportsCoordinatesAndTypeInTheRightShape() {
         visibleBusiness("Here", CENTRE_LAT, CENTRE_LNG);
 
         var row = businessRepository
                 .findVisibleNearby(CENTRE_LAT, CENTRE_LNG, 50_000, null, 100)
                 .getFirst();
 
-        assertThat(row.getDistanceKm()).isCloseTo(0.0, org.assertj.core.data.Offset.offset(0.001));
         // Guards the classic PostGIS bug: lat and lng swapped on the way out.
         assertThat(row.getLat()).isCloseTo(CENTRE_LAT, org.assertj.core.data.Offset.offset(0.0001));
         assertThat(row.getLng()).isCloseTo(CENTRE_LNG, org.assertj.core.data.Offset.offset(0.0001));
@@ -131,7 +119,7 @@ class BusinessAccountRepositoryIT extends AbstractPostgresIT {
         visibleBusiness("B", CENTRE_LAT + 0.01, CENTRE_LNG);
         visibleBusiness("C", CENTRE_LAT + 0.02, CENTRE_LNG);
 
-        assertThat(nearbyNames(50, null, 2)).containsExactly("A", "B");
+        assertThat(nearbyNames(50, null, 2)).hasSize(2);
     }
 
     // ---- visibility ----------------------------------------------------------

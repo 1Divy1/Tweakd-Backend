@@ -20,6 +20,7 @@ public class R2Config {
     private BucketTarget posts;
     private BucketTarget avatars;
     private BucketTarget business;
+    private BucketTarget mapEvents;
 
     /**
      * Resolves a logical bucket to its configured name + public URL. Add a case (and a config
@@ -31,6 +32,7 @@ public class R2Config {
             case POSTS -> posts;
             case AVATARS -> avatars;
             case BUSINESS -> business;
+            case MAP_EVENTS -> mapEvents;
         };
     }
 

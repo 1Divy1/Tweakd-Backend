@@ -43,11 +43,11 @@ class ForumsNotificationListenerTest {
     private ForumsNotificationListener listener;
 
     private static NotificationPreferencesDto allEnabled() {
-        return new NotificationPreferencesDto(true, true, true, true, true, true, true, true);
+        return new NotificationPreferencesDto(true, true, true, true, true, true, true, true, true);
     }
 
     private static NotificationPreferencesDto with(boolean likes, boolean comments) {
-        return new NotificationPreferencesDto(likes, comments, true, true, true, true, true, true);
+        return new NotificationPreferencesDto(likes, comments, true, true, true, true, true, true, true);
     }
 
     @BeforeEach
@@ -56,7 +56,7 @@ class ForumsNotificationListenerTest {
         notificationService = mock(NotificationService.class);
         listener = new ForumsNotificationListener(profileService, notificationService);
         when(profileService.findByIds(anyCollection()))
-                .thenReturn(List.of(new ProfileSearchResultDto(ACTOR, "marius_dev", null)));
+                .thenReturn(List.of(new ProfileSearchResultDto(ACTOR, "Marius", "marius_dev", null)));
     }
 
     @Test

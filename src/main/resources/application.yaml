@@ -5,6 +5,9 @@ supabase:
   auth:
     issuer: ${SUPABASE_URL}/auth/v1
 
+mapbox:
+  access-token: ${MAPBOX_ACCESS_TOKEN}
+
 cloudflare:
   r2:
     account-id: ${CLOUDFLARE_ACCOUNT_ID}
@@ -23,6 +26,9 @@ cloudflare:
     business:
       bucket: ${CLOUDFLARE_BUSINESS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_BUSINESS_BUCKET_URL}
+    map-events:
+      bucket: ${CLOUDFLARE_MAP_EVENTS_BUCKET_NAME}
+      public-url: ${CLOUDFLARE_MAP_EVENTS_BUCKET_URL}
 
 spring:
   application:

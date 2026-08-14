@@ -33,6 +33,16 @@ public interface StorageService {
      * @return one {@code {key, uploadUrl}} slot per requested image
      */
     PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count);
+
+    /**
+     * Issues a presigned PUT URL for a car event's cover image. Follows the same create-then-attach
+     * flow as posts: the event row is created first so its id exists, Flutter uploads the cover
+     * straight to R2, then sends the returned {@code key} back to the events module to persist.
+     *
+     * @param eventId the event the cover belongs to (used to namespace the R2 key)
+     * @return a {@code {key, uploadUrl}} slot
+     */
+    UploadUrlResponse eventCoverUploadUrlRequest(UUID eventId);
     UploadUrlResponse modificationUploadUrlRequest(UUID carId, UUID modId, ModificationPhase phase, FileFormat format);
     ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files);
 

@@ -10,6 +10,12 @@ public enum Capability {
     REVIEW_CONTENT,
     /** Warn, ban, and unban authors. */
     WARN_BAN,
+    /**
+     * Approve, reject and delete user-submitted map events. Deliberately separate from
+     * {@link #REVIEW_CONTENT}: putting an event on the map is a publishing decision, not a
+     * moderation one, and is reserved for owners and senior admins.
+     */
+    APPROVE_EVENTS,
     /** Support tickets and the feedback admin operations. */
     ANSWER_TICKETS,
     /** Process refunds (capability flag only — no billing integration yet). */

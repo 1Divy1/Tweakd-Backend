@@ -387,10 +387,11 @@ class ProfileControllerWebTest {
     @Test
     void searchDelegatesTheQueryAndReturnsSnakeCaseResults() throws Exception {
         when(profileService.searchByUsername("rac"))
-                .thenReturn(List.of(new ProfileSearchResultDto(ID, "racer", "http://a/x.png")));
+                .thenReturn(List.of(new ProfileSearchResultDto(ID, "Race Car Rick", "racer", "http://a/x.png")));
 
         mockMvc.perform(get("/api/v1/profile/search").param("q", "rac").with(TestJwts.user()))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Race Car Rick"))
                 .andExpect(jsonPath("$[0].username").value("racer"))
                 .andExpect(jsonPath("$[0].avatar_url").value("http://a/x.png"));
 
@@ -528,7 +529,7 @@ class ProfileControllerWebTest {
     @Test
     void getNotificationsReturnsSnakeCaseToggles() throws Exception {
         when(profileService.getNotificationPreferences(ID.toString()))
-                .thenReturn(new NotificationPreferencesDto(true, false, true, true, false, true, false, true));
+                .thenReturn(new NotificationPreferencesDto(true, false, true, true, false, true, false, true, true));
 
         mockMvc.perform(get("/api/v1/profile/me/notifications").with(TestJwts.user()))
                 .andExpect(status().isOk())
@@ -541,12 +542,12 @@ class ProfileControllerWebTest {
     @Test
     void updateNotificationsDelegatesTheFullPayload() throws Exception {
         when(profileService.updateNotificationPreferences(eq(ID.toString()), any(NotificationPreferencesRequest.class)))
-                .thenReturn(new NotificationPreferencesDto(true, true, true, true, true, true, true, true));
+                .thenReturn(new NotificationPreferencesDto(true, true, true, true, true, true, true, true, true));
 
         String body = """
                 {"likes_enabled":true,"comments_enabled":true,"shares_enabled":true,"dms_enabled":true,
                  "flash_meets_enabled":true,"organized_events_enabled":true,"price_drops_enabled":true,
-                 "tags_enabled":true}""";
+                 "tags_enabled":true,"event_organizer_enabled":true}""";
 
         mockMvc.perform(put("/api/v1/profile/me/notifications")
                         .with(TestJwts.user())

@@ -125,7 +125,7 @@ class DmsServiceImplTest {
 
     private void recipientExists() {
         when(profileService.findByIds(List.of(PEER)))
-                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "peer", null)));
+                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "Peer Name", "peer", null)));
     }
 
     private static CarSummaryDto car(UUID id) {
@@ -222,7 +222,7 @@ class DmsServiceImplTest {
     void conversationPairIsCanonicalizedRegardlessOfSenderOrder() {
         // Sender is the higher UUID; the pair must still be stored as (PEER=002 lower? no) — verify
         // the arguments passed are min(sender,recipient), max(sender,recipient).
-        when(profileService.findByIds(List.of(SELF))).thenReturn(List.of(new ProfileSearchResultDto(SELF, "s", null)));
+        when(profileService.findByIds(List.of(SELF))).thenReturn(List.of(new ProfileSearchResultDto(SELF, "S Name", "s", null)));
         when(conversationRepository.findByUserAAndUserB(SELF, PEER))
                 .thenReturn(Optional.of(conversation(CONV, SELF, PEER)));
 
@@ -588,7 +588,7 @@ class DmsServiceImplTest {
         st.setUnreadCount(5);
         when(stateRepository.findByConversationIdInAndUserId(List.of(CONV), SELF)).thenReturn(List.of(st));
         when(profileService.findByIds(List.of(PEER)))
-                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "peer", "a.png")));
+                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "Peer Name", "peer", "a.png")));
         when(presenceService.getPresence(List.of(PEER)))
                 .thenReturn(Map.of(PEER, PresenceDto.online(PEER)));
 
@@ -617,7 +617,7 @@ class DmsServiceImplTest {
                 .thenReturn(List.of(first, second));
         when(stateRepository.findByConversationIdInAndUserId(List.of(CONV), SELF)).thenReturn(List.of());
         when(profileService.findByIds(List.of(PEER)))
-                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "peer", null)));
+                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "Peer Name", "peer", null)));
         when(presenceService.getPresence(List.of(PEER)))
                 .thenReturn(Map.of(PEER, PresenceDto.offline(PEER, null)));
 
