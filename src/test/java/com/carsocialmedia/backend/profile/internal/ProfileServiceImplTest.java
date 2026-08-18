@@ -1,8 +1,5 @@
 package com.carsocialmedia.backend.profile.internal;
 
-import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
-import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
-import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.shared.geo.CountryDto;
 import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
@@ -15,28 +12,19 @@ import com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
-import com.carsocialmedia.backend.profile.dto.RoleSelectionRequest;
 import com.carsocialmedia.backend.profile.exception.CannotReportSelfException;
 import com.carsocialmedia.backend.profile.exception.InvalidReferenceException;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
 import com.carsocialmedia.backend.profile.exception.UsernameAlreadyTakenException;
-import com.carsocialmedia.backend.profile.internal.entity.CarCategoryOptionEntity;
 import com.carsocialmedia.backend.shared.geo.CityEntity;
-import com.carsocialmedia.backend.profile.internal.entity.CommunityRoleOptionEntity;
 import com.carsocialmedia.backend.shared.geo.CountryEntity;
 import com.carsocialmedia.backend.profile.internal.entity.LanguageOptionEntity;
 import com.carsocialmedia.backend.profile.internal.entity.NotificationPreferencesEntity;
-import com.carsocialmedia.backend.profile.internal.entity.ProfileCarCategoryEntity;
-import com.carsocialmedia.backend.profile.internal.entity.ProfileCommunityRoleEntity;
 import com.carsocialmedia.backend.profile.internal.entity.ProfileEntity;
-import com.carsocialmedia.backend.profile.internal.repository.CarCategoryOptionRepository;
 import com.carsocialmedia.backend.shared.geo.CityRepository;
-import com.carsocialmedia.backend.profile.internal.repository.CommunityRoleOptionRepository;
 import com.carsocialmedia.backend.shared.geo.CountryRepository;
 import com.carsocialmedia.backend.profile.internal.repository.NotificationPreferencesRepository;
-import com.carsocialmedia.backend.profile.internal.repository.ProfileCarCategoryRepository;
 import com.carsocialmedia.backend.profile.internal.repository.LanguageOptionRepository;
-import com.carsocialmedia.backend.profile.internal.repository.ProfileCommunityRoleRepository;
 import com.carsocialmedia.backend.profile.internal.repository.ProfileRepository;
 import com.carsocialmedia.backend.report.ReportService;
 import com.carsocialmedia.backend.storage.StorageBucket;
@@ -66,10 +54,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * Business rules of {@link ProfileServiceImpl} with mocked repositories/collaborators: own-profile
- * read and not-found mapping, onboarding (username-taken pre-check and DB-race fallback, location +
- * replace-all selections), public lookups and prefix search (blank short-circuit), replace-all
- * car-category / community-role validation, notification-preference lazy defaulting, moderation
- * snapshot + ban/unban cache eviction, location updates, and self-report guarding.
+ * read and not-found mapping, onboarding (username-taken pre-check and DB-race fallback, location),
+ * public lookups and prefix search (blank short-circuit), notification-preference lazy defaulting,
+ * moderation snapshot + ban/unban cache eviction, location updates, and self-report guarding.
  */
 class ProfileServiceImplTest {
 
@@ -80,11 +67,7 @@ class ProfileServiceImplTest {
     private ProfileRepository profileRepository;
     private CountryRepository countryRepository;
     private CityRepository cityRepository;
-    private CommunityRoleOptionRepository communityRoleOptionRepository;
-    private CarCategoryOptionRepository carCategoryOptionRepository;
     private NotificationPreferencesRepository notificationPreferencesRepository;
-    private ProfileCarCategoryRepository profileCarCategoryRepository;
-    private ProfileCommunityRoleRepository profileCommunityRoleRepository;
     private LanguageOptionRepository languageOptionRepository;
     private ReportService reportService;
     private StorageService storageService;
@@ -97,11 +80,7 @@ class ProfileServiceImplTest {
         profileRepository = mock(ProfileRepository.class);
         countryRepository = mock(CountryRepository.class);
         cityRepository = mock(CityRepository.class);
-        communityRoleOptionRepository = mock(CommunityRoleOptionRepository.class);
-        carCategoryOptionRepository = mock(CarCategoryOptionRepository.class);
         notificationPreferencesRepository = mock(NotificationPreferencesRepository.class);
-        profileCarCategoryRepository = mock(ProfileCarCategoryRepository.class);
-        profileCommunityRoleRepository = mock(ProfileCommunityRoleRepository.class);
         languageOptionRepository = mock(LanguageOptionRepository.class);
         reportService = mock(ReportService.class);
         storageService = mock(StorageService.class);
@@ -110,8 +89,7 @@ class ProfileServiceImplTest {
         // http URLs, so publicUrl() is never hit — but the mapper still exercises the real resolution.
         ProfileDtoMapper mapper = new ProfileDtoMapper(storageService);
         service = new ProfileServiceImpl(profileRepository, countryRepository, cityRepository,
-                communityRoleOptionRepository, carCategoryOptionRepository, notificationPreferencesRepository,
-                profileCarCategoryRepository, profileCommunityRoleRepository, languageOptionRepository,
+                notificationPreferencesRepository, languageOptionRepository,
                 reportService, storageService, mapper, banCache);
     }
 
@@ -161,8 +139,8 @@ class ProfileServiceImplTest {
 
     // ---- completeOnboarding -------------------------------------------------
 
-    private OnboardingRequest onboarding(String username, String cityId, List<String> cats, List<String> roles) {
-        return new OnboardingRequest(username, "my bio", cityId, 25, cats, roles);
+    private OnboardingRequest onboarding(String username, String cityId) {
+        return new OnboardingRequest(username, "my bio", cityId, 25);
     }
 
     @Test
@@ -174,20 +152,16 @@ class ProfileServiceImplTest {
         when(profileRepository.findById(USER)).thenReturn(Optional.of(profile));
         when(profileRepository.existsByUsername("newuser")).thenReturn(false);
         when(cityRepository.findById("cluj")).thenReturn(Optional.of(city));
-        when(carCategoryOptionRepository.countByIdIn(List.of("jdm"))).thenReturn(1L);
-        when(communityRoleOptionRepository.countByIdIn(List.of("mechanic"))).thenReturn(1L);
         when(notificationPreferencesRepository.existsById(USER)).thenReturn(false);
 
         ProfileDto dto = service.completeOnboarding(USER_S,
-                onboarding("newuser", "cluj", List.of("jdm"), List.of("mechanic")));
+                onboarding("newuser", "cluj"));
 
         assertThat(dto.username()).isEqualTo("newuser");
         assertThat(profile.getBio()).isEqualTo("my bio");
         assertThat(profile.isRequiresOnboarding()).isFalse();
         assertThat(profile.getDiscoveryRadiusKm()).isEqualTo(25);
         verify(profileRepository).saveAndFlush(profile);
-        verify(profileCarCategoryRepository).deleteByIdProfileId(USER);
-        verify(profileCommunityRoleRepository).deleteByIdProfileId(USER);
         verify(notificationPreferencesRepository).save(any(NotificationPreferencesEntity.class));
     }
 
@@ -198,7 +172,7 @@ class ProfileServiceImplTest {
 
         assertThatExceptionOfType(UsernameAlreadyTakenException.class)
                 .isThrownBy(() -> service.completeOnboarding(USER_S,
-                        onboarding("newuser", "cluj", List.of(), List.of())));
+                        onboarding("newuser", "cluj")));
 
         verify(profileRepository, never()).saveAndFlush(any());
     }
@@ -212,7 +186,7 @@ class ProfileServiceImplTest {
 
         assertThatExceptionOfType(UsernameAlreadyTakenException.class)
                 .isThrownBy(() -> service.completeOnboarding(USER_S,
-                        onboarding("newuser", "cluj", List.of(), List.of())));
+                        onboarding("newuser", "cluj")));
     }
 
     @Test
@@ -223,19 +197,7 @@ class ProfileServiceImplTest {
 
         assertThatExceptionOfType(InvalidReferenceException.class)
                 .isThrownBy(() -> service.completeOnboarding(USER_S,
-                        onboarding("newuser", "nowhere", List.of(), List.of())));
-    }
-
-    @Test
-    void completeOnboardingRejectsUnknownCarCategory() {
-        when(profileRepository.findById(USER)).thenReturn(Optional.of(profileWithCity()));
-        when(profileRepository.existsByUsername("newuser")).thenReturn(false);
-        when(cityRepository.findById("cluj")).thenReturn(Optional.of(cityCluj()));
-        when(carCategoryOptionRepository.countByIdIn(List.of("bogus"))).thenReturn(0L);
-
-        assertThatExceptionOfType(InvalidReferenceException.class)
-                .isThrownBy(() -> service.completeOnboarding(USER_S,
-                        onboarding("newuser", "cluj", List.of("bogus"), List.of())));
+                        onboarding("newuser", "nowhere")));
     }
 
     @Test
@@ -244,7 +206,7 @@ class ProfileServiceImplTest {
 
         assertThatExceptionOfType(ProfileNotFoundException.class)
                 .isThrownBy(() -> service.completeOnboarding(USER_S,
-                        onboarding("newuser", "cluj", List.of(), List.of())));
+                        onboarding("newuser", "cluj")));
     }
 
     private CityEntity cityCluj() {
@@ -470,82 +432,6 @@ class ProfileServiceImplTest {
                 .isThrownBy(() -> service.updateRealtimeLocation(USER_S, new RealtimeLocationRequest(1.0, 2.0)));
     }
 
-    // ---- car categories (replace-all) ---------------------------------------
-
-    @Test
-    void setCarCategoriesRequiresProfileToExist() {
-        when(profileRepository.existsById(USER)).thenReturn(false);
-
-        assertThatExceptionOfType(ProfileNotFoundException.class)
-                .isThrownBy(() -> service.setCarCategories(USER_S, new CategorySelectionRequest(List.of("jdm"))));
-        verify(profileCarCategoryRepository, never()).deleteByIdProfileId(any());
-    }
-
-    @Test
-    void setCarCategoriesReplacesTheSelectionAndReturnsCurrent() {
-        when(profileRepository.existsById(USER)).thenReturn(true);
-        when(carCategoryOptionRepository.countByIdIn(List.of("jdm"))).thenReturn(1L);
-        when(profileCarCategoryRepository.findByIdProfileId(USER)).thenReturn(List.of());
-        when(carCategoryOptionRepository.findAllById(anyList())).thenReturn(List.of());
-
-        service.setCarCategories(USER_S, new CategorySelectionRequest(List.of("jdm", "jdm")));
-
-        ArgumentCaptor<List<ProfileCarCategoryEntity>> saved = ArgumentCaptor.forClass(List.class);
-        verify(profileCarCategoryRepository).deleteByIdProfileId(USER);
-        verify(profileCarCategoryRepository).saveAll(saved.capture());
-        // duplicate "jdm" is de-duplicated to a single junction row
-        assertThat(saved.getValue()).hasSize(1);
-    }
-
-    @Test
-    void setCarCategoriesRejectsUnknownIds() {
-        when(profileRepository.existsById(USER)).thenReturn(true);
-        when(carCategoryOptionRepository.countByIdIn(List.of("bogus"))).thenReturn(0L);
-
-        assertThatExceptionOfType(InvalidReferenceException.class)
-                .isThrownBy(() -> service.setCarCategories(USER_S, new CategorySelectionRequest(List.of("bogus"))));
-    }
-
-    @Test
-    void getCarCategoriesHydratesTheStoredIds() {
-        ProfileCarCategoryEntity row = new ProfileCarCategoryEntity(
-                new com.carsocialmedia.backend.profile.internal.entity.ProfileCarCategoryId(USER, "jdm"));
-        CarCategoryOptionEntity opt = new CarCategoryOptionEntity();
-        opt.setId("jdm");
-        opt.setName("JDM");
-        when(profileCarCategoryRepository.findByIdProfileId(USER)).thenReturn(List.of(row));
-        when(carCategoryOptionRepository.findAllById(List.of("jdm"))).thenReturn(List.of(opt));
-
-        List<CarCategoryDto> cats = service.getCarCategories(USER_S);
-
-        assertThat(cats).containsExactly(new CarCategoryDto("jdm", "JDM"));
-    }
-
-    // ---- community roles (replace-all) --------------------------------------
-
-    @Test
-    void setCommunityRolesRequiresProfileToExist() {
-        when(profileRepository.existsById(USER)).thenReturn(false);
-
-        assertThatExceptionOfType(ProfileNotFoundException.class)
-                .isThrownBy(() -> service.setCommunityRoles(USER_S, new RoleSelectionRequest(List.of("mechanic"))));
-    }
-
-    @Test
-    void getCommunityRolesHydratesTheStoredIds() {
-        ProfileCommunityRoleEntity row = new ProfileCommunityRoleEntity(
-                new com.carsocialmedia.backend.profile.internal.entity.ProfileCommunityRoleId(USER, "mechanic"));
-        CommunityRoleOptionEntity opt = new CommunityRoleOptionEntity();
-        opt.setId("mechanic");
-        opt.setName("Mechanic");
-        when(profileCommunityRoleRepository.findByIdProfileId(USER)).thenReturn(List.of(row));
-        when(communityRoleOptionRepository.findAllById(List.of("mechanic"))).thenReturn(List.of(opt));
-
-        List<CommunityRoleDto> roles = service.getCommunityRoles(USER_S);
-
-        assertThat(roles).containsExactly(new CommunityRoleDto("mechanic", "Mechanic"));
-    }
-
     // ---- notification preferences -------------------------------------------
 
     @Test
@@ -572,7 +458,7 @@ class ProfileServiceImplTest {
         NotificationPreferencesDto dto = service.getNotificationPreferences(USER_S);
 
         assertThat(dto.likesEnabled()).isTrue();
-        assertThat(dto.priceDropsEnabled()).isTrue();
+        assertThat(dto.serviceRemindersEnabled()).isTrue();
         verify(notificationPreferencesRepository).save(any(NotificationPreferencesEntity.class));
     }
 
@@ -629,7 +515,7 @@ class ProfileServiceImplTest {
 
         assertThat(dto.likesEnabled()).isFalse();
         assertThat(dto.sharesEnabled()).isTrue();
-        assertThat(dto.priceDropsEnabled()).isFalse();
+        assertThat(dto.serviceRemindersEnabled()).isFalse();
         assertThat(prefs.getUpdatedAt()).isNotNull();
     }
 

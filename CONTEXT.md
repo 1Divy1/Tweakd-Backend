@@ -50,6 +50,8 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, open-now derivation
 ├── mapevents/        ← public API: MapEventsService, DTOs, domain events (approval / car / organizer)
 │   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, keyset cursor
+├── feedbackfeed/     ← public API: FeedbackFeedService, DTOs. The in-app community feedback board
+│   └── internal/     ← private: controller, service impl, entities, repositories, dual-shape keyset cursor
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
     └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
@@ -71,7 +73,9 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
   (`shared/realtime/JwtChannelInterceptor`, same JWT validation as REST).
 - `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
   module then applies fine-grained team-role capability checks (`admin_team_members`). Approving
-  user-submitted map events is gated on `APPROVE_EVENTS`, held by `owner` and `senior_admin` only.
+  user-submitted map events is gated on `APPROVE_EVENTS`, and managing the community feedback feed
+  (roadmap status, official response, removal) on `MANAGE_ROADMAP` — both held by `owner` and
+  `senior_admin` only.
 - **Staff accounts are separate from app accounts**: dashboard staff are profile-less Supabase auth
   users (the `handle_new_user` trigger skips them), invited by email through the admin module's
   `SupabaseAuthAdminClient` (service-role key). Their identity lives on `admin_team_members`
@@ -114,6 +118,7 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
 - [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
 - [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)
+- [`feedbackfeed` module](src/main/java/com/carsocialmedia/backend/feedbackfeed/README.md)
 - [`notification` module](src/main/java/com/carsocialmedia/backend/notification/README.md)
 - [`support` module](src/main/java/com/carsocialmedia/backend/support/README.md)
 - [`dms` module](src/main/java/com/carsocialmedia/backend/dms/README.md)

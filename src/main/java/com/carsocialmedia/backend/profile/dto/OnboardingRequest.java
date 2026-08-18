@@ -3,18 +3,15 @@ package com.carsocialmedia.backend.profile.dto;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-import java.util.List;
-
 /**
- * First-time onboarding payload. The username, city, discovery radius, favorite car
- * categories and community roles are all required; only the bio is optional. The
- * region and country are derived from the selected {@code cityId} (each city belongs
- * to exactly one region, and each region to one country), so they are not sent here.
+ * First-time onboarding payload. The username, city, and discovery radius are all
+ * required; only the bio is optional. The region and country are derived from the
+ * selected {@code cityId} (each city belongs to exactly one region, and each region
+ * to one country), so they are not sent here.
  */
 public record OnboardingRequest(
 
@@ -32,23 +29,11 @@ public record OnboardingRequest(
         @NotNull
         @Min(value = 1, message = "Discovery radius must be between 1 and 100 km")
         @Max(value = 100, message = "Discovery radius must be between 1 and 100 km")
-        Integer discoveryRadiusKm,
-
-        @NotEmpty
-        List<String> categoryIds,
-
-        @NotEmpty
-        List<String> roleIds
+        Integer discoveryRadiusKm
 ) {
         public OnboardingRequest {
                 if (bio == null) {
                         bio = "";
-                }
-                if (categoryIds == null) {
-                        categoryIds = List.of();
-                }
-                if (roleIds == null) {
-                        roleIds = List.of();
                 }
         }
 }

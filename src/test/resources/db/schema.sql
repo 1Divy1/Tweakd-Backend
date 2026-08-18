@@ -787,6 +787,163 @@ end $$;
 
 
 --
+-- Name: trg_feedback_feed_block_completed_votes(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_feedback_feed_block_completed_votes() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+    msg_status text;
+    target_message_id uuid;
+begin
+    target_message_id := coalesce(NEW.message_id, OLD.message_id);
+
+    select status into msg_status
+    from feedback_feed_messages
+    where id = target_message_id;
+
+    if msg_status = 'completed' then
+        if TG_OP = 'DELETE' then
+            raise exception 'Cannot remove a vote from a completed feedback message';
+        else
+            raise exception 'Cannot vote on a completed feedback message';
+        end if;
+    end if;
+
+    if TG_OP = 'DELETE' then
+        return OLD;
+    else
+        return NEW;
+    end if;
+end;
+$$;
+
+
+--
+-- Name: trg_feedback_feed_notify_author_status_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_feedback_feed_notify_author_status_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+    new_status_label text;
+begin
+    if NEW.status is distinct from OLD.status then
+        select status into new_status_label
+        from feedback_feed_status_options
+        where id = NEW.status;
+
+        insert into notifications (user_id, type, title, body, payload)
+        values (
+            NEW.author_id,
+            'feedback_status_changed',
+            'Your feedback status has been updated !',
+            'Your feedback status is now: ' || coalesce(new_status_label, NEW.status),
+            jsonb_build_object(
+                'message_id', NEW.id,
+                'old_status', OLD.status,
+                'new_status', NEW.status
+            )
+        );
+    end if;
+
+    return NEW;
+end;
+$$;
+
+
+--
+-- Name: trg_feedback_feed_stamp_completed_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_feedback_feed_stamp_completed_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+    if TG_OP = 'INSERT' then
+        if NEW.status = 'completed' and NEW.completed_at is null then
+            NEW.completed_at := now();
+        elsif NEW.status <> 'completed' then
+            NEW.completed_at := null;
+        end if;
+        return NEW;
+    end if;
+
+    if NEW.status is distinct from OLD.status then
+        if NEW.status = 'completed' then
+            NEW.completed_at := now();
+        else
+            NEW.completed_at := null;
+        end if;
+    end if;
+    return NEW;
+end;
+$$;
+
+
+--
+-- Name: trg_feedback_feed_update_vote_counts(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_feedback_feed_update_vote_counts() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+    if TG_OP = 'INSERT' then
+        if NEW.vote_type = 1 then
+            update feedback_feed_messages
+            set up_votes = up_votes + 1,
+                net_votes = net_votes + 1
+            where id = NEW.message_id;
+        else
+            update feedback_feed_messages
+            set down_votes = down_votes + 1,
+                net_votes = net_votes - 1
+            where id = NEW.message_id;
+        end if;
+        return NEW;
+
+    elsif TG_OP = 'UPDATE' then
+        if OLD.vote_type <> NEW.vote_type then
+            if NEW.vote_type = 1 then
+                update feedback_feed_messages
+                set up_votes = up_votes + 1,
+                    down_votes = down_votes - 1,
+                    net_votes = net_votes + 2
+                where id = NEW.message_id;
+            else
+                update feedback_feed_messages
+                set down_votes = down_votes + 1,
+                    up_votes = up_votes - 1,
+                    net_votes = net_votes - 2
+                where id = NEW.message_id;
+            end if;
+        end if;
+        return NEW;
+
+    elsif TG_OP = 'DELETE' then
+        if OLD.vote_type = 1 then
+            update feedback_feed_messages
+            set up_votes = up_votes - 1,
+                net_votes = net_votes - 1
+            where id = OLD.message_id;
+        else
+            update feedback_feed_messages
+            set down_votes = down_votes - 1,
+                net_votes = net_votes + 1
+            where id = OLD.message_id;
+        end if;
+        return OLD;
+    end if;
+
+    return null;
+end;
+$$;
+
+
+--
 -- Name: update_car_event_attendees_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1146,16 +1303,6 @@ CREATE TABLE public.car_brands (
 --
 
 COMMENT ON TABLE public.car_brands IS 'A list of predefined car brands that a user can select from (to avoid manual entries).';
-
-
---
--- Name: car_category_options; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.car_category_options (
-    id text NOT NULL,
-    name text NOT NULL
-);
 
 
 --
@@ -1863,23 +2010,6 @@ COMMENT ON COLUMN public.comments.reply_count IS 'The number of child comments h
 
 
 --
--- Name: community_role_options; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.community_role_options (
-    id text NOT NULL,
-    name text NOT NULL
-);
-
-
---
--- Name: TABLE community_role_options; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.community_role_options IS 'Configured at onboarding. Can be changed after. Describes what role(s) a user can have in the app - IMPORTANT: not what type of privilleges (eg: moderator, admin) has; that''s a different table';
-
-
---
 -- Name: countries; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2088,6 +2218,104 @@ CREATE TABLE public.feedback_feature_options (
 --
 
 COMMENT ON TABLE public.feedback_feature_options IS '(Reference table) - For what feature do we write a feedback';
+
+
+--
+-- Name: feedback_feed_feedback_types; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.feedback_feed_feedback_types (
+    id text NOT NULL,
+    type text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE feedback_feed_feedback_types; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.feedback_feed_feedback_types IS 'What type of feedback is it (eg: bug / feature request / feature improvement)';
+
+
+--
+-- Name: feedback_feed_messages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.feedback_feed_messages (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    author_id uuid NOT NULL,
+    message text NOT NULL,
+    up_votes integer DEFAULT 0 NOT NULL,
+    down_votes integer DEFAULT 0 NOT NULL,
+    is_deleted boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    type text NOT NULL,
+    status text DEFAULT 'sent'::text NOT NULL,
+    net_votes integer DEFAULT 0 NOT NULL,
+    staff_response_message text,
+    completed_at timestamp with time zone
+);
+
+
+--
+-- Name: TABLE feedback_feed_messages; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.feedback_feed_messages IS 'A suggestion message shared in the feedback feed by a user. It can be voted by other users.';
+
+
+--
+-- Name: COLUMN feedback_feed_messages.type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.feedback_feed_messages.type IS 'What type of feedback is it';
+
+
+--
+-- Name: COLUMN feedback_feed_messages.staff_response_message; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.feedback_feed_messages.staff_response_message IS '(Optional): Message from the staff members, about the feedback suggestion.';
+
+
+--
+-- Name: COLUMN feedback_feed_messages.completed_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.feedback_feed_messages.completed_at IS 'When status last became ''completed''. Stamped/cleared by trg_feedback_feed_stamp_completed_at; never written by the app.';
+
+
+--
+-- Name: feedback_feed_status_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.feedback_feed_status_options (
+    id text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE feedback_feed_status_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.feedback_feed_status_options IS '(Reference table) All possible states for a feed feedback post';
+
+
+--
+-- Name: feedback_feed_votes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.feedback_feed_votes (
+    user_id uuid NOT NULL,
+    message_id uuid NOT NULL,
+    vote_type smallint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT feedback_feed_votes_vote_type_check CHECK ((vote_type = ANY (ARRAY['-1'::integer, 1])))
+);
 
 
 --
@@ -2548,7 +2776,6 @@ CREATE TABLE public.notification_preferences (
     shares_enabled boolean DEFAULT true NOT NULL,
     dms_enabled boolean DEFAULT true NOT NULL,
     flash_meets_enabled boolean DEFAULT true NOT NULL,
-    price_drops_enabled boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     organized_events_enabled boolean NOT NULL,
     tags_enabled boolean DEFAULT true NOT NULL,
@@ -2766,40 +2993,6 @@ CREATE TABLE public.price_currencies_options (
 --
 
 COMMENT ON TABLE public.price_currencies_options IS 'A predefined set of currencies. Used when adding a new mod with its price (for example)';
-
-
---
--- Name: profile_car_categories_junction; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.profile_car_categories_junction (
-    profile_id uuid NOT NULL,
-    category_id text NOT NULL
-);
-
-
---
--- Name: TABLE profile_car_categories_junction; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.profile_car_categories_junction IS 'When the user onboards in the app, they can choose their favorite car brands - this is why this table exists.';
-
-
---
--- Name: profile_community_roles_junction; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.profile_community_roles_junction (
-    profile_id uuid NOT NULL,
-    role_id text NOT NULL
-);
-
-
---
--- Name: TABLE profile_community_roles_junction; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.profile_community_roles_junction IS 'The join table between a user and their role(s) in the app';
 
 
 --
@@ -3409,13 +3602,6 @@ ALTER TABLE ONLY public.car_brands
     ADD CONSTRAINT car_brands_pkey PRIMARY KEY (id);
 
 
---
--- Name: car_category_options car_category_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_category_options
-    ADD CONSTRAINT car_category_options_pkey PRIMARY KEY (id);
-
 
 --
 -- Name: car_color_options car_color_options_color_code_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3689,13 +3875,6 @@ ALTER TABLE ONLY public.comments
     ADD CONSTRAINT comments_pkey PRIMARY KEY (id);
 
 
---
--- Name: community_role_options community_role_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.community_role_options
-    ADD CONSTRAINT community_role_options_pkey PRIMARY KEY (id);
-
 
 --
 -- Name: countries countries_name_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3799,6 +3978,38 @@ ALTER TABLE ONLY public.feedback_feature_options
 
 ALTER TABLE ONLY public.feedback_feature_options
     ADD CONSTRAINT feedback_feature_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: feedback_feed_feedback_types feedback_feed_feedback_types_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_feedback_types
+    ADD CONSTRAINT feedback_feed_feedback_types_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: feedback_feed_messages feedback_feed_message_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_messages
+    ADD CONSTRAINT feedback_feed_message_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: feedback_feed_status_options feedback_feed_status_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_status_options
+    ADD CONSTRAINT feedback_feed_status_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: feedback_feed_votes feedback_feed_votes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_votes
+    ADD CONSTRAINT feedback_feed_votes_pkey PRIMARY KEY (user_id, message_id);
 
 
 --
@@ -4097,20 +4308,6 @@ ALTER TABLE ONLY public.price_currencies_options
     ADD CONSTRAINT price_currencies_options_pkey PRIMARY KEY (id);
 
 
---
--- Name: profile_car_categories_junction profile_car_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_car_categories_junction
-    ADD CONSTRAINT profile_car_categories_pkey PRIMARY KEY (profile_id, category_id);
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_community_roles_junction
-    ADD CONSTRAINT profile_community_roles_pkey PRIMARY KEY (profile_id, role_id);
 
 
 --
@@ -4293,6 +4490,13 @@ CREATE INDEX car_event_attendees_list_status_idx ON public.car_event_attendees_l
 
 
 --
+-- Name: car_event_organizers_individual_organizer_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_organizers_individual_organizer_id_idx ON public.car_event_organizers USING btree (individual_organizer_id);
+
+
+--
 -- Name: car_event_organizers_one_creator; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4318,6 +4522,13 @@ CREATE UNIQUE INDEX car_event_organizers_unique_individual ON public.car_event_o
 --
 
 CREATE INDEX car_event_participants_owner_id_idx ON public.car_event_participants USING btree (owner_id);
+
+
+--
+-- Name: car_events_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_events_created_at_idx ON public.car_events USING btree (created_at);
 
 
 --
@@ -4381,6 +4592,13 @@ CREATE INDEX dream_cars_profile_id_idx ON public.dream_cars USING btree (profile
 --
 
 CREATE INDEX feedback_comments_feedback_idx ON public.feedback_comments USING btree (feedback_id, created_at DESC);
+
+
+--
+-- Name: feedback_status_options_sort_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX feedback_status_options_sort_order_idx ON public.feedback_status_options USING btree (sort_order);
 
 
 --
@@ -4542,6 +4760,41 @@ CREATE INDEX idx_comments_user_id ON public.comments USING btree (user_id);
 --
 
 CREATE INDEX idx_dm_message_car_tags_car ON public.dm_message_car_tags USING btree (car_id);
+
+
+--
+-- Name: idx_feedback_feed_messages_active_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_feedback_feed_messages_active_created ON public.feedback_feed_messages USING btree (created_at DESC, id DESC) WHERE (status <> 'completed'::text);
+
+
+--
+-- Name: idx_feedback_feed_messages_completed_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_feedback_feed_messages_completed_created ON public.feedback_feed_messages USING btree (created_at DESC, id DESC) WHERE (status = 'completed'::text);
+
+
+--
+-- Name: idx_feedback_feed_messages_completed_shipped; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_feedback_feed_messages_completed_shipped ON public.feedback_feed_messages USING btree (completed_at DESC, id DESC) WHERE (status = 'completed'::text);
+
+
+--
+-- Name: idx_feedback_feed_messages_popular; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_feedback_feed_messages_popular ON public.feedback_feed_messages USING btree (net_votes DESC, id DESC) WHERE (status <> 'completed'::text);
+
+
+--
+-- Name: idx_feedback_feed_votes_message; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_feedback_feed_votes_message ON public.feedback_feed_votes USING btree (message_id);
 
 
 --
@@ -4857,6 +5110,34 @@ CREATE TRIGGER comment_reports_case AFTER INSERT ON public.comment_reports FOR E
 --
 
 CREATE TRIGGER feedback_comments_count AFTER INSERT OR DELETE ON public.feedback_comments FOR EACH ROW EXECUTE FUNCTION public.bump_feedback_comment_count();
+
+
+--
+-- Name: feedback_feed_messages feedback_feed_messages_notify_author_trg; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER feedback_feed_messages_notify_author_trg AFTER UPDATE OF status ON public.feedback_feed_messages FOR EACH ROW EXECUTE FUNCTION public.trg_feedback_feed_notify_author_status_change();
+
+
+--
+-- Name: feedback_feed_messages feedback_feed_messages_stamp_completed_at_trg; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER feedback_feed_messages_stamp_completed_at_trg BEFORE INSERT OR UPDATE OF status ON public.feedback_feed_messages FOR EACH ROW EXECUTE FUNCTION public.trg_feedback_feed_stamp_completed_at();
+
+
+--
+-- Name: feedback_feed_votes feedback_feed_votes_block_completed_trg; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER feedback_feed_votes_block_completed_trg BEFORE INSERT OR DELETE OR UPDATE ON public.feedback_feed_votes FOR EACH ROW EXECUTE FUNCTION public.trg_feedback_feed_block_completed_votes();
+
+
+--
+-- Name: feedback_feed_votes feedback_feed_votes_counts_trg; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER feedback_feed_votes_counts_trg AFTER INSERT OR DELETE OR UPDATE ON public.feedback_feed_votes FOR EACH ROW EXECUTE FUNCTION public.trg_feedback_feed_update_vote_counts();
 
 
 --
@@ -5604,6 +5885,46 @@ ALTER TABLE ONLY public.feedback
 
 
 --
+-- Name: feedback_feed_messages feedback_feed_message_author_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_messages
+    ADD CONSTRAINT feedback_feed_message_author_id_fkey FOREIGN KEY (author_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: feedback_feed_messages feedback_feed_message_type_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_messages
+    ADD CONSTRAINT feedback_feed_message_type_fkey FOREIGN KEY (type) REFERENCES public.feedback_feed_feedback_types(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: feedback_feed_messages feedback_feed_messages_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_messages
+    ADD CONSTRAINT feedback_feed_messages_status_fkey FOREIGN KEY (status) REFERENCES public.feedback_feed_status_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: feedback_feed_votes feedback_feed_votes_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_votes
+    ADD CONSTRAINT feedback_feed_votes_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.feedback_feed_messages(id) ON DELETE CASCADE;
+
+
+--
+-- Name: feedback_feed_votes feedback_feed_votes_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feedback_feed_votes
+    ADD CONSTRAINT feedback_feed_votes_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: feedback feedback_status_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6051,36 +6372,6 @@ ALTER TABLE ONLY public.posts
     ADD CONSTRAINT posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
---
--- Name: profile_car_categories_junction profile_car_categories_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_car_categories_junction
-    ADD CONSTRAINT profile_car_categories_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.car_category_options(id);
-
-
---
--- Name: profile_car_categories_junction profile_car_categories_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_car_categories_junction
-    ADD CONSTRAINT profile_car_categories_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_community_roles_junction
-    ADD CONSTRAINT profile_community_roles_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_community_roles_junction
-    ADD CONSTRAINT profile_community_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.community_role_options(id);
 
 
 --
@@ -6276,19 +6567,7 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_category_options Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: cities Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: community_role_options Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
 --
 
 
@@ -6420,11 +6699,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 -- Name: car_brands car_brands_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
-
-
---
--- Name: car_category_options; Type: ROW SECURITY; Schema: public; Owner: -
---
 
 
 --
@@ -6737,11 +7011,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: community_role_options; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
 -- Name: countries; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -6807,6 +7076,26 @@ ALTER TABLE ONLY public.vehicle_history_entries
 -- Name: feedback_feature_options feedback_feature_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
+
+
+--
+-- Name: feedback_feed_feedback_types; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: feedback_feed_messages; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: feedback_feed_status_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: feedback_feed_votes; Type: ROW SECURITY; Schema: public; Owner: -
+--
 
 
 --
@@ -7176,28 +7465,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: price_currencies_options price_currencies_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profile_car_categories_junction; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: profile_car_categories_junction profile_car_categories_junction_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profile_community_roles_junction; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_junction_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
 
