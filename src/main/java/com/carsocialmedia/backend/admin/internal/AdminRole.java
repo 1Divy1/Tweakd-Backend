@@ -20,6 +20,9 @@ enum AdminRole {
     // event to the map is an owner / senior-admin decision.
     content_moderator(EnumSet.of(Capability.REVIEW_CONTENT, Capability.WARN_BAN)),
 
+    // Note: no MANAGE_ROADMAP — ANSWER_TICKETS covers the older feedback board and support tickets,
+    // but committing the community feed to "in development" or "shipped" is an owner / senior-admin
+    // decision.
     support_agent(EnumSet.of(Capability.ANSWER_TICKETS)),
 
     technical(EnumSet.of(Capability.VIEW_ANALYTICS));

@@ -1,10 +1,7 @@
 package com.carsocialmedia.backend.profile.internal;
 
 import com.carsocialmedia.backend.profile.ProfileService;
-import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
-import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
 import com.carsocialmedia.backend.shared.geo.CityDto;
-import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.shared.geo.CountryDto;
 import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
@@ -17,7 +14,6 @@ import com.carsocialmedia.backend.profile.dto.ProfileModerationSnapshotDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
-import com.carsocialmedia.backend.profile.dto.RoleSelectionRequest;
 import com.carsocialmedia.backend.profile.exception.CannotReportSelfException;
 import com.carsocialmedia.backend.profile.exception.InvalidReferenceException;
 import com.carsocialmedia.backend.profile.exception.ProfileNotFoundException;
@@ -50,11 +46,7 @@ class ProfileServiceImpl implements ProfileService {
     private final ProfileRepository profileRepository;
     private final CountryRepository countryRepository;
     private final CityRepository cityRepository;
-    private final CommunityRoleOptionRepository communityRoleOptionRepository;
-    private final CarCategoryOptionRepository carCategoryOptionRepository;
     private final NotificationPreferencesRepository notificationPreferencesRepository;
-    private final ProfileCarCategoryRepository profileCarCategoryRepository;
-    private final ProfileCommunityRoleRepository profileCommunityRoleRepository;
     private final LanguageOptionRepository languageOptionRepository;
     private final ReportService reportService;
     private final StorageService storageService;
@@ -64,11 +56,7 @@ class ProfileServiceImpl implements ProfileService {
     ProfileServiceImpl(ProfileRepository profileRepository,
                        CountryRepository countryRepository,
                        CityRepository cityRepository,
-                       CommunityRoleOptionRepository communityRoleOptionRepository,
-                       CarCategoryOptionRepository carCategoryOptionRepository,
                        NotificationPreferencesRepository notificationPreferencesRepository,
-                       ProfileCarCategoryRepository profileCarCategoryRepository,
-                       ProfileCommunityRoleRepository profileCommunityRoleRepository,
                        LanguageOptionRepository languageOptionRepository,
                        ReportService reportService,
                        StorageService storageService,
@@ -77,11 +65,7 @@ class ProfileServiceImpl implements ProfileService {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
         this.cityRepository = cityRepository;
-        this.communityRoleOptionRepository = communityRoleOptionRepository;
-        this.carCategoryOptionRepository = carCategoryOptionRepository;
         this.notificationPreferencesRepository = notificationPreferencesRepository;
-        this.profileCarCategoryRepository = profileCarCategoryRepository;
-        this.profileCommunityRoleRepository = profileCommunityRoleRepository;
         this.languageOptionRepository = languageOptionRepository;
         this.reportService = reportService;
         this.storageService = storageService;
@@ -127,8 +111,6 @@ class ProfileServiceImpl implements ProfileService {
             throw new UsernameAlreadyTakenException(request.username());
         }
 
-        replaceCarCategories(id, request.categoryIds());
-        replaceCommunityRoles(id, request.roleIds());
         ensureDefaultNotificationPreferences(id);
 
         return mapper.toDto(profile);
@@ -272,20 +254,6 @@ class ProfileServiceImpl implements ProfileService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<CommunityRoleDto> listCommunityRoles() {
-        return communityRoleOptionRepository.findAllByOrderByNameAsc()
-                .stream().map(CommunityRoleOptionEntity::toDto).toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<CarCategoryDto> listCarCategories() {
-        return carCategoryOptionRepository.findAllByOrderByNameAsc()
-                .stream().map(CarCategoryOptionEntity::toDto).toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
     public List<LanguageOptionDto> listLanguageOptions() {
         return languageOptionRepository.findAllByOrderByLanguageAsc()
                 .stream().map(LanguageOptionEntity::toDto).toList();
@@ -328,46 +296,6 @@ class ProfileServiceImpl implements ProfileService {
         profileRepository.save(profile);
     }
 
-    // ---- favorite car categories -------------------------------------------
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<CarCategoryDto> getCarCategories(String userId) {
-        List<String> ids = profileCarCategoryRepository.findByIdProfileId(UUID.fromString(userId))
-                .stream().map(e -> e.getId().getCategoryId()).toList();
-        return carCategoryOptionRepository.findAllById(ids)
-                .stream().map(CarCategoryOptionEntity::toDto).toList();
-    }
-
-    @Override
-    @Transactional
-    public List<CarCategoryDto> setCarCategories(String userId, CategorySelectionRequest request) {
-        UUID id = UUID.fromString(userId);
-        requireProfile(id, userId);
-        replaceCarCategories(id, request.categoryIds());
-        return getCarCategories(userId);
-    }
-
-    // ---- community roles ---------------------------------------------------
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<CommunityRoleDto> getCommunityRoles(String userId) {
-        List<String> ids = profileCommunityRoleRepository.findByIdProfileId(UUID.fromString(userId))
-                .stream().map(e -> e.getId().getRoleId()).toList();
-        return communityRoleOptionRepository.findAllById(ids)
-                .stream().map(CommunityRoleOptionEntity::toDto).toList();
-    }
-
-    @Override
-    @Transactional
-    public List<CommunityRoleDto> setCommunityRoles(String userId, RoleSelectionRequest request) {
-        UUID id = UUID.fromString(userId);
-        requireProfile(id, userId);
-        replaceCommunityRoles(id, request.roleIds());
-        return getCommunityRoles(userId);
-    }
-
     // ---- notification preferences ------------------------------------------
 
     @Override
@@ -397,7 +325,7 @@ class ProfileServiceImpl implements ProfileService {
         prefs.setDmsEnabled(request.dmsEnabled());
         prefs.setFlashMeetsEnabled(request.flashMeetsEnabled());
         prefs.setOrganizedEventsEnabled(request.organizedEventsEnabled());
-        prefs.setPriceDropsEnabled(request.priceDropsEnabled());
+        prefs.setServiceRemindersEnabled(request.serviceRemindersEnabled());
         prefs.setTagsEnabled(request.tagsEnabled());
         prefs.setEventOrganizerEnabled(request.eventOrganizerEnabled());
         prefs.setUpdatedAt(Instant.now());
@@ -442,32 +370,6 @@ class ProfileServiceImpl implements ProfileService {
         if (radius != null) {
             profile.setDiscoveryRadiusKm(radius);
         }
-    }
-
-    private void replaceCarCategories(UUID profileId, List<String> categoryIds) {
-        List<String> distinct = categoryIds.stream().distinct().toList();
-        if (!distinct.isEmpty() && carCategoryOptionRepository.countByIdIn(distinct) != distinct.size()) {
-            throw new InvalidReferenceException("One or more car category IDs are invalid");
-        }
-        profileCarCategoryRepository.deleteByIdProfileId(profileId);
-        profileCarCategoryRepository.flush();
-        profileCarCategoryRepository.saveAll(
-                distinct.stream()
-                        .map(cid -> new ProfileCarCategoryEntity(new ProfileCarCategoryId(profileId, cid)))
-                        .toList());
-    }
-
-    private void replaceCommunityRoles(UUID profileId, List<String> roleIds) {
-        List<String> distinct = roleIds.stream().distinct().toList();
-        if (!distinct.isEmpty() && communityRoleOptionRepository.countByIdIn(distinct) != distinct.size()) {
-            throw new InvalidReferenceException("One or more community role IDs are invalid");
-        }
-        profileCommunityRoleRepository.deleteByIdProfileId(profileId);
-        profileCommunityRoleRepository.flush();
-        profileCommunityRoleRepository.saveAll(
-                distinct.stream()
-                        .map(rid -> new ProfileCommunityRoleEntity(new ProfileCommunityRoleId(profileId, rid)))
-                        .toList());
     }
 
     private void ensureDefaultNotificationPreferences(UUID profileId) {

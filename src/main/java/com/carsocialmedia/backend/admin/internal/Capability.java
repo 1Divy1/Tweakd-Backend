@@ -18,6 +18,14 @@ public enum Capability {
     APPROVE_EVENTS,
     /** Support tickets and the feedback admin operations. */
     ANSWER_TICKETS,
+    /**
+     * Manage the community feedback feed: set a request's roadmap status, write the team's official
+     * response, remove spam. Deliberately separate from {@link #ANSWER_TICKETS}: telling the
+     * community that something is in development or shipped is a product commitment, not user
+     * support, so it stays with owners and senior admins — the same reasoning as
+     * {@link #APPROVE_EVENTS}.
+     */
+    MANAGE_ROADMAP,
     /** Process refunds (capability flag only — no billing integration yet). */
     REFUNDS,
     /** The overview / analytics pages. */

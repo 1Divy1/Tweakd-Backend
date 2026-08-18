@@ -1,10 +1,7 @@
 package com.carsocialmedia.backend.profile.internal.controller;
 
 import com.carsocialmedia.backend.profile.ProfileService;
-import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
-import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
 import com.carsocialmedia.backend.profile.dto.AvatarUpdateRequest;
-import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LanguageUpdateRequest;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
@@ -16,7 +13,6 @@ import com.carsocialmedia.backend.profile.dto.ProfileDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
-import com.carsocialmedia.backend.profile.dto.RoleSelectionRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -113,32 +109,6 @@ class ProfileController {
             @Valid @RequestBody RealtimeLocationRequest request
     ) {
         profileService.updateRealtimeLocation(jwt.getSubject(), request);
-    }
-
-    @GetMapping("/me/car-categories")
-    public List<CarCategoryDto> getCarCategories(@AuthenticationPrincipal Jwt jwt) {
-        return profileService.getCarCategories(jwt.getSubject());
-    }
-
-    @PutMapping("/me/car-categories")
-    public List<CarCategoryDto> setCarCategories(
-            @AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody CategorySelectionRequest request
-    ) {
-        return profileService.setCarCategories(jwt.getSubject(), request);
-    }
-
-    @GetMapping("/me/community-roles")
-    public List<CommunityRoleDto> getCommunityRoles(@AuthenticationPrincipal Jwt jwt) {
-        return profileService.getCommunityRoles(jwt.getSubject());
-    }
-
-    @PutMapping("/me/community-roles")
-    public List<CommunityRoleDto> setCommunityRoles(
-            @AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody RoleSelectionRequest request
-    ) {
-        return profileService.setCommunityRoles(jwt.getSubject(), request);
     }
 
     @GetMapping("/me/notifications")

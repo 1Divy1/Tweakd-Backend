@@ -1,9 +1,6 @@
 package com.carsocialmedia.backend.profile.internal.controller;
 
 import com.carsocialmedia.backend.profile.ProfileService;
-import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
-import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
-import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
 import com.carsocialmedia.backend.profile.dto.ProfileEditRequest;
@@ -244,8 +241,7 @@ class ProfileControllerWebTest {
     // ---- POST /onboarding ---------------------------------------------------
 
     private static final String VALID_ONBOARDING = """
-            {"username":"newracer","bio":"hi","city_id":"cluj","discovery_radius_km":25,
-             "category_ids":["jdm"],"role_ids":["mechanic"]}""";
+            {"username":"newracer","bio":"hi","city_id":"cluj","discovery_radius_km":25}""";
 
     @Test
     void onboardingReturnsProfileAndPassesTheSubjectAndBody() throws Exception {
@@ -263,7 +259,6 @@ class ProfileControllerWebTest {
         verify(profileService).completeOnboarding(eq(ID.toString()), req.capture());
         assertThat(req.getValue().username()).isEqualTo("newracer");
         assertThat(req.getValue().cityId()).isEqualTo("cluj");
-        assertThat(req.getValue().categoryIds()).containsExactly("jdm");
     }
 
     @Test
@@ -281,8 +276,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithBlankUsernameIsRejectedBeforeReachingTheService() throws Exception {
         String body = """
-                {"username":"","city_id":"cluj","discovery_radius_km":25,
-                 "category_ids":["jdm"],"role_ids":["mechanic"]}""";
+                {"username":"","city_id":"cluj","discovery_radius_km":25}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -296,8 +290,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithInvalidUsernamePatternIsRejected() throws Exception {
         String body = """
-                {"username":"Bad Name","city_id":"cluj","discovery_radius_km":25,
-                 "category_ids":["jdm"],"role_ids":["mechanic"]}""";
+                {"username":"Bad Name","city_id":"cluj","discovery_radius_km":25}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -311,8 +304,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithMissingCityIsRejected() throws Exception {
         String body = """
-                {"username":"newracer","discovery_radius_km":25,
-                 "category_ids":["jdm"],"role_ids":["mechanic"]}""";
+                {"username":"newracer","discovery_radius_km":25}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -324,21 +316,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithOutOfRangeRadiusIsRejected() throws Exception {
         String body = """
-                {"username":"newracer","city_id":"cluj","discovery_radius_km":200,
-                 "category_ids":["jdm"],"role_ids":["mechanic"]}""";
-
-        mockMvc.perform(post("/api/v1/profile/onboarding")
-                        .with(TestJwts.user())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void onboardingWithEmptyCategoryIdsIsRejected() throws Exception {
-        String body = """
-                {"username":"newracer","city_id":"cluj","discovery_radius_km":25,
-                 "category_ids":[],"role_ids":["mechanic"]}""";
+                {"username":"newracer","city_id":"cluj","discovery_radius_km":200}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -482,48 +460,6 @@ class ProfileControllerWebTest {
         verify(profileService, never()).updateRealtimeLocation(any(), any());
     }
 
-    // ---- car categories -----------------------------------------------------
-
-    @Test
-    void getCarCategoriesReturnsList() throws Exception {
-        when(profileService.getCarCategories(ID.toString()))
-                .thenReturn(List.of(new CarCategoryDto("jdm", "JDM")));
-
-        mockMvc.perform(get("/api/v1/profile/me/car-categories").with(TestJwts.user()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("jdm"))
-                .andExpect(jsonPath("$[0].name").value("JDM"));
-    }
-
-    @Test
-    void setCarCategoriesDelegatesTheSelection() throws Exception {
-        when(profileService.setCarCategories(eq(ID.toString()), any(CategorySelectionRequest.class)))
-                .thenReturn(List.of(new CarCategoryDto("jdm", "JDM")));
-
-        mockMvc.perform(put("/api/v1/profile/me/car-categories")
-                        .with(TestJwts.user())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"category_ids\":[\"jdm\"]}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("jdm"));
-
-        ArgumentCaptor<CategorySelectionRequest> req = ArgumentCaptor.forClass(CategorySelectionRequest.class);
-        verify(profileService).setCarCategories(eq(ID.toString()), req.capture());
-        assertThat(req.getValue().categoryIds()).containsExactly("jdm");
-    }
-
-    // ---- community roles ----------------------------------------------------
-
-    @Test
-    void getCommunityRolesReturnsList() throws Exception {
-        when(profileService.getCommunityRoles(ID.toString()))
-                .thenReturn(List.of(new CommunityRoleDto("mechanic", "Mechanic")));
-
-        mockMvc.perform(get("/api/v1/profile/me/community-roles").with(TestJwts.user()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("mechanic"));
-    }
-
     // ---- notification preferences -------------------------------------------
 
     @Test
@@ -536,7 +472,7 @@ class ProfileControllerWebTest {
                 .andExpect(jsonPath("$.likes_enabled").value(true))
                 .andExpect(jsonPath("$.comments_enabled").value(false))
                 .andExpect(jsonPath("$.flash_meets_enabled").value(false))
-                .andExpect(jsonPath("$.price_drops_enabled").value(false));
+                .andExpect(jsonPath("$.service_reminders_enabled").value(false));
     }
 
     @Test
@@ -546,7 +482,7 @@ class ProfileControllerWebTest {
 
         String body = """
                 {"likes_enabled":true,"comments_enabled":true,"shares_enabled":true,"dms_enabled":true,
-                 "flash_meets_enabled":true,"organized_events_enabled":true,"price_drops_enabled":true,
+                 "flash_meets_enabled":true,"organized_events_enabled":true,"service_reminders_enabled":true,
                  "tags_enabled":true,"event_organizer_enabled":true}""";
 
         mockMvc.perform(put("/api/v1/profile/me/notifications")

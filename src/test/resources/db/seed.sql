@@ -107,3 +107,17 @@ INSERT INTO public.car_event_participant_status_options (id, status) VALUES
     ('rejected', 'Rejected'),
     ('withdrawn', 'Withdrawn')
 ON CONFLICT (id) DO NOTHING;
+
+-- Feedback feed: feedback_feed_messages.type and .status both carry RESTRICT FKs into these
+-- lookup tables, so no message can be inserted without them.
+INSERT INTO public.feedback_feed_feedback_types (id, type) VALUES
+    ('bug', 'Bug'),
+    ('feature_request', 'Feature request'),
+    ('feature_improvement', 'Feature improvement')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.feedback_feed_status_options (id, status) VALUES
+    ('sent', 'Sent'),
+    ('under_development', 'Under development'),
+    ('completed', 'Completed')
+ON CONFLICT (id) DO NOTHING;
