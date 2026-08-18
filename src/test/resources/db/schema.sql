@@ -1306,16 +1306,6 @@ COMMENT ON TABLE public.car_brands IS 'A list of predefined car brands that a us
 
 
 --
--- Name: car_category_options; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.car_category_options (
-    id text NOT NULL,
-    name text NOT NULL
-);
-
-
---
 -- Name: car_color_options; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2017,23 +2007,6 @@ COMMENT ON COLUMN public.comments.likes_count IS 'Stores how many likes did this
 --
 
 COMMENT ON COLUMN public.comments.reply_count IS 'The number of child comments having the current comment as their parent';
-
-
---
--- Name: community_role_options; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.community_role_options (
-    id text NOT NULL,
-    name text NOT NULL
-);
-
-
---
--- Name: TABLE community_role_options; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.community_role_options IS 'Configured at onboarding. Can be changed after. Describes what role(s) a user can have in the app - IMPORTANT: not what type of privilleges (eg: moderator, admin) has; that''s a different table';
 
 
 --
@@ -2803,7 +2776,6 @@ CREATE TABLE public.notification_preferences (
     shares_enabled boolean DEFAULT true NOT NULL,
     dms_enabled boolean DEFAULT true NOT NULL,
     flash_meets_enabled boolean DEFAULT true NOT NULL,
-    price_drops_enabled boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     organized_events_enabled boolean NOT NULL,
     tags_enabled boolean DEFAULT true NOT NULL,
@@ -3021,40 +2993,6 @@ CREATE TABLE public.price_currencies_options (
 --
 
 COMMENT ON TABLE public.price_currencies_options IS 'A predefined set of currencies. Used when adding a new mod with its price (for example)';
-
-
---
--- Name: profile_car_categories_junction; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.profile_car_categories_junction (
-    profile_id uuid NOT NULL,
-    category_id text NOT NULL
-);
-
-
---
--- Name: TABLE profile_car_categories_junction; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.profile_car_categories_junction IS 'When the user onboards in the app, they can choose their favorite car brands - this is why this table exists.';
-
-
---
--- Name: profile_community_roles_junction; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.profile_community_roles_junction (
-    profile_id uuid NOT NULL,
-    role_id text NOT NULL
-);
-
-
---
--- Name: TABLE profile_community_roles_junction; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.profile_community_roles_junction IS 'The join table between a user and their role(s) in the app';
 
 
 --
@@ -3664,13 +3602,6 @@ ALTER TABLE ONLY public.car_brands
     ADD CONSTRAINT car_brands_pkey PRIMARY KEY (id);
 
 
---
--- Name: car_category_options car_category_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_category_options
-    ADD CONSTRAINT car_category_options_pkey PRIMARY KEY (id);
-
 
 --
 -- Name: car_color_options car_color_options_color_code_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3943,13 +3874,6 @@ ALTER TABLE ONLY public.comment_tagged_people
 ALTER TABLE ONLY public.comments
     ADD CONSTRAINT comments_pkey PRIMARY KEY (id);
 
-
---
--- Name: community_role_options community_role_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.community_role_options
-    ADD CONSTRAINT community_role_options_pkey PRIMARY KEY (id);
 
 
 --
@@ -4384,20 +4308,6 @@ ALTER TABLE ONLY public.price_currencies_options
     ADD CONSTRAINT price_currencies_options_pkey PRIMARY KEY (id);
 
 
---
--- Name: profile_car_categories_junction profile_car_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_car_categories_junction
-    ADD CONSTRAINT profile_car_categories_pkey PRIMARY KEY (profile_id, category_id);
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_community_roles_junction
-    ADD CONSTRAINT profile_community_roles_pkey PRIMARY KEY (profile_id, role_id);
 
 
 --
@@ -6462,36 +6372,6 @@ ALTER TABLE ONLY public.posts
     ADD CONSTRAINT posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
---
--- Name: profile_car_categories_junction profile_car_categories_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_car_categories_junction
-    ADD CONSTRAINT profile_car_categories_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.car_category_options(id);
-
-
---
--- Name: profile_car_categories_junction profile_car_categories_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_car_categories_junction
-    ADD CONSTRAINT profile_car_categories_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_profile_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_community_roles_junction
-    ADD CONSTRAINT profile_community_roles_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.profile_community_roles_junction
-    ADD CONSTRAINT profile_community_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.community_role_options(id);
 
 
 --
@@ -6687,19 +6567,7 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_category_options Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: cities Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: community_role_options Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
 --
 
 
@@ -6831,11 +6699,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 -- Name: car_brands car_brands_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
-
-
---
--- Name: car_category_options; Type: ROW SECURITY; Schema: public; Owner: -
---
 
 
 --
@@ -7145,11 +7008,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 -- Name: comments comments_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
-
-
---
--- Name: community_role_options; Type: ROW SECURITY; Schema: public; Owner: -
---
 
 
 --
@@ -7607,28 +7465,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: price_currencies_options price_currencies_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profile_car_categories_junction; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: profile_car_categories_junction profile_car_categories_junction_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profile_community_roles_junction; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: profile_community_roles_junction profile_community_roles_junction_select_authenticated; Type: POLICY; Schema: public; Owner: -
 --
 
 

@@ -45,8 +45,9 @@ public class NotificationPreferencesEntity {
     @Column(name = "organized_events_enabled", nullable = false)
     private boolean organizedEventsEnabled = true;
 
-    @Column(name = "price_drops_enabled", nullable = false)
-    private boolean priceDropsEnabled = true;
+    /** Reminders for scheduled services and expiring documents (e.g. service book) on your cars. */
+    @Column(name = "service_reminders_enabled", nullable = false)
+    private boolean serviceRemindersEnabled = true;
 
     /** Notifications for being tagged (or having a car tagged) in forum threads and replies. */
     @Column(name = "tags_enabled", nullable = false)
@@ -66,7 +67,7 @@ public class NotificationPreferencesEntity {
     public NotificationPreferencesDto toDto() {
         return new NotificationPreferencesDto(
                 likesEnabled, commentsEnabled, sharesEnabled,
-                dmsEnabled, flashMeetsEnabled, organizedEventsEnabled, priceDropsEnabled,
+                dmsEnabled, flashMeetsEnabled, organizedEventsEnabled, serviceRemindersEnabled,
                 tagsEnabled, eventOrganizerEnabled
         );
     }

@@ -1,9 +1,6 @@
 package com.carsocialmedia.backend.profile;
 
-import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
-import com.carsocialmedia.backend.profile.dto.CategorySelectionRequest;
 import com.carsocialmedia.backend.shared.geo.CityDto;
-import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.shared.geo.CountryDto;
 import com.carsocialmedia.backend.profile.dto.LanguageOptionDto;
 import com.carsocialmedia.backend.profile.dto.LocationRequest;
@@ -15,7 +12,6 @@ import com.carsocialmedia.backend.profile.dto.ProfileDto;
 import com.carsocialmedia.backend.profile.dto.ProfileSearchResultDto;
 import com.carsocialmedia.backend.profile.dto.PublicProfileDto;
 import com.carsocialmedia.backend.profile.dto.RealtimeLocationRequest;
-import com.carsocialmedia.backend.profile.dto.RoleSelectionRequest;
 
 import java.util.Collection;
 import java.util.List;
@@ -87,10 +83,6 @@ public interface ProfileService {
 
     List<CityDto> listCities(String countryId);
 
-    List<CommunityRoleDto> listCommunityRoles();
-
-    List<CarCategoryDto> listCarCategories();
-
     /** All selectable UI languages (reference data). */
     List<LanguageOptionDto> listLanguageOptions();
 
@@ -110,18 +102,6 @@ public interface ProfileService {
 
     /** Stores the user's live location after they opt in to realtime location. */
     void updateRealtimeLocation(String userId, RealtimeLocationRequest request);
-
-    // ---- favorite car categories (replace-all) -----------------------------
-
-    List<CarCategoryDto> getCarCategories(String userId);
-
-    List<CarCategoryDto> setCarCategories(String userId, CategorySelectionRequest request);
-
-    // ---- community roles (replace-all) -------------------------------------
-
-    List<CommunityRoleDto> getCommunityRoles(String userId);
-
-    List<CommunityRoleDto> setCommunityRoles(String userId, RoleSelectionRequest request);
 
     // ---- notification preferences ------------------------------------------
 

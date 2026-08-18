@@ -1,7 +1,5 @@
 package com.carsocialmedia.backend.profile.internal.repository;
 
-import com.carsocialmedia.backend.profile.internal.entity.ProfileCarCategoryEntity;
-import com.carsocialmedia.backend.profile.internal.entity.ProfileCarCategoryId;
 import com.carsocialmedia.backend.profile.internal.entity.ProfileEntity;
 import com.carsocialmedia.backend.testsupport.AbstractPostgresIT;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,9 +23,8 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 /**
  * Real-SQL behaviors of the profile repositories against the Supabase schema in a PostGIS container:
  * the case-insensitive username prefix search (ordering), the bulk-by-id and business-only custom
- * queries, the ban-state projection, the username UNIQUE constraint the onboarding fallback relies
- * on, the reference-option {@code countByIdIn} validation query, and the replace-all car-category
- * junction writes/deletes.
+ * queries, the ban-state projection, and the username UNIQUE constraint the onboarding fallback
+ * relies on.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -39,10 +36,6 @@ class ProfileRepositoryIT extends AbstractPostgresIT {
 
     @Autowired
     private ProfileRepository profileRepository;
-    @Autowired
-    private CarCategoryOptionRepository carCategoryOptionRepository;
-    @Autowired
-    private ProfileCarCategoryRepository profileCarCategoryRepository;
     @Autowired
     private DataSource dataSource;
 
@@ -145,39 +138,5 @@ class ProfileRepositoryIT extends AbstractPostgresIT {
 
         assertThatExceptionOfType(DuplicateKeyException.class).isThrownBy(() ->
                 jdbc.update("insert into public.profiles (id, username) values (?, ?)", B, "unique_name"));
-    }
-
-    // ---- reference-option validation query ----------------------------------
-
-    @Test
-    void countByIdInCountsOnlyExistingCarCategoryOptions() {
-        jdbc.update("insert into public.car_category_options (id, name) values (?, ?)", "jdm", "JDM");
-        jdbc.update("insert into public.car_category_options (id, name) values (?, ?)", "classic", "Classic");
-
-        assertThat(carCategoryOptionRepository.countByIdIn(List.of("jdm", "classic"))).isEqualTo(2L);
-        assertThat(carCategoryOptionRepository.countByIdIn(List.of("jdm", "bogus"))).isEqualTo(1L);
-    }
-
-    // ---- replace-all junction writes ----------------------------------------
-
-    @Test
-    void carCategoryJunctionRoundTripsAndDeletesPerProfile() {
-        createProfile(A, "cat_owner");
-        jdbc.update("insert into public.car_category_options (id, name) values (?, ?)", "jdm", "JDM");
-        jdbc.update("insert into public.car_category_options (id, name) values (?, ?)", "classic", "Classic");
-
-        profileCarCategoryRepository.saveAll(List.of(
-                new ProfileCarCategoryEntity(new ProfileCarCategoryId(A, "jdm")),
-                new ProfileCarCategoryEntity(new ProfileCarCategoryId(A, "classic"))));
-        profileCarCategoryRepository.flush();
-
-        assertThat(profileCarCategoryRepository.findByIdProfileId(A))
-                .extracting(e -> e.getId().getCategoryId())
-                .containsExactlyInAnyOrder("jdm", "classic");
-
-        profileCarCategoryRepository.deleteByIdProfileId(A);
-        profileCarCategoryRepository.flush();
-
-        assertThat(profileCarCategoryRepository.findByIdProfileId(A)).isEmpty();
     }
 }

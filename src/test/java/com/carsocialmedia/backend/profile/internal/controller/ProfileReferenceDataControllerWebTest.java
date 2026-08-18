@@ -1,9 +1,7 @@
 package com.carsocialmedia.backend.profile.internal.controller;
 
 import com.carsocialmedia.backend.profile.ProfileService;
-import com.carsocialmedia.backend.profile.dto.CarCategoryDto;
 import com.carsocialmedia.backend.shared.geo.CityDto;
-import com.carsocialmedia.backend.profile.dto.CommunityRoleDto;
 import com.carsocialmedia.backend.shared.geo.CountryDto;
 import com.carsocialmedia.backend.testsupport.AppWebMvcTest;
 import com.carsocialmedia.backend.testsupport.TestJwts;
@@ -63,25 +61,5 @@ class ProfileReferenceDataControllerWebTest {
                 .andExpect(jsonPath("$[0].lng").value(23.59));
 
         verify(profileService).listCities("RO");
-    }
-
-    @Test
-    void getCommunityRolesReturnsList() throws Exception {
-        when(profileService.listCommunityRoles())
-                .thenReturn(List.of(new CommunityRoleDto("mechanic", "Mechanic")));
-
-        mockMvc.perform(get("/api/v1/profile/reference/community-roles").with(TestJwts.user()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("mechanic"));
-    }
-
-    @Test
-    void getCarCategoriesReturnsList() throws Exception {
-        when(profileService.listCarCategories())
-                .thenReturn(List.of(new CarCategoryDto("jdm", "JDM")));
-
-        mockMvc.perform(get("/api/v1/profile/reference/car-categories").with(TestJwts.user()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("jdm"));
     }
 }
