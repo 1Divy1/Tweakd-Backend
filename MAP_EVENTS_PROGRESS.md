@@ -32,7 +32,7 @@ exists today, more coming.
 **The feature is complete and the whole suite passes.** What remains is listed under
 "Still open / deliberately deferred" and "Follow-ups for the owner" below.
 
-**Module naming (owner-chosen):** package `com.carsocialmedia.backend.mapevents`, REST base
+**Module naming (owner-chosen):** package `com.tweakdapp.backend.mapevents`, REST base
 `/api/v1/map-events`, types prefixed `MapEvent*`, tables stay `car_event*`. R2 keys:
 `events/{eventId}/{uuid}.webp` in the `MAP_EVENTS` bucket (`cloudflare.r2.map-events.*`, which was
 already present in `application.yaml` — only the `StorageBucket` enum and `R2Config.target()` needed

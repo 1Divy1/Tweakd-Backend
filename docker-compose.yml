@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: car-social-media-backend:latest
-    container_name: car-social-media-backend
+    image: tweakd-backend:latest
+    container_name: tweakd-backend
     restart: unless-stopped
     ports:
       - "8080:8080"

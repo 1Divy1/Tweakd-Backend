@@ -26,12 +26,12 @@ Secrets are loaded from `.env` at the project root via `spring.config.import`. R
 
 ## Architecture
 
-The project uses **Spring Modulith** to enforce hard module boundaries at test time. Each top-level package under `com.carsocialmedia.backend` is an `@ApplicationModule` declared in its `package-info.java`.
+The project uses **Spring Modulith** to enforce hard module boundaries at test time. Each top-level package under `com.tweakdapp.backend` is an `@ApplicationModule` declared in its `package-info.java`.
 
 ### Module layout
 
 ```
-com.carsocialmedia.backend/
+com.tweakdapp.backend/
 ├── profile/          ← public API: service interface, DTOs, domain events, exceptions
 │   └── internal/     ← private: controller, service impl, entity, repository
 ├── follow/           ← public API: service interface, DTOs, enums, exceptions
@@ -107,25 +107,25 @@ Entities use `@Getter` / `@Setter`. The Lombok annotation processor is wired in 
 
 Each module has a `README.md` with its specific API surface, endpoints, entities, exceptions, and Supabase trigger dependencies:
 
-- [`profile` module](src/main/java/com/carsocialmedia/backend/profile/README.md)
-- [`follow` module](src/main/java/com/carsocialmedia/backend/relationships/README.md)
-- [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
-- [`posts` module](src/main/java/com/carsocialmedia/backend/posts/README.md)
-- [`feed` module](src/main/java/com/carsocialmedia/backend/feed/README.md)
-- [`tags` module](src/main/java/com/carsocialmedia/backend/tags/README.md)
-- [`business` module](src/main/java/com/carsocialmedia/backend/business/README.md)
-- [`mapevents` module](src/main/java/com/carsocialmedia/backend/mapevents/README.md)
-- [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
-- [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
-- [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)
-- [`feedbackfeed` module](src/main/java/com/carsocialmedia/backend/feedbackfeed/README.md)
-- [`notification` module](src/main/java/com/carsocialmedia/backend/notification/README.md)
-- [`support` module](src/main/java/com/carsocialmedia/backend/support/README.md)
-- [`dms` module](src/main/java/com/carsocialmedia/backend/dms/README.md)
-- [`presence` module](src/main/java/com/carsocialmedia/backend/presence/README.md)
-- [`admin` module](src/main/java/com/carsocialmedia/backend/admin/README.md)
-- [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
-- [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)
+- [`profile` module](src/main/java/com/tweakdapp/backend/profile/README.md)
+- [`follow` module](src/main/java/com/tweakdapp/backend/relationships/README.md)
+- [`garage` module](src/main/java/com/tweakdapp/backend/garage/README.md)
+- [`posts` module](src/main/java/com/tweakdapp/backend/posts/README.md)
+- [`feed` module](src/main/java/com/tweakdapp/backend/feed/README.md)
+- [`tags` module](src/main/java/com/tweakdapp/backend/tags/README.md)
+- [`business` module](src/main/java/com/tweakdapp/backend/business/README.md)
+- [`mapevents` module](src/main/java/com/tweakdapp/backend/mapevents/README.md)
+- [`forums` module](src/main/java/com/tweakdapp/backend/forums/README.md)
+- [`report` module](src/main/java/com/tweakdapp/backend/report/README.md)
+- [`feedback` module](src/main/java/com/tweakdapp/backend/feedback/README.md)
+- [`feedbackfeed` module](src/main/java/com/tweakdapp/backend/feedbackfeed/README.md)
+- [`notification` module](src/main/java/com/tweakdapp/backend/notification/README.md)
+- [`support` module](src/main/java/com/tweakdapp/backend/support/README.md)
+- [`dms` module](src/main/java/com/tweakdapp/backend/dms/README.md)
+- [`presence` module](src/main/java/com/tweakdapp/backend/presence/README.md)
+- [`admin` module](src/main/java/com/tweakdapp/backend/admin/README.md)
+- [`storage` module](src/main/java/com/tweakdapp/backend/storage/README.md)
+- [`shared` module](src/main/java/com/tweakdapp/backend/shared/README.md)
 
 The admin-dashboard build-out (modules `notification` / `support` / `admin`, feedback board,
 moderation, bans) is documented end-to-end in [`ADMIN_DASHBOARD_PROGRESS.md`](ADMIN_DASHBOARD_PROGRESS.md).
