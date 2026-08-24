@@ -18,7 +18,7 @@ Manages user profile data and onboarding. Owns the `profiles` table plus the
 | Method | Description |
 |---|---|
 | `getProfile(userId)` | Returns the authenticated user's own profile |
-| `completeOnboarding(userId, request)` | Saves username (required) and bio (optional) after first sign-in |
+| `completeOnboarding(userId, request)` | Saves name, username, city, discovery radius (required) and bio (optional) after first sign-in |
 | `getPublicProfileByUsername(username)` | Returns a public view of any profile by username |
 | `searchByUsername(prefix)` | Prefix search across all usernames |
 | `findIdByUsername(username)` | Lookup helper for sibling modules — resolves a username to its UUID |
@@ -35,7 +35,7 @@ Manages user profile data and onboarding. Owns the `profiles` table plus the
 | `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding | Own-profile responses |
 | `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness | Public profile view (no `requiresOnboarding`) |
 | `ProfileSearchResultDto` | id, name, username, avatarUrl | Search results and cross-module hydration |
-| `OnboardingRequest` | username (required), bio, cityId, discoveryRadiusKm (all optional) | POST /onboarding body |
+| `OnboardingRequest` | name, username, cityId, discoveryRadiusKm (required), bio (optional) | POST /onboarding body |
 | `LocationRequest` | cityId, discoveryRadiusKm (all optional) | PATCH /me/location body |
 | `RealtimeLocationRequest` | lat, lng (required) | PATCH /me/realtime-location body |
 | `NotificationPreferencesRequest` | 9 boolean toggles (all required, incl. `tags_enabled`, `service_reminders_enabled`) | PUT /me/notifications body |

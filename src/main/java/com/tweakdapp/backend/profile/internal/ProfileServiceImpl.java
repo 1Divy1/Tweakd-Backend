@@ -100,6 +100,7 @@ class ProfileServiceImpl implements ProfileService {
             throw new UsernameAlreadyTakenException(request.username());
         }
 
+        profile.setName(request.name());
         profile.setUsername(request.username());
         profile.setBio(request.bio());
         profile.setRequiresOnboarding(false);

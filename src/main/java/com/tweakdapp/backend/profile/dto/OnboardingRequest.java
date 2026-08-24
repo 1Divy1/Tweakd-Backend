@@ -8,12 +8,16 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * First-time onboarding payload. The username, city, and discovery radius are all
- * required; only the bio is optional. The region and country are derived from the
+ * First-time onboarding payload. The name, username, city, and discovery radius are
+ * all required; only the bio is optional. The region and country are derived from the
  * selected {@code cityId} (each city belongs to exactly one region, and each region
  * to one country), so they are not sent here.
  */
 public record OnboardingRequest(
+
+        @NotBlank(message = "Name is required")
+        @Size(max = 80, message = "Name must be at most 80 characters")
+        String name,
 
         @NotBlank(message = "Username is required")
         @Size(min = 3, max = 30, message = "Username must be between 3 and 30 characters")
@@ -32,6 +36,9 @@ public record OnboardingRequest(
         Integer discoveryRadiusKm
 ) {
         public OnboardingRequest {
+                if (name != null) {
+                        name = name.trim();
+                }
                 if (bio == null) {
                         bio = "";
                 }

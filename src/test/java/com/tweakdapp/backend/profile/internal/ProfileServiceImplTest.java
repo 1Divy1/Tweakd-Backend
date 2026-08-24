@@ -140,7 +140,7 @@ class ProfileServiceImplTest {
     // ---- completeOnboarding -------------------------------------------------
 
     private OnboardingRequest onboarding(String username, String cityId) {
-        return new OnboardingRequest(username, "my bio", cityId, 25);
+        return new OnboardingRequest("New User", username, "my bio", cityId, 25);
     }
 
     @Test
@@ -158,6 +158,7 @@ class ProfileServiceImplTest {
                 onboarding("newuser", "cluj"));
 
         assertThat(dto.username()).isEqualTo("newuser");
+        assertThat(profile.getName()).isEqualTo("New User");
         assertThat(profile.getBio()).isEqualTo("my bio");
         assertThat(profile.isRequiresOnboarding()).isFalse();
         assertThat(profile.getDiscoveryRadiusKm()).isEqualTo(25);

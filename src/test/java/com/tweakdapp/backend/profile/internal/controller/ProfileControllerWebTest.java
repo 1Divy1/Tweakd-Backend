@@ -241,7 +241,7 @@ class ProfileControllerWebTest {
     // ---- POST /onboarding ---------------------------------------------------
 
     private static final String VALID_ONBOARDING = """
-            {"username":"newracer","bio":"hi","city_id":"cluj","discovery_radius_km":25}""";
+            {"name":"New Racer","username":"newracer","bio":"hi","city_id":"cluj","discovery_radius_km":25}""";
 
     @Test
     void onboardingReturnsProfileAndPassesTheSubjectAndBody() throws Exception {
@@ -257,6 +257,7 @@ class ProfileControllerWebTest {
 
         ArgumentCaptor<OnboardingRequest> req = ArgumentCaptor.forClass(OnboardingRequest.class);
         verify(profileService).completeOnboarding(eq(ID.toString()), req.capture());
+        assertThat(req.getValue().name()).isEqualTo("New Racer");
         assertThat(req.getValue().username()).isEqualTo("newracer");
         assertThat(req.getValue().cityId()).isEqualTo("cluj");
     }
@@ -276,7 +277,21 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithBlankUsernameIsRejectedBeforeReachingTheService() throws Exception {
         String body = """
-                {"username":"","city_id":"cluj","discovery_radius_km":25}""";
+                {"name":"New Racer","username":"","city_id":"cluj","discovery_radius_km":25}""";
+
+        mockMvc.perform(post("/api/v1/profile/onboarding")
+                        .with(TestJwts.user())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        verify(profileService, never()).completeOnboarding(any(), any());
+    }
+
+    @Test
+    void onboardingWithBlankNameIsRejectedBeforeReachingTheService() throws Exception {
+        String body = """
+                {"name":"","username":"newracer","city_id":"cluj","discovery_radius_km":25}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -290,7 +305,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithInvalidUsernamePatternIsRejected() throws Exception {
         String body = """
-                {"username":"Bad Name","city_id":"cluj","discovery_radius_km":25}""";
+                {"name":"New Racer","username":"Bad Name","city_id":"cluj","discovery_radius_km":25}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -304,7 +319,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithMissingCityIsRejected() throws Exception {
         String body = """
-                {"username":"newracer","discovery_radius_km":25}""";
+                {"name":"New Racer","username":"newracer","discovery_radius_km":25}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
@@ -316,7 +331,7 @@ class ProfileControllerWebTest {
     @Test
     void onboardingWithOutOfRangeRadiusIsRejected() throws Exception {
         String body = """
-                {"username":"newracer","city_id":"cluj","discovery_radius_km":200}""";
+                {"name":"New Racer","username":"newracer","city_id":"cluj","discovery_radius_km":200}""";
 
         mockMvc.perform(post("/api/v1/profile/onboarding")
                         .with(TestJwts.user())
