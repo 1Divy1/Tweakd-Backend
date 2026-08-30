@@ -52,6 +52,9 @@ com.tweakdapp.backend/
 │   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, keyset cursor
 ├── feedbackfeed/     ← public API: FeedbackFeedService, DTOs. The in-app community feedback board
 │   └── internal/     ← private: controller, service impl, entities, repositories, dual-shape keyset cursor
+├── notification/     ← public API: NotificationService, DTOs. In-app notifications + FCM push
+│   └── internal/     ← private: controller, service impl, entities, repositories, producer listeners
+│       └── push/     ← private: device registry (endpoints + entity), Firebase config, FCM sender, dispatcher
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
     └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
@@ -92,6 +95,24 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
 - `hibernate.ddl-auto: validate` — **the schema is owned by Supabase, not Hibernate**. Never add `@GeneratedValue` strategies that assume Hibernate creates tables. Entity columns must match the DB schema exactly; a divergence crashes startup.
 - `open-in-view: false` — lazy associations must be resolved inside `@Transactional` boundaries (usually the service layer).
 - Supabase database triggers handle certain side effects (counter increments, default field values). See each module's README for the triggers that affect it.
+
+## Push notifications
+
+Push is a second delivery channel for the rows the `notification` module already writes, not a
+separate system — `data.notification_id` is the `notifications.id` the client marks read. Delivery is
+split by ownership:
+
+- **This backend** sends every notification type except `dm`, via `firebase-admin` from
+  `notification/internal/push`. Credentials come from Application Default Credentials (the Cloud Run
+  runtime service account); if they cannot be resolved the app still starts and simply does not push.
+- **A Supabase edge function** sends `dm`. DMs never reach Spring on the write path — the Flutter
+  client calls the `dm_send_message` Postgres RPC directly and live delivery rides Supabase Realtime
+  — so there is no Spring event to hook.
+
+Both read device tokens from the one shared table `user_devices_firebase_token`, which is
+RLS-denied and revoked from `anon`/`authenticated`: only the backend (table owner) and the edge
+function (`service_role`, select + delete) can see it. FCM tokens are device-addressable secrets and
+are never returned by any endpoint.
 
 ## REST conventions
 

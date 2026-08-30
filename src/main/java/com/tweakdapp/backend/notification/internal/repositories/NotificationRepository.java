@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +30,20 @@ public interface NotificationRepository extends JpaRepository<NotificationEntity
                                            Pageable pageable);
 
     long countByUserIdAndReadFalse(UUID userId);
+
+    /**
+     * Unread counts for many users in one round trip, as {@code [userId, count]} rows. Used to build
+     * the per-recipient push badge for a whole batch without issuing a count per notification.
+     *
+     * <p>Users with no unread rows are simply absent from the result — callers default them to 0.
+     */
+    @Query("""
+            select n.userId, count(n)
+              from NotificationEntity n
+             where n.userId in :userIds and n.read = false
+             group by n.userId
+            """)
+    List<Object[]> countUnreadGrouped(@Param("userIds") Collection<UUID> userIds);
 
     Optional<NotificationEntity> findByIdAndUserId(UUID id, UUID userId);
 

@@ -1,6 +1,6 @@
 # notification module
 
-Generic **in-app** notifications (no push). Owns the polymorphic `notifications` table. A
+Generic in-app notifications **plus push delivery**. Owns the polymorphic `notifications` table. A
 dependency-free leaf: other modules (via the `admin` orchestrator) write notifications through
 `NotificationService.push(...)`; the app reads them through this module's own REST endpoints.
 
@@ -73,8 +73,110 @@ they're spelled out in the listener.
 | POST | `/api/v1/notifications/{id}/read` | Mark one read |
 | POST | `/api/v1/notifications/read-all` | Mark all read → `{ "marked": n }` |
 
+## Push notifications (FCM)
+
+Every notification written through this module is also delivered to the recipient's devices as a
+Firebase Cloud Messaging push — push is a **second delivery channel for the rows above**, not a
+separate system, which is why `data.notification_id` is the `notifications.id` the client marks read.
+
+### Who sends what
+
+| Types | Sender |
+|---|---|
+| the 20 types in the tables above | **this backend** (`internal/push`, `firebase-admin`) |
+| `dm` | **a Supabase edge function**, never this backend |
+
+DMs bypass Spring entirely on the write path: the Flutter client calls the `dm_send_message`
+Postgres RPC directly and live delivery rides Supabase Realtime, so the backend never observes a
+message being sent. The edge function is triggered by the `dm` row insert and calls FCM itself.
+`PushDispatcher` skips `type = 'dm'` defensively — rows written by Postgres publish no Spring event,
+so the two senders cannot collide.
+
+### How a push happens
+
+`NotificationServiceImpl.push` / `pushToAll` publish a `NotificationsCreatedEvent` carrying the new
+ids. `PushDispatcher` consumes it with `@Async @Transactional(REQUIRES_NEW)
+@TransactionalEventListener` — the same shape the in-app listeners use — so a rolled-back like or
+comment never pushes. The dispatcher then:
+
+1. reloads the rows and drops any `dm`;
+2. batch-loads every recipient's devices (one query) and unread counts (**one grouped query**, not
+   one per recipient);
+3. builds one message per (recipient, device) pair and sends via `sendEach` in chunks of 500;
+4. deletes tokens FCM reported as permanently dead.
+
+Notification preferences are **not** re-checked here — the producing listeners already gate on them
+before calling `push`, so a row existing means delivery was approved.
+
+Delivery is best effort and never fails the producer: the in-app row is committed and readable over
+REST regardless. There is no retry.
+
+### Token lifecycle
+
+`sendEach` returns per-message results in input order, which is how a failure maps back to a token:
+
+| `MessagingErrorCode` | Action |
+|---|---|
+| `UNREGISTERED`, `INVALID_ARGUMENT`, `SENDER_ID_MISMATCH` | delete the row — the token is dead |
+| `UNAVAILABLE`, `INTERNAL`, `QUOTA_EXCEEDED`, `THIRD_PARTY_AUTH_ERROR` | keep it — transient |
+
+A whole-batch failure prunes nothing: nothing is provably dead.
+
+### Payload
+
+```json
+{
+  "notification": { "title": "...", "body": "..." },
+  "data": {
+    "type": "post_like", "notification_id": "...", "unread_count": "7",
+    "actor_id": "...", "actor_username": "...", "post_id": "..."
+  },
+  "android": { "notification": { "channel_id": "tweakd_default" } },
+  "apns": { "payload": { "aps": { "badge": 7, "sound": "default" } } }
+}
+```
+
+Every `data` value is a string — FCM rejects anything else, and it matters here because `payload`
+legitimately carries a Boolean (`car_tagged`). Null values are dropped rather than stringified to
+`"null"`. `body` is truncated to 200 chars (FCM caps the payload at 4 KB). `unread_count` and the
+APNs badge both come from `countUnread`, i.e. unread `notifications` rows.
+
+### Configuration
+
+`firebase.*` in `application.yaml`. Credentials come from **Application Default Credentials** — the
+Cloud Run runtime service account in production, `GOOGLE_APPLICATION_CREDENTIALS` or `gcloud auth
+application-default login` locally. If they cannot be resolved the app still starts and
+`NoOpFcmSender` takes over, so the test suite and a fresh checkout need no Firebase setup.
+
+`firebase-admin` excludes `google-cloud-firestore` and `google-cloud-storage`; FCM speaks plain HTTP
+and those pull in the whole gRPC stack (~48 MB, 67 jars).
+
+## Device endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/notifications/devices` | Idempotent upsert keyed on the token → 200 |
+| DELETE | `/api/v1/notifications/devices` | Unregister; token in the **body** → 204 |
+
+```json
+{ "token": "...", "platform": "ios|android", "app_version": "1.0.0+1", "locale": "en" }
+```
+
+The token travels in the DELETE **body, not the path**: a path segment is written verbatim into
+access, proxy and CDN logs, and an FCM token is a device-addressable secret.
+
+Security properties, all deliberate:
+
+- the account is always the JWT subject, never anything in the body;
+- unregister is scoped `where token = ? and user_id = ?`, so one user cannot cut off another's push
+  by replaying their token;
+- unregister returns 204 whether or not a row matched — it is not a token-existence oracle;
+- no endpoint returns a token and there is no list-devices endpoint;
+- a per-user cap of 10 devices, oldest evicted first.
+
 ## Entities
 
 | Entity → table | Notes |
 |---|---|
 | `NotificationEntity` → `notifications` | app-generated UUID id; `payload` mapped as `Map<String,Object>` via `@JdbcTypeCode(SqlTypes.JSON)`; `created_at` DB-managed; partial index on unread rows |
+| `UserDeviceEntity` → `user_devices_firebase_token` | FCM tokens, one row per device. `token` is UNIQUE **on its own**, which is what implements device handoff: re-registering reassigns the row to the new user. RLS-enabled with no policies and revoked from `anon`/`authenticated`, so only the backend (owner) and the edge function (`service_role`, select+delete only) can read it. Shared with the `dm` edge function. |

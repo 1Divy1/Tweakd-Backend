@@ -246,6 +246,28 @@ begin
     set unread_count = public.dm_participant_state.unread_count + 1,
         hidden_at    = null;
 
+  -- Feed row for the recipient. Spring's push pipeline never touches 'dm';
+  -- in production the notifications_dm_push trigger picks this row up and
+  -- calls the dm-push edge function. That trigger is deliberately NOT
+  -- mirrored here: it depends on pg_net, which Testcontainers does not have.
+  insert into public.notifications (id, user_id, type, title, body, payload, is_read, created_at)
+  select
+    gen_random_uuid(),
+    p_recipient_id,
+    'dm',
+    coalesce(nullif(s.username, ''), 'Someone') || ' sent you a message',
+    case when btrim(v_content) = '' then 'Shared a car' else left(v_content, 200) end,
+    jsonb_build_object(
+      'actor_id',        v_sender::text,
+      'actor_username',  coalesce(nullif(s.username, ''), 'Someone'),
+      'conversation_id', v_conversation_id::text,
+      'message_id',      v_message_id::text
+    ),
+    false,
+    v_now
+  from public.profiles s
+  where s.id = v_sender;
+
   return jsonb_build_object(
     'id',              v_message_id,
     'conversation_id', v_conversation_id,
@@ -1097,6 +1119,21 @@ begin
         resolved_at = case when public.moderation_cases.status = 'resolved' then null   else public.moderation_cases.resolved_at end;
   return new;
 end $$;
+
+
+--
+-- Name: user_devices_firebase_token_touch(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.user_devices_firebase_token_touch() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO ''
+    AS $$
+begin
+    new.updated_at := now();
+    return new;
+end;
+$$;
 
 
 SET default_tablespace = '';
@@ -3267,6 +3304,47 @@ CREATE TABLE public.tagged_people (
 
 
 --
+-- Name: user_devices_firebase_token; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_devices_firebase_token (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    token text NOT NULL,
+    platform text NOT NULL,
+    app_version text,
+    locale text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_devices_firebase_token_app_version_chk CHECK (((app_version IS NULL) OR ((length(app_version) >= 1) AND (length(app_version) <= 32)))),
+    CONSTRAINT user_devices_firebase_token_locale_chk CHECK (((locale IS NULL) OR (locale ~ '^[a-zA-Z]{2,3}([-_][a-zA-Z0-9]{2,8}){0,2}$'::text))),
+    CONSTRAINT user_devices_firebase_token_platform_chk CHECK ((platform = ANY (ARRAY['ios'::text, 'android'::text]))),
+    CONSTRAINT user_devices_firebase_token_token_chk CHECK (((length(token) >= 32) AND (length(token) <= 512)))
+);
+
+
+--
+-- Name: TABLE user_devices_firebase_token; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.user_devices_firebase_token IS 'FCM registration tokens, one row per device. Single source of truth shared by the Spring backend (all notification types except dm) and the Supabase edge function (dm). token is UNIQUE on its own, not (user_id, token): re-registering an existing token reassigns it to the calling user, which is how device handoff between accounts works. Never exposed over the REST API - there is no list-devices endpoint and no response ever contains a token.';
+
+
+--
+-- Name: COLUMN user_devices_firebase_token.token; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.user_devices_firebase_token.token IS 'FCM registration token. A device-addressable secret: anyone holding it can push arbitrary notifications to that device. RLS-denied and revoked from anon/authenticated so no Supabase client can enumerate tokens.';
+
+
+--
+-- Name: COLUMN user_devices_firebase_token.updated_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.user_devices_firebase_token.updated_at IS 'Bumped on every re-registration by the touch trigger. Doubles as the staleness watermark: FCM garbage-collects registrations after 270 days of inactivity.';
+
+
+--
 -- Name: user_presence; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3602,7 +3680,6 @@ ALTER TABLE ONLY public.car_brands
     ADD CONSTRAINT car_brands_pkey PRIMARY KEY (id);
 
 
-
 --
 -- Name: car_color_options car_color_options_color_code_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
@@ -3873,7 +3950,6 @@ ALTER TABLE ONLY public.comment_tagged_people
 
 ALTER TABLE ONLY public.comments
     ADD CONSTRAINT comments_pkey PRIMARY KEY (id);
-
 
 
 --
@@ -4308,8 +4384,6 @@ ALTER TABLE ONLY public.price_currencies_options
     ADD CONSTRAINT price_currencies_options_pkey PRIMARY KEY (id);
 
 
-
-
 --
 -- Name: profile_reports profile_reports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
@@ -4412,6 +4486,22 @@ ALTER TABLE ONLY public.tagged_people
 
 ALTER TABLE ONLY public.post_images
     ADD CONSTRAINT unique_post_display_order UNIQUE (post_id, display_order);
+
+
+--
+-- Name: user_devices_firebase_token user_devices_firebase_token_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_devices_firebase_token
+    ADD CONSTRAINT user_devices_firebase_token_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_devices_firebase_token user_devices_firebase_token_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_devices_firebase_token
+    ADD CONSTRAINT user_devices_firebase_token_token_key UNIQUE (token);
 
 
 --
@@ -4592,6 +4682,13 @@ CREATE INDEX dream_cars_profile_id_idx ON public.dream_cars USING btree (profile
 --
 
 CREATE INDEX feedback_comments_feedback_idx ON public.feedback_comments USING btree (feedback_id, created_at DESC);
+
+
+--
+-- Name: feedback_feed_messages_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX feedback_feed_messages_created_at_idx ON public.feedback_feed_messages USING btree (created_at);
 
 
 --
@@ -5099,6 +5196,20 @@ CREATE INDEX support_tickets_user_idx ON public.support_tickets USING btree (use
 
 
 --
+-- Name: user_devices_firebase_token_updated_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX user_devices_firebase_token_updated_at_idx ON public.user_devices_firebase_token USING btree (updated_at);
+
+
+--
+-- Name: user_devices_firebase_token_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX user_devices_firebase_token_user_id_idx ON public.user_devices_firebase_token USING btree (user_id);
+
+
+--
 -- Name: comment_reports comment_reports_case; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5362,6 +5473,13 @@ CREATE TRIGGER trg_update_car_event_attending_cars_count AFTER INSERT OR DELETE 
 --
 
 CREATE TRIGGER trg_vehicle_history_entries_updated_at BEFORE UPDATE ON public.vehicle_history_entries FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: user_devices_firebase_token user_devices_firebase_token_touch_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_devices_firebase_token_touch_updated_at BEFORE UPDATE ON public.user_devices_firebase_token FOR EACH ROW EXECUTE FUNCTION public.user_devices_firebase_token_touch();
 
 
 --
@@ -6021,14 +6139,6 @@ ALTER TABLE ONLY public.forum_thread_replies
 
 
 --
--- Name: forum_thread_replies forum_posts_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.forum_thread_replies
-    ADD CONSTRAINT forum_posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id);
-
-
---
 -- Name: forum_shortcuts forum_shortcuts_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6057,7 +6167,7 @@ ALTER TABLE ONLY public.forum_shortcuts
 --
 
 ALTER TABLE ONLY public.forum_shortcuts
-    ADD CONSTRAINT forum_shortcuts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id);
+    ADD CONSTRAINT forum_shortcuts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6073,7 +6183,7 @@ ALTER TABLE ONLY public.forum_thread_likes
 --
 
 ALTER TABLE ONLY public.forum_thread_likes
-    ADD CONSTRAINT forum_thread_likes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id);
+    ADD CONSTRAINT forum_thread_likes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6090,6 +6200,14 @@ ALTER TABLE ONLY public.forum_thread_reads
 
 ALTER TABLE ONLY public.forum_thread_reads
     ADD CONSTRAINT forum_thread_reads_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_replies forum_thread_replies_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_replies
+    ADD CONSTRAINT forum_thread_replies_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6257,7 +6375,7 @@ ALTER TABLE ONLY public.forum_threads
 --
 
 ALTER TABLE ONLY public.forum_threads
-    ADD CONSTRAINT forum_threads_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id);
+    ADD CONSTRAINT forum_threads_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6370,8 +6488,6 @@ ALTER TABLE ONLY public.post_shares
 
 ALTER TABLE ONLY public.posts
     ADD CONSTRAINT posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
 
 
 --
@@ -6495,6 +6611,14 @@ ALTER TABLE ONLY public.tagged_people
 
 
 --
+-- Name: user_devices_firebase_token user_devices_firebase_token_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_devices_firebase_token
+    ADD CONSTRAINT user_devices_firebase_token_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: user_presence user_presence_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6567,60 +6691,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: cities Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: countries Allow authenticated read access; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: report_reasons Authenticated users can read report reasons; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: blocked_accounts Users can view their own blocked accounts; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: comment_reports Users can view their own comment reports; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: forum_thread_reply_reports Users can view their own forum thread reply reports; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: forum_thread_reports Users can view their own forum thread reports; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: post_reports Users can view their own post reports; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profile_reports Users can view their own profile reports; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: admin_team_members; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -6651,26 +6721,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: business_accounts business_accounts_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: business_account_active_status_options business_active_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: business_hours; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: business_hours business_hours_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6679,26 +6731,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: business_type_options business_type_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: business_account_verification_status_options business_verification_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_brands; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: car_brands car_brands_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6707,31 +6741,13 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_color_options car_color_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_distance_units; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
--- Name: car_distance_units car_distance_units_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_drivetrain_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: car_drivetrain_options car_drivetrain_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6745,38 +6761,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_event_attendee_status car_event_attendee_status_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_event_attendees_list; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: car_event_attendees_list car_event_attendees_list_delete_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_event_attendees_list car_event_attendees_list_insert_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_event_attendees_list car_event_attendees_list_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_event_attendees_list car_event_attendees_list_update_own; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6795,43 +6781,13 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_event_organizers car_event_organizers_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_event_participant_status_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
--- Name: car_event_participant_status_options car_event_participant_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_event_participants; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: car_event_participants car_event_participants_delete_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_event_participants car_event_participants_insert_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_event_participants car_event_participants_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6850,38 +6806,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_fuel_type_options car_fuel_type_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_gallery; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: car_gallery car_gallery_delete_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_gallery car_gallery_insert_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_gallery car_gallery_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_gallery car_gallery_update_own_car; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6890,20 +6816,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_mod_categories car_mod_categories_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: car_models; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: car_models car_models_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6922,38 +6836,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_status_options car_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: cars; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: cars cars_delete_own_garage; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: cars cars_insert_own_garage; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: cars cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: cars cars_update_own_garage; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -6967,12 +6851,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: comment_likes comment_likes_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: comment_reports; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -6983,31 +6861,13 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: comment_tagged_cars comment_tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: comment_tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
--- Name: comment_tagged_people comment_tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: comments; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: comments comments_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7041,20 +6901,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: dream_cars dream_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: event_car_meet; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: event_car_meet event_car_meet_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7070,12 +6918,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 --
 -- Name: feedback_feature_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: feedback_feature_options feedback_feature_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7099,20 +6941,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: feedback feedback_select_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: feedback_status_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: feedback_status_options feedback_status_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7126,12 +6956,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: feedback_type_options feedback_type_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: feedback_votes; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7142,44 +6966,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: follows follows_delete_own_or_received; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: follows follows_insert_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: follows follows_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: follows follows_update_received; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: forum_post_likes; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: forum_post_likes forum_post_likes_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: forum_thread_replies forum_posts_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7188,20 +6976,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: forum_shortcuts forum_shortcuts_select_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: forum_thread_likes; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: forum_thread_likes forum_thread_likes_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7225,20 +7001,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: forum_thread_reply_tagged_cars forum_thread_reply_tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: forum_thread_reply_tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: forum_thread_reply_tagged_people forum_thread_reply_tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7257,20 +7021,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: forum_thread_tagged_cars forum_thread_tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: forum_thread_tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: forum_thread_tagged_people forum_thread_tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7284,79 +7036,13 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: forum_thread_topics forum_thread_topics_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: forum_threads; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
--- Name: forum_threads forum_threads_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: forum_thread_topic_options forum_topics_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: garages; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: garages garages_delete_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: garages garages_insert_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: garages garages_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: garages garages_update_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modification_gallery mod_gallery_delete_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modification_gallery mod_gallery_insert_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modification_gallery mod_gallery_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modification_gallery mod_gallery_update_own_car; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7370,38 +7056,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_modifications mods_delete_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modifications mods_insert_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modifications mods_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: car_modifications mods_update_own_car; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: notification_preferences; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: notification_preferences notification_preferences_select_own; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7415,20 +7071,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: post_images post_images_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: post_likes; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: post_likes post_likes_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7442,31 +7086,13 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: post_shares post_shares_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: posts; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
--- Name: posts posts_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: price_currencies_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: price_currencies_options price_currencies_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --
@@ -7502,12 +7128,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: saved_posts saved_posts_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: support_ticket_categories; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7528,20 +7148,13 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: tagged_cars tagged_cars_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
--- Name: tagged_people tagged_people_select_authenticated; Type: POLICY; Schema: public; Owner: -
+-- Name: user_devices_firebase_token; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
 
 
 --
@@ -7560,20 +7173,8 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: vehicle_entry_options vehicle_entry_options_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
 -- Name: vehicle_entry_status; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-
---
--- Name: vehicle_entry_status vehicle_entry_status_select_authenticated; Type: POLICY; Schema: public; Owner: -
---
-
 
 
 --

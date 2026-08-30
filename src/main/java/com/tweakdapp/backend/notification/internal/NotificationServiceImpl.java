@@ -5,7 +5,9 @@ import com.tweakdapp.backend.notification.dto.NotificationDto;
 import com.tweakdapp.backend.notification.dto.NotificationPageDto;
 import com.tweakdapp.backend.notification.exception.NotificationNotFoundException;
 import com.tweakdapp.backend.notification.internal.entities.NotificationEntity;
+import com.tweakdapp.backend.notification.internal.push.NotificationsCreatedEvent;
 import com.tweakdapp.backend.notification.internal.repositories.NotificationRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,15 +27,19 @@ public class NotificationServiceImpl implements NotificationService {
     private static final int MAX_PAGE_SIZE = 50;
 
     private final NotificationRepository notificationRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public NotificationServiceImpl(NotificationRepository notificationRepository) {
+    public NotificationServiceImpl(NotificationRepository notificationRepository,
+                                   ApplicationEventPublisher eventPublisher) {
         this.notificationRepository = notificationRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
     @Transactional
     public void push(UUID userId, String type, String title, String body, Map<String, Object> payload) {
-        notificationRepository.save(buildNotification(userId, type, title, body, payload));
+        NotificationEntity saved = notificationRepository.save(buildNotification(userId, type, title, body, payload));
+        publishForPush(List.of(saved.getId()));
     }
 
     @Override
@@ -42,7 +48,8 @@ public class NotificationServiceImpl implements NotificationService {
         List<NotificationEntity> notifications = new LinkedHashSet<>(userIds).stream()
                 .map(userId -> buildNotification(userId, type, title, body, payload))
                 .toList();
-        notificationRepository.saveAll(notifications);
+        List<NotificationEntity> saved = notificationRepository.saveAll(notifications);
+        publishForPush(saved.stream().map(NotificationEntity::getId).toList());
     }
 
     @Override
@@ -86,6 +93,17 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public int markAllRead(UUID userId) {
         return notificationRepository.markAllRead(userId);
+    }
+
+    /**
+     * Hands the new rows to {@code PushDispatcher}, which sends them to FCM asynchronously once this
+     * transaction commits. Publishing rather than calling directly keeps delivery off the caller's
+     * thread and guarantees a rolled-back notification is never pushed. An empty batch is a no-op.
+     */
+    private void publishForPush(List<UUID> notificationIds) {
+        if (!notificationIds.isEmpty()) {
+            eventPublisher.publishEvent(new NotificationsCreatedEvent(notificationIds));
+        }
     }
 
     private NotificationEntity buildNotification(UUID userId, String type, String title, String body,
