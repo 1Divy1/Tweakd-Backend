@@ -52,7 +52,10 @@ class FirebaseConfig {
             log.info("Firebase push initialised (project={}, dryRun={})",
                     app.getOptions().getProjectId(), properties.isDryRun());
             return FirebaseMessaging.getInstance(app);
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
+            // LinkageError as well as Exception: a Firebase class missing from the runtime classpath
+            // surfaces as NoClassDefFoundError, which is an Error — catching only Exception would let
+            // it abort startup, the exact outcome this fallback exists to prevent.
             // Message only — a credential error can carry environment detail we do not want in logs.
             log.error("Firebase push unavailable, falling back to no-op sender: {}", e.getMessage());
             return null;
@@ -67,7 +70,7 @@ class FirebaseConfig {
                 builder.setProjectId(properties.getProjectId());
             }
             return builder.build();
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             throw new IllegalStateException("Could not resolve Application Default Credentials", e);
         }
     }
