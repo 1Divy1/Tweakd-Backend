@@ -60,3 +60,10 @@ Thumbs.db
 *.war
 *.ear
 hs_err_pid*
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Firebase service account keys — never commit
+*serviceAccount*.json
+firebase-adminsdk*.json

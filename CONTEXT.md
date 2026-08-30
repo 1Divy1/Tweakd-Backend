@@ -26,12 +26,12 @@ Secrets are loaded from `.env` at the project root via `spring.config.import`. R
 
 ## Architecture
 
-The project uses **Spring Modulith** to enforce hard module boundaries at test time. Each top-level package under `com.carsocialmedia.backend` is an `@ApplicationModule` declared in its `package-info.java`.
+The project uses **Spring Modulith** to enforce hard module boundaries at test time. Each top-level package under `com.tweakdapp.backend` is an `@ApplicationModule` declared in its `package-info.java`.
 
 ### Module layout
 
 ```
-com.carsocialmedia.backend/
+com.tweakdapp.backend/
 ├── profile/          ← public API: service interface, DTOs, domain events, exceptions
 │   └── internal/     ← private: controller, service impl, entity, repository
 ├── follow/           ← public API: service interface, DTOs, enums, exceptions
@@ -52,6 +52,9 @@ com.carsocialmedia.backend/
 │   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, keyset cursor
 ├── feedbackfeed/     ← public API: FeedbackFeedService, DTOs. The in-app community feedback board
 │   └── internal/     ← private: controller, service impl, entities, repositories, dual-shape keyset cursor
+├── notification/     ← public API: NotificationService, DTOs. In-app notifications + FCM push
+│   └── internal/     ← private: controller, service impl, entities, repositories, producer listeners
+│       └── push/     ← private: device registry (endpoints + entity), Firebase config, FCM sender, dispatcher
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
     └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
@@ -93,6 +96,24 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
 - `open-in-view: false` — lazy associations must be resolved inside `@Transactional` boundaries (usually the service layer).
 - Supabase database triggers handle certain side effects (counter increments, default field values). See each module's README for the triggers that affect it.
 
+## Push notifications
+
+Push is a second delivery channel for the rows the `notification` module already writes, not a
+separate system — `data.notification_id` is the `notifications.id` the client marks read. Delivery is
+split by ownership:
+
+- **This backend** sends every notification type except `dm`, via `firebase-admin` from
+  `notification/internal/push`. Credentials come from Application Default Credentials (the Cloud Run
+  runtime service account); if they cannot be resolved the app still starts and simply does not push.
+- **A Supabase edge function** sends `dm`. DMs never reach Spring on the write path — the Flutter
+  client calls the `dm_send_message` Postgres RPC directly and live delivery rides Supabase Realtime
+  — so there is no Spring event to hook.
+
+Both read device tokens from the one shared table `user_devices_firebase_token`, which is
+RLS-denied and revoked from `anon`/`authenticated`: only the backend (table owner) and the edge
+function (`service_role`, select + delete) can see it. FCM tokens are device-addressable secrets and
+are never returned by any endpoint.
+
 ## REST conventions
 
 - Base path: `/api/v1/<module>/...`
@@ -107,25 +128,25 @@ Entities use `@Getter` / `@Setter`. The Lombok annotation processor is wired in 
 
 Each module has a `README.md` with its specific API surface, endpoints, entities, exceptions, and Supabase trigger dependencies:
 
-- [`profile` module](src/main/java/com/carsocialmedia/backend/profile/README.md)
-- [`follow` module](src/main/java/com/carsocialmedia/backend/relationships/README.md)
-- [`garage` module](src/main/java/com/carsocialmedia/backend/garage/README.md)
-- [`posts` module](src/main/java/com/carsocialmedia/backend/posts/README.md)
-- [`feed` module](src/main/java/com/carsocialmedia/backend/feed/README.md)
-- [`tags` module](src/main/java/com/carsocialmedia/backend/tags/README.md)
-- [`business` module](src/main/java/com/carsocialmedia/backend/business/README.md)
-- [`mapevents` module](src/main/java/com/carsocialmedia/backend/mapevents/README.md)
-- [`forums` module](src/main/java/com/carsocialmedia/backend/forums/README.md)
-- [`report` module](src/main/java/com/carsocialmedia/backend/report/README.md)
-- [`feedback` module](src/main/java/com/carsocialmedia/backend/feedback/README.md)
-- [`feedbackfeed` module](src/main/java/com/carsocialmedia/backend/feedbackfeed/README.md)
-- [`notification` module](src/main/java/com/carsocialmedia/backend/notification/README.md)
-- [`support` module](src/main/java/com/carsocialmedia/backend/support/README.md)
-- [`dms` module](src/main/java/com/carsocialmedia/backend/dms/README.md)
-- [`presence` module](src/main/java/com/carsocialmedia/backend/presence/README.md)
-- [`admin` module](src/main/java/com/carsocialmedia/backend/admin/README.md)
-- [`storage` module](src/main/java/com/carsocialmedia/backend/storage/README.md)
-- [`shared` module](src/main/java/com/carsocialmedia/backend/shared/README.md)
+- [`profile` module](src/main/java/com/tweakdapp/backend/profile/README.md)
+- [`follow` module](src/main/java/com/tweakdapp/backend/relationships/README.md)
+- [`garage` module](src/main/java/com/tweakdapp/backend/garage/README.md)
+- [`posts` module](src/main/java/com/tweakdapp/backend/posts/README.md)
+- [`feed` module](src/main/java/com/tweakdapp/backend/feed/README.md)
+- [`tags` module](src/main/java/com/tweakdapp/backend/tags/README.md)
+- [`business` module](src/main/java/com/tweakdapp/backend/business/README.md)
+- [`mapevents` module](src/main/java/com/tweakdapp/backend/mapevents/README.md)
+- [`forums` module](src/main/java/com/tweakdapp/backend/forums/README.md)
+- [`report` module](src/main/java/com/tweakdapp/backend/report/README.md)
+- [`feedback` module](src/main/java/com/tweakdapp/backend/feedback/README.md)
+- [`feedbackfeed` module](src/main/java/com/tweakdapp/backend/feedbackfeed/README.md)
+- [`notification` module](src/main/java/com/tweakdapp/backend/notification/README.md)
+- [`support` module](src/main/java/com/tweakdapp/backend/support/README.md)
+- [`dms` module](src/main/java/com/tweakdapp/backend/dms/README.md)
+- [`presence` module](src/main/java/com/tweakdapp/backend/presence/README.md)
+- [`admin` module](src/main/java/com/tweakdapp/backend/admin/README.md)
+- [`storage` module](src/main/java/com/tweakdapp/backend/storage/README.md)
+- [`shared` module](src/main/java/com/tweakdapp/backend/shared/README.md)
 
 The admin-dashboard build-out (modules `notification` / `support` / `admin`, feedback board,
 moderation, bans) is documented end-to-end in [`ADMIN_DASHBOARD_PROGRESS.md`](ADMIN_DASHBOARD_PROGRESS.md).
