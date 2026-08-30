@@ -30,6 +30,7 @@
 		<java.version>25</java.version>
 		<spring-modulith.version>2.0.3</spring-modulith.version>
 		<firebase-admin.version>9.10.0</firebase-admin.version>
+		<google-http-client.version>2.1.0</google-http-client.version>
 	</properties>
 
 	<dependencyManagement>
@@ -171,6 +172,18 @@
 					<artifactId>google-cloud-firestore</artifactId>
 				</exclusion>
 			</exclusions>
+		</dependency>
+		<!--
+			firebase-admin 9.10 hard-wires JacksonFactory as the default JsonFactory in
+			FirebaseOptions.<init>, but only ships google-http-client-gson transitively. Without this
+			the class is absent at runtime and FirebaseConfig dies with NoClassDefFoundError on
+			startup. Version tracks the google-http-client that firebase-admin resolves - keep them
+			in lockstep.
+		-->
+		<dependency>
+			<groupId>com.google.http-client</groupId>
+			<artifactId>google-http-client-jackson2</artifactId>
+			<version>${google-http-client.version}</version>
 		</dependency>
 	</dependencies>
 
