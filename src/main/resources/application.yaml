@@ -30,6 +30,16 @@ cloudflare:
       bucket: ${CLOUDFLARE_MAP_EVENTS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_MAP_EVENTS_BUCKET_URL}
 
+firebase:
+  # Push delivery for every notification type except `dm`, which a Supabase edge function owns.
+  # Credentials come from Application Default Credentials: the Cloud Run runtime service account in
+  # production, GOOGLE_APPLICATION_CREDENTIALS or `gcloud auth application-default login` locally.
+  # If they cannot be resolved the backend still starts and simply does not push.
+  enabled: ${FIREBASE_ENABLED:true}
+  project-id: ${FIREBASE_PROJECT_ID:}
+  android-channel-id: tweakd_default
+  dry-run: ${FIREBASE_DRY_RUN:false}
+
 spring:
   application:
     name: backend

@@ -8,7 +8,7 @@
 		<version>4.0.6</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.carsocialmedia</groupId>
+	<groupId>com.tweakdapp</groupId>
 	<artifactId>backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name/>
@@ -29,6 +29,7 @@
 	<properties>
 		<java.version>25</java.version>
 		<spring-modulith.version>2.0.3</spring-modulith.version>
+		<firebase-admin.version>9.10.0</firebase-admin.version>
 	</properties>
 
 	<dependencyManagement>
@@ -148,6 +149,28 @@
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>s3</artifactId>
+		</dependency>
+		<!--
+			FCM only. firebase-admin bundles Firestore and Cloud Storage support, which drag in
+			the whole gRPC / protobuf / xds stack (~135 MB, ~200 jars) that Cloud Messaging never
+			touches - it speaks plain HTTP via google-http-client. Excluded to keep the runtime
+			image small. Re-add them here if this project ever uses FirebaseFirestore or
+			FirebaseStorage.
+		-->
+		<dependency>
+			<groupId>com.google.firebase</groupId>
+			<artifactId>firebase-admin</artifactId>
+			<version>${firebase-admin.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.google.cloud</groupId>
+					<artifactId>google-cloud-storage</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>com.google.cloud</groupId>
+					<artifactId>google-cloud-firestore</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 	</dependencies>
 

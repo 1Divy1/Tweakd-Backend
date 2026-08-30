@@ -36,7 +36,7 @@ repository tests only for hand-written queries and trigger-dependent flows (not 
 
 ## Conventions
 
-- Test classes mirror the main package: `src/test/java/com/carsocialmedia/backend/<module>/...`.
+- Test classes mirror the main package: `src/test/java/com/tweakdapp/backend/<module>/...`.
   Tests for `internal/` classes live in the same package so package-private access works.
 - Naming: `<Class>Test` (unit), `<Controller>WebTest` (web slice), `<Repository>IT`
   (Testcontainers-backed). Method names describe behavior: `deletingThreadWithRepliesAnonymizesIt()`.

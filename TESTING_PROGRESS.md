@@ -256,7 +256,7 @@ looking, PG version pinned, flaky-test fixes), newest first.
 
 - 2026-07-16 — Phase 5 gotchas:
   - The "follow" feature is the `relationships` module (package
-    `com.carsocialmedia.backend.relationships`, owns `public.follows`) — there is no `follow`
+    `com.tweakdapp.backend.relationships`, owns `public.follows`) — there is no `follow`
     package. REST base path is still `/api/v1/follow`.
   - The `follows` BEFORE INSERT trigger `set_follow_initial_status` force-sets `status := 'accepted'`
     on *every* insert, so you can't insert a `pending` row directly. To exercise a repository's
