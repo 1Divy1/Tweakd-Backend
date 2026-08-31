@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.dms;
 
+import com.tweakdapp.backend.dms.dto.DmConversationDto;
 import com.tweakdapp.backend.dms.dto.DmConversationPageDto;
 import com.tweakdapp.backend.dms.dto.DmMessageDto;
 import com.tweakdapp.backend.dms.dto.DmMessagePageDto;
@@ -20,6 +21,25 @@ public interface DmsService {
      * caller hid and conversations without any message yet are not listed.
      */
     DmConversationPageDto listConversations(UUID userId, String cursor, int size);
+
+    /**
+     * One conversation as it appears on the chats list — peer profile, last-message trio, the
+     * caller's unread count, the peer's presence.
+     *
+     * <p>Exists so a chat screen can open from a conversation id alone: a push notification tap, a
+     * restored route, a share link. Without it the only way in is the list, so any entry point that
+     * has just an id dead-ends at the inbox. This is the client's only route to the data at all —
+     * {@code authenticated} holds no privilege on any {@code dm_*} table, so it cannot read the
+     * conversation from Supabase.
+     *
+     * <p>Hidden conversations are returned. Hiding removes a chat from the list, but a
+     * notification for it is still a legitimate way to open it, and sending unhides anyway.
+     *
+     * @throws com.tweakdapp.backend.dms.exception.DmConversationNotFoundException if the
+     *         conversation does not exist — or the caller is not a participant, which is
+     *         deliberately the same 404
+     */
+    DmConversationDto getConversation(UUID userId, UUID conversationId);
 
     /**
      * One keyset page of a conversation's messages, newest first, plus the peer's read watermark.

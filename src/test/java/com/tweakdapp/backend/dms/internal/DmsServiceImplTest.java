@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.dms.internal;
 
+import com.tweakdapp.backend.dms.dto.DmConversationDto;
 import com.tweakdapp.backend.dms.dto.DmConversationPageDto;
 import com.tweakdapp.backend.dms.dto.DmMessageDto;
 import com.tweakdapp.backend.dms.dto.DmMessagePageDto;
@@ -572,6 +573,72 @@ class DmsServiceImplTest {
         service.relayTyping(SELF, CONV, true);
 
         verifyNoInteractions(eventPusher);
+    }
+
+    // ---- getConversation ----------------------------------------------------
+
+    @Test
+    void getConversationReturnsTheSameShapeAsAListRow() {
+        DmConversationEntity conv = conversation(CONV, SELF, PEER);
+        conv.setLastMessagePreview("yo");
+        conv.setLastMessageSenderId(PEER);
+        conv.setLastMessageAt(Instant.parse("2026-07-16T10:00:00Z"));
+        when(conversationRepository.findById(CONV)).thenReturn(Optional.of(conv));
+
+        DmParticipantStateEntity st = state(CONV, SELF);
+        st.setUnreadCount(5);
+        when(stateRepository.findByConversationIdInAndUserId(List.of(CONV), SELF)).thenReturn(List.of(st));
+        when(profileService.findByIds(List.of(PEER)))
+                .thenReturn(List.of(new ProfileSearchResultDto(PEER, "Peer Name", "peer", "a.png")));
+        when(presenceService.getPresence(List.of(PEER)))
+                .thenReturn(Map.of(PEER, PresenceDto.online(PEER)));
+
+        DmConversationDto dto = service.getConversation(SELF, CONV);
+
+        assertThat(dto.id()).isEqualTo(CONV);
+        assertThat(dto.peer().username()).isEqualTo("peer");
+        assertThat(dto.lastMessagePreview()).isEqualTo("yo");
+        assertThat(dto.lastMessageSenderId()).isEqualTo(PEER);
+        assertThat(dto.unreadCount()).isEqualTo(5);
+        assertThat(dto.peerOnline()).isTrue();
+    }
+
+    /** The peer is resolved relative to the caller, so each side sees the other. */
+    @Test
+    void getConversationResolvesThePeerRelativeToTheCaller() {
+        DmConversationEntity conv = conversation(CONV, SELF, PEER);
+        when(conversationRepository.findById(CONV)).thenReturn(Optional.of(conv));
+        when(stateRepository.findByConversationIdInAndUserId(List.of(CONV), PEER)).thenReturn(List.of());
+        when(profileService.findByIds(List.of(SELF)))
+                .thenReturn(List.of(new ProfileSearchResultDto(SELF, "Self Name", "self", null)));
+        when(presenceService.getPresence(List.of(SELF)))
+                .thenReturn(Map.of(SELF, PresenceDto.offline(SELF, null)));
+
+        DmConversationDto dto = service.getConversation(PEER, CONV);
+
+        assertThat(dto.peer().id()).isEqualTo(SELF);
+        assertThat(dto.unreadCount()).isZero(); // absent state → default 0
+        assertThat(dto.peerOnline()).isFalse();
+    }
+
+    @Test
+    void getConversationIsA404ForANonParticipant() {
+        UUID stranger = UUID.fromString("00000000-0000-0000-0000-0000000000f1");
+        when(conversationRepository.findById(CONV))
+                .thenReturn(Optional.of(conversation(CONV, SELF, PEER)));
+
+        assertThatExceptionOfType(DmConversationNotFoundException.class)
+                .isThrownBy(() -> service.getConversation(stranger, CONV));
+
+        verifyNoInteractions(profileService);
+    }
+
+    @Test
+    void getConversationIsA404WhenItDoesNotExist() {
+        when(conversationRepository.findById(CONV)).thenReturn(Optional.empty());
+
+        assertThatExceptionOfType(DmConversationNotFoundException.class)
+                .isThrownBy(() -> service.getConversation(SELF, CONV));
     }
 
     // ---- listConversations --------------------------------------------------

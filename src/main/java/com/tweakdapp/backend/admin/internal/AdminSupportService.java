@@ -34,7 +34,7 @@ public class AdminSupportService {
                 "ticket_reply",
                 "Support replied to your ticket",
                 "\"" + ticket.subject() + "\" has a new reply from our team.",
-                Map.of("ticketId", ticket.id().toString()));
+                Map.of("ticket_id", ticket.id().toString()));
         return ticket;
     }
 }
