@@ -7,7 +7,28 @@ dependency-free leaf: other modules (via the `admin` orchestrator) write notific
 Current producers: feedback status changes (`feedback_status`), staff ticket replies
 (`ticket_reply`), moderation warnings (`moderation_warning`), content removals (`content_removed`).
 The `type` string is the client's rendering/deep-link discriminator; `payload` (jsonb) carries the
-type-specific ids (e.g. `feedbackId`, `ticketId`, `caseId`).
+type-specific ids. **Every payload key is snake_case and every id is a string**, across all
+producers — the global SNAKE_CASE wire strategy renames POJO fields, not JSON-map keys, so they are
+spelled out literally at each call site.
+
+| `type` | Recipient | `payload` keys |
+|---|---|---|
+| `feedback_status` | author + subscribers | `feedback_id`, `status` |
+| `ticket_reply` | the requester | `ticket_id` |
+| `moderation_warning` | the author | `target_type`, `target_id`, `case_id` |
+| `content_removed` | the author | `target_type`, `target_id`, `case_id` |
+
+`target_type` ∈ `post` / `comment` / `forum_thread` / `forum_thread_reply`, and decides which screen
+`target_id` belongs to.
+
+> **Routing caveat for `content_removed`:** the content is deleted immediately before the
+> notification is sent, so `target_id` names a row that no longer exists. It is there for context
+> and labelling, **not** as a deep-link destination — routing to it lands on a 404. `target_id` on
+> `moderation_warning` *is* routable: a warning leaves the content in place.
+
+*(These four keys were `feedbackId` / `ticketId` / `caseId` / `targetType` until 2026-08-31, and
+`target_id` was absent entirely — which is why the two moderation types could not be deep-linked at
+all. Clients reading the old camelCase keys must be updated in the same release.)*
 
 ### Social producers (posts / forums engagement)
 

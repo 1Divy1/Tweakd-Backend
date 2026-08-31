@@ -1,9 +1,44 @@
 # dms module
 
-1:1 direct messaging. **The backend is the realtime gateway** — the Flutter client never talks to
-Supabase Realtime. Durable operations are REST; live delivery (new messages, read receipts,
-deletions, typing) is pushed over the shared STOMP WebSocket (`shared/realtime`, endpoint `/ws`)
-to each participant's private queue `/user/queue/dms`.
+1:1 direct messaging.
+
+> ### ⚠️ Status: sending and the WebSocket are retired; the reads below are live
+>
+> This module was built as the full DM backend — REST writes plus a STOMP realtime gateway. The
+> client now uses only **half** of it. Established against production on 2026-08-31:
+>
+> | Concern | Owner today |
+> |---|---|
+> | Reading conversations & messages | **This module** (`GET /conversations`, `GET /conversations/{id}/messages`) |
+> | Read receipts, hide, delete | **This module** — no Supabase RPC exists for them |
+> | **Sending** | **Supabase RPC `dm_send_message`** (`SECURITY DEFINER`) |
+> | **Live delivery / presence** | **Supabase Realtime Broadcast** (topic auth: `dm_topic_is_peer`) |
+>
+> **Why the reads must be ours:** `authenticated` and `anon` hold *no* privilege on any `dm_*`
+> table — RLS is on and there are zero policies *and* zero grants. The client physically cannot
+> read `dm_conversations` or `dm_messages` from Supabase. Sending works only because
+> `dm_send_message` is `SECURITY DEFINER` and so bypasses both.
+>
+> **Why sending is not ours:** `dm_send_message` writes the message **and** its `type = 'dm'`
+> notification row in one transaction, and that row is what fires the DM push (trigger →
+> `dm-push` edge function). `DmsServiceImpl.sendMessage` writes no notification, so a message sent
+> through the backend arrived with no push at all. Verified: of the 10 DMs sent since the
+> `dm_send_message_writes_notification` migration (2026-08-30), all 10 join to a matching `dm`
+> notification by `payload->>'message_id'` — 0 orphans.
+>
+> Consequences:
+> - **`POST /messages` is retired** — it answers `410 Gone` and logs a warning naming the caller.
+>   `DmsService.sendMessage` is left intact (still unit-tested) as the reference implementation.
+> - `DmMessageCreatedEvent` therefore never fires, so **`DmEventPusher` and the whole
+>   `/user/queue/dms` STOMP gateway below are dead**. Nothing publishes to that queue.
+> - Everything else in this module is live and load-bearing. Do not "clean up" the read path.
+>
+> This notice replaces an earlier paragraph claiming "the backend is the realtime gateway — the
+> Flutter client never talks to Supabase Realtime", which was true when the module was written
+> (2026-07) and is false now.
+
+The rest of this document describes the module **as implemented**. Treat the send and WebSocket
+sections as a reference for code that exists, not as a description of live traffic.
 
 Anyone can DM anyone (all accounts are public; there is no block check yet — `blocked_accounts`
 exists but the `relationships` module exposes no public API for it). Conversations are created
@@ -27,8 +62,9 @@ ON DELETE CASCADE.
 | Method | Description |
 |---|---|
 | `listConversations(userId, cursor, size)` | Chats list, keyset by `last_message_at` desc; peer summary + preview + unread count |
+| `getConversation(userId, conversationId)` | One conversation in the same shape as a list row; 404 for a non-participant |
 | `listMessages(userId, conversationId, cursor, size)` | One history page, newest first, + peer's read watermark |
-| `sendMessage(senderId, request)` | Persist + bump unread + unhide both sides → `message.created` push after commit |
+| `sendMessage(senderId, request)` ⚠️ no longer reachable over REST | Persist + bump unread + unhide both sides → `message.created` push after commit |
 | `markRead(userId, conversationId)` | Zero unread, advance watermark → `conversation.read` push after commit |
 | `deleteMessage(userId, messageId)` | Sender-only soft delete (idempotent) → `message.deleted` push after commit |
 | `hideConversation(userId, conversationId)` | Hide from caller's list, zero their unread |
@@ -40,8 +76,9 @@ ON DELETE CASCADE.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/conversations?cursor=&size=` | Chats list page (rows carry flat `peer_online` / `peer_last_seen_at`) |
+| GET | `/conversations/{id}` | One conversation as a chats-list row — lets a chat screen open from an id alone (push tap, restored route). Hidden conversations included |
 | GET | `/conversations/{id}/messages?cursor=&size=` | History page + `peerLastReadMessageId`; each message carries `tagged_cars` |
-| POST | `/messages` | `{recipient_id, content?, tagged_car_ids?}` → 201 + the saved message (with `tagged_cars`) |
+| POST | `/messages` ⚠️ **retired → 410** | ~~`{recipient_id, content?, tagged_car_ids?}` ~~ use the `dm_send_message` RPC |
 | POST | `/conversations/{id}/read` | Mark read → `{conversationId, lastReadMessageId}` |
 | POST | `/conversations/{id}/hide` | Hide chat (204) |
 | DELETE | `/messages/{id}` | Soft-delete own message (204) |
@@ -53,6 +90,9 @@ car-tag rules on `POST /messages` surface as 400s (dms exceptions → `GlobalExc
 `TaggedCarNotFoundException` (unknown car id). `content` still validates `@Size(max=2000)`.
 
 ## WebSocket protocol
+
+⚠️ **Dead as of 2026-08-31** — see the status notice at the top. Nothing
+publishes the events this section describes, because the client does not send through this backend.
 
 1. Connect to `/ws` (raw WebSocket, no SockJS) with STOMP CONNECT header
    `Authorization: Bearer <supabase jwt>` — validated by `shared/realtime/JwtChannelInterceptor`
