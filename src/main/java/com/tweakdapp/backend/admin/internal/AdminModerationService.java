@@ -235,7 +235,7 @@ public class AdminModerationService {
             notificationService.push(content.authorId(), "content_removed",
                     "Your content was removed",
                     note != null && !note.isBlank() ? note : "It was found to break our community guidelines.",
-                    Map.of("targetType", caseEntity.getTargetType(), "caseId", caseEntity.getId()));
+                    routingPayload(caseEntity));
         }
         resolve(caseEntity, "content_removed", moderatorId);
     }
@@ -254,7 +254,7 @@ public class AdminModerationService {
         recordAction(moderatorId, caseEntity, "warn", authorId, null, note);
         notificationService.push(authorId, "moderation_warning",
                 "You have received a warning", note,
-                Map.of("targetType", caseEntity.getTargetType(), "caseId", caseEntity.getId()));
+                routingPayload(caseEntity));
         resolve(caseEntity, "author_warned", moderatorId);
     }
 
@@ -456,5 +456,24 @@ public class AdminModerationService {
         }
         String flat = content.replace('\n', ' ').strip();
         return flat.length() <= PREVIEW_LENGTH ? flat : flat.substring(0, PREVIEW_LENGTH) + "…";
+    }
+
+    /**
+     * Routing payload for the two notifications a moderation decision sends the author.
+     *
+     * <p>{@code target_id} is the point: without it the client knows a case exists and what kind of
+     * thing it concerned, but not which one, so the notification could not be deep-linked. Keys are
+     * literal snake_case and ids are strings, matching every other notification type — the global
+     * wire strategy renames POJO fields, not JSON-map keys, so they are spelled out. {@code case_id}
+     * is stringified for the same reason, even though it is a bigint.
+     *
+     * <p>{@code target_type} is the discriminator the client routes on ({@code post},
+     * {@code thread}, ...); it decides which screen {@code target_id} belongs to.
+     */
+    private static Map<String, Object> routingPayload(ModerationCaseEntity caseEntity) {
+        return Map.of(
+                "target_type", caseEntity.getTargetType(),
+                "target_id", caseEntity.getTargetId().toString(),
+                "case_id", caseEntity.getId().toString());
     }
 }

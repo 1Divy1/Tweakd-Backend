@@ -39,7 +39,7 @@ public class AdminFeedbackService {
                 "feedback_status",
                 "Feedback update: " + change.newStatus().name(),
                 "\"" + change.contentPreview() + "\" is now " + change.newStatus().name() + ".",
-                Map.of("feedbackId", change.feedbackId().toString(), "status", change.newStatus().id()));
+                Map.of("feedback_id", change.feedbackId().toString(), "status", change.newStatus().id()));
         return change.newStatus();
     }
 }

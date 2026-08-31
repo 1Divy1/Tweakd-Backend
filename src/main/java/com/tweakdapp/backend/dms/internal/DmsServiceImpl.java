@@ -119,21 +119,33 @@ public class DmsServiceImpl implements DmsService {
         Map<UUID, PresenceDto> presence = presenceService.getPresence(peerIds);
 
         List<DmConversationDto> items = page.stream()
-                .map(c -> {
-                    PresenceDto peerPresence = presence.get(c.peerOf(userId));
-                    return new DmConversationDto(
-                            c.getId(),
-                            peers.get(c.peerOf(userId)),
-                            c.getLastMessagePreview(),
-                            c.getLastMessageSenderId(),
-                            c.getLastMessageAt(),
-                            unreadByConversation.getOrDefault(c.getId(), 0),
-                            peerPresence.online(),
-                            peerPresence.lastSeenAt());
-                })
+                .map(c -> toConversationDto(
+                        c,
+                        peers.get(c.peerOf(userId)),
+                        presence.get(c.peerOf(userId)),
+                        unreadByConversation.getOrDefault(c.getId(), 0)))
                 .toList();
 
         return new DmConversationPageDto(items, nextCursor);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DmConversationDto getConversation(UUID userId, UUID conversationId) {
+        DmConversationEntity conversation = requireParticipant(conversationId, userId);
+        UUID peerId = conversation.peerOf(userId);
+
+        int unread = stateRepository.findByConversationIdInAndUserId(List.of(conversationId), userId).stream()
+                .findFirst()
+                .map(DmParticipantStateEntity::getUnreadCount)
+                .orElse(0);
+
+        // Same two batch lookups the list uses, for one id each — keeps a single shape of row.
+        ProfileSearchResultDto peer = profileService.findByIds(List.of(peerId)).stream()
+                .findFirst()
+                .orElse(null);
+
+        return toConversationDto(conversation, peer, presenceService.getPresence(List.of(peerId)).get(peerId), unread);
     }
 
     @Override
@@ -295,6 +307,28 @@ public class DmsServiceImpl implements DmsService {
      * The participant check and the conversation fetch in one: a conversation the caller is not
      * part of is indistinguishable from one that does not exist.
      */
+    /**
+     * One chats-list row. Shared by the list and the single-conversation read so the two can never
+     * drift into describing the same conversation differently.
+     *
+     * <p>{@code peer} is null only if the peer's profile could not be resolved (a hard-deleted
+     * account); the row is still returned, as the list has always done.
+     */
+    private static DmConversationDto toConversationDto(DmConversationEntity conversation,
+                                                       ProfileSearchResultDto peer,
+                                                       PresenceDto peerPresence,
+                                                       int unreadCount) {
+        return new DmConversationDto(
+                conversation.getId(),
+                peer,
+                conversation.getLastMessagePreview(),
+                conversation.getLastMessageSenderId(),
+                conversation.getLastMessageAt(),
+                unreadCount,
+                peerPresence.online(),
+                peerPresence.lastSeenAt());
+    }
+
     private DmConversationEntity requireParticipant(UUID conversationId, UUID userId) {
         return conversationRepository.findById(conversationId)
                 .filter(c -> c.getUserA().equals(userId) || c.getUserB().equals(userId))
