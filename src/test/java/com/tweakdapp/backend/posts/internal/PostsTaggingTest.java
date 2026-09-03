@@ -168,7 +168,7 @@ class PostsTaggingTest {
     }
 
     private static CarSummaryDto car(UUID carId, UUID ownerId) {
-        return new CarSummaryDto(carId, "BMW", "M3", null, null, new CarOwnerDto(ownerId, "user-" + ownerId));
+        return new CarSummaryDto(carId, "BMW", "M3", 2020, 473, 550, null, null, new CarOwnerDto(ownerId, "user-" + ownerId));
     }
 
     // ---- the "tag the owner first" rule on comments --------------------------

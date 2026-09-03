@@ -151,6 +151,102 @@ $$;
 
 
 --
+-- Name: dm_push_bundle(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.dm_push_bundle(p_notification_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_n      public.notifications%rowtype;
+  v_unread bigint;
+  v_result jsonb;
+begin
+  select * into v_n from public.notifications where id = p_notification_id;
+
+  -- Lock #1: this RPC will not serve anything that is not a DM, so a leaked
+  -- webhook secret cannot be used to re-fire or spoof any other push type.
+  if not found or v_n.type <> 'dm' then
+    return null;
+  end if;
+
+  if exists (
+    select 1 from public.notification_preferences p
+     where p.profile_id = v_n.user_id and p.dms_enabled = false
+  ) then
+    return null;
+  end if;
+
+  if v_n.payload ? 'actor_id' and exists (
+    select 1 from public.blocked_accounts b
+     where b.blocker_id = v_n.user_id
+       and b.blocked_id = (v_n.payload ->> 'actor_id')::uuid
+  ) then
+    return null;
+  end if;
+
+  select count(*) into v_unread
+    from public.notifications n
+   where n.user_id = v_n.user_id and n.is_read = false;
+
+  select jsonb_build_object(
+           'notification_id', v_n.id,
+           'title',           v_n.title,
+           'body',            v_n.body,
+           'payload',         coalesce(v_n.payload, '{}'::jsonb),
+           'unread_count',    v_unread,
+           'tokens',          coalesce(jsonb_agg(d.token), '[]'::jsonb))
+    into v_result
+    from public.user_devices_firebase_token d
+   where d.user_id = v_n.user_id;
+
+  return v_result;
+end;
+$$;
+
+
+--
+-- Name: dm_push_notify(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.dm_push_notify() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_secret text;
+begin
+  select decrypted_secret into v_secret
+    from vault.decrypted_secrets
+   where name = 'dm_push_webhook_secret';
+
+  -- A missing secret must never break a DM send; the message still delivers,
+  -- only the push is skipped.
+  if v_secret is null then
+    return null;
+  end if;
+
+  -- URL and anon key are public by design (the anon key ships in the Flutter
+  -- app); the anon bearer only satisfies the gateway's verify_jwt. The actual
+  -- authentication is x-webhook-secret, compared in constant time by the
+  -- function. net.http_post queues asynchronously, so DM send latency is
+  -- unchanged, and a rolled-back transaction cancels the queued request.
+  perform net.http_post(
+    url     := 'https://fybgmaigzidhbmhbgfhu.supabase.co/functions/v1/dm-push',
+    headers := jsonb_build_object(
+                 'Content-Type',     'application/json',
+                 'Authorization',    'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5YmdtYWlnemlkaGJtaGJnZmh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNDU1MjAsImV4cCI6MjA5MTkyMTUyMH0.luKclQDTi7D-kQCLoKd8yxqopqWr-Uiiar95qnz4Zqs',
+                 'x-webhook-secret', v_secret),
+    body    := jsonb_build_object('notification_id', new.id),
+    timeout_milliseconds := 5000
+  );
+  return null;
+end;
+$$;
+
+
+--
 -- Name: dm_send_message(uuid, text, uuid[]); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -247,9 +343,8 @@ begin
         hidden_at    = null;
 
   -- Feed row for the recipient. Spring's push pipeline never touches 'dm';
-  -- in production the notifications_dm_push trigger picks this row up and
-  -- calls the dm-push edge function. That trigger is deliberately NOT
-  -- mirrored here: it depends on pg_net, which Testcontainers does not have.
+  -- the notifications_dm_push trigger picks this row up instead. Same
+  -- transaction as the send, so a failed send leaves no orphan notification.
   insert into public.notifications (id, user_id, type, title, body, payload, is_read, created_at)
   select
     gen_random_uuid(),
@@ -1182,6 +1277,57 @@ CREATE TABLE public.app_language_options (
 --
 
 COMMENT ON TABLE public.app_language_options IS 'Language options for the app''s interface';
+
+
+--
+-- Name: badges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.badges (
+    id text NOT NULL,
+    title text NOT NULL,
+    description text,
+    unlocked_badge_url text NOT NULL,
+    is_available boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    locked_badge_url text,
+    CONSTRAINT badges_urls_are_keys CHECK (((unlocked_badge_url !~~ 'http%'::text) AND ((locked_badge_url IS NULL) OR (locked_badge_url !~~ 'http%'::text))))
+);
+
+
+--
+-- Name: TABLE badges; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.badges IS 'Admin-managed catalogue of unlockable badges. Retire a badge with is_available = false — never DELETE, or you orphan the user_badges rows that earned it (the FK is ON DELETE RESTRICT and will refuse anyway).';
+
+
+--
+-- Name: COLUMN badges.id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.id IS 'Stable code, referenced by user_badges.badge_id and by the Badges constants in the backend. Renaming it cascades to holders.';
+
+
+--
+-- Name: COLUMN badges.unlocked_badge_url; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.unlocked_badge_url IS 'R2 object key of the earned artwork within the app-assets bucket, e.g. ''badges/pioneer/badge-unlocked.svg''. A key, not a URL — the backend builds the full URL.';
+
+
+--
+-- Name: COLUMN badges.is_available; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.is_available IS 'false = retired: cannot be awarded and is hidden from the catalogue, but stays readable on the profiles that already hold it.';
+
+
+--
+-- Name: COLUMN badges.locked_badge_url; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.locked_badge_url IS 'R2 object key of the not-yet-earned artwork. NULL = no locked variant; the client greys the unlocked one out itself.';
 
 
 --
@@ -3070,6 +3216,7 @@ CREATE TABLE public.profiles (
     banned_until timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     app_language text DEFAULT 'en'::text NOT NULL,
+    reputation_score integer DEFAULT 0 NOT NULL,
     CONSTRAINT profiles_bio_check CHECK ((length(bio) <= 500)),
     CONSTRAINT profiles_discovery_radius_km_check CHECK (((discovery_radius_km >= 1) AND (discovery_radius_km <= 100))),
     CONSTRAINT profiles_followers_count_check CHECK ((followers_count >= 0)),
@@ -3195,6 +3342,123 @@ COMMENT ON TABLE public.report_reasons IS 'Contains categories of reasons for a 
 
 
 --
+-- Name: reputation_score_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reputation_score_history (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    reason text NOT NULL,
+    score_gain integer NOT NULL,
+    previous_score integer NOT NULL,
+    new_score integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    source_type text,
+    source_id uuid,
+    source_label text,
+    revoked_at timestamp with time zone,
+    revoked_reason text,
+    CONSTRAINT reputation_history_revocation_paired CHECK (((revoked_reason IS NULL) OR (revoked_at IS NOT NULL))),
+    CONSTRAINT reputation_history_source_paired CHECK ((((source_type IS NULL) AND (source_id IS NULL)) OR ((source_type IS NOT NULL) AND (source_id IS NOT NULL)))),
+    CONSTRAINT reputation_history_source_type_valid CHECK (((source_type IS NULL) OR (source_type = ANY (ARRAY['car_event'::text, 'contest'::text, 'car'::text, 'car_modification'::text, 'forum_thread'::text, 'forum_reply'::text, 'marketplace_listing'::text, 'review'::text]))))
+);
+
+
+--
+-- Name: COLUMN reputation_score_history.source_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_history.source_type IS 'What kind of thing earned this, e.g. ''car_event''. NULL for entries with no source (anniversaries).';
+
+
+--
+-- Name: COLUMN reputation_score_history.source_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_history.source_id IS 'The source row''s id. Deliberately NOT a foreign key - see the migration header. Used for deep-linking.';
+
+
+--
+-- Name: COLUMN reputation_score_history.source_label; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_history.source_label IS 'The source''s display name as it was at award time. Snapshotted so the entry survives the source being renamed or deleted.';
+
+
+--
+-- Name: COLUMN reputation_score_history.revoked_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_history.revoked_at IS 'When this award was taken back. NULL = live. Revoked entries are hidden from the public timeline and excluded from the score.';
+
+
+--
+-- Name: COLUMN reputation_score_history.revoked_reason; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_history.revoked_reason IS 'Why it was taken back, e.g. ''Event was cancelled''. Shown to the owner only.';
+
+
+--
+-- Name: reputation_score_reason_options; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reputation_score_reason_options (
+    id text NOT NULL,
+    reason text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    points integer NOT NULL,
+    category text NOT NULL,
+    is_repeatable boolean DEFAULT true NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    CONSTRAINT reputation_reason_category_valid CHECK ((category = ANY (ARRAY['events'::text, 'contests'::text, 'community'::text, 'garage'::text, 'trust'::text, 'marketplace'::text, 'moderation'::text]))),
+    CONSTRAINT reputation_reason_points_nonzero CHECK ((points <> 0))
+);
+
+
+--
+-- Name: TABLE reputation_score_reason_options; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.reputation_score_reason_options IS 'Reference data: every way a user can gain or lose reputation. `id` is the code stored in reputation_score_history.reason.';
+
+
+--
+-- Name: COLUMN reputation_score_reason_options.id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_reason_options.id IS 'Stable code, referenced by reputation_score_history.reason. Renaming it cascades to history.';
+
+
+--
+-- Name: COLUMN reputation_score_reason_options.reason; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_reason_options.reason IS 'Display label, e.g. "Attended a car event".';
+
+
+--
+-- Name: COLUMN reputation_score_reason_options.points; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_reason_options.points IS 'Default score delta. Negative for penalties. Never zero.';
+
+
+--
+-- Name: COLUMN reputation_score_reason_options.is_repeatable; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_reason_options.is_repeatable IS 'false = one-time achievement; the backend refuses a second award for the same user.';
+
+
+--
+-- Name: COLUMN reputation_score_reason_options.is_active; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reputation_score_reason_options.is_active IS 'Retire a reason by setting this false — never DELETE, or you orphan history.';
+
+
+--
 -- Name: saved_posts; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3301,6 +3565,33 @@ CREATE TABLE public.tagged_people (
     user_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now()
 );
+
+
+--
+-- Name: user_badges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_badges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    badge_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    granted_by uuid
+);
+
+
+--
+-- Name: TABLE user_badges; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.user_badges IS 'Which badges a user has unlocked. One row per (user, badge) — enforced by user_badges_user_badge_uq, which is what makes awarding idempotent. Revoking deletes the row; there is no tombstone.';
+
+
+--
+-- Name: COLUMN user_badges.granted_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.user_badges.granted_by IS 'The staff member who granted this by hand, from admin_team_members. NULL = awarded automatically by the backend. Not an FK: staff and app users live in different tables, and removing a staff member must not disturb the badges they granted.';
 
 
 --
@@ -3574,6 +3865,14 @@ ALTER TABLE ONLY public.app_language_options
 
 ALTER TABLE ONLY public.app_language_options
     ADD CONSTRAINT app_language_options_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: badges badges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.badges
+    ADD CONSTRAINT badges_pkey PRIMARY KEY (id);
 
 
 --
@@ -4417,6 +4716,22 @@ ALTER TABLE ONLY public.report_reasons
 
 
 --
+-- Name: reputation_score_history reputation_score_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reputation_score_history
+    ADD CONSTRAINT reputation_score_history_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: reputation_score_reason_options reputation_score_reason_options_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reputation_score_reason_options
+    ADD CONSTRAINT reputation_score_reason_options_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: saved_posts saved_posts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4486,6 +4801,14 @@ ALTER TABLE ONLY public.tagged_people
 
 ALTER TABLE ONLY public.post_images
     ADD CONSTRAINT unique_post_display_order UNIQUE (post_id, display_order);
+
+
+--
+-- Name: user_badges user_badges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_badges
+    ADD CONSTRAINT user_badges_pkey PRIMARY KEY (id);
 
 
 --
@@ -5175,6 +5498,27 @@ CREATE INDEX notifications_user_unread_idx ON public.notifications USING btree (
 
 
 --
+-- Name: reputation_score_history_source_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX reputation_score_history_source_uq ON public.reputation_score_history USING btree (user_id, reason, source_type, source_id) WHERE ((source_id IS NOT NULL) AND (revoked_at IS NULL));
+
+
+--
+-- Name: reputation_score_history_user_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX reputation_score_history_user_created_idx ON public.reputation_score_history USING btree (user_id, created_at DESC, id DESC);
+
+
+--
+-- Name: reputation_score_history_user_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX reputation_score_history_user_live_idx ON public.reputation_score_history USING btree (user_id, created_at DESC, id DESC) WHERE (revoked_at IS NULL);
+
+
+--
 -- Name: support_ticket_messages_ticket_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5193,6 +5537,20 @@ CREATE INDEX support_tickets_status_idx ON public.support_tickets USING btree (s
 --
 
 CREATE INDEX support_tickets_user_idx ON public.support_tickets USING btree (user_id, last_message_at DESC);
+
+
+--
+-- Name: user_badges_badge_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX user_badges_badge_id_idx ON public.user_badges USING btree (badge_id);
+
+
+--
+-- Name: user_badges_user_badge_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX user_badges_user_badge_uq ON public.user_badges USING btree (user_id, badge_id);
 
 
 --
@@ -5256,6 +5614,13 @@ CREATE TRIGGER feedback_feed_votes_counts_trg AFTER INSERT OR DELETE OR UPDATE O
 --
 
 CREATE TRIGGER feedback_votes_count AFTER INSERT OR DELETE ON public.feedback_votes FOR EACH ROW EXECUTE FUNCTION public.bump_feedback_vote_count();
+
+
+--
+-- Name: notifications notifications_dm_push; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER notifications_dm_push AFTER INSERT ON public.notifications FOR EACH ROW WHEN ((new.type = 'dm'::text)) EXECUTE FUNCTION public.dm_push_notify();
 
 
 --
@@ -6539,6 +6904,22 @@ ALTER TABLE ONLY public.profiles
 
 
 --
+-- Name: reputation_score_history reputation_score_history_reason_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reputation_score_history
+    ADD CONSTRAINT reputation_score_history_reason_fkey FOREIGN KEY (reason) REFERENCES public.reputation_score_reason_options(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: reputation_score_history reputation_score_history_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reputation_score_history
+    ADD CONSTRAINT reputation_score_history_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: saved_posts saved_posts_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6608,6 +6989,22 @@ ALTER TABLE ONLY public.tagged_people
 
 ALTER TABLE ONLY public.tagged_people
     ADD CONSTRAINT tagged_people_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_badges user_badges_badge_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_badges
+    ADD CONSTRAINT user_badges_badge_id_fkey FOREIGN KEY (badge_id) REFERENCES public.badges(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: user_badges user_badges_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_badges
+    ADD CONSTRAINT user_badges_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6697,6 +7094,11 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: app_language_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: badges; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
@@ -7123,6 +7525,16 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
+-- Name: reputation_score_history; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: reputation_score_reason_options; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
 -- Name: saved_posts; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7149,6 +7561,11 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: tagged_people; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: user_badges; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 

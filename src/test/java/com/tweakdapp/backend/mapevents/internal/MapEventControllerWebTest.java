@@ -215,7 +215,7 @@ class MapEventControllerWebTest {
     void myParticipantsReturnsTheSnakeCaseShapeIncludingTheRejectionReason() throws Exception {
         when(mapEventsService.listMyParticipants(USER_ID, EVENT_ID)).thenReturn(List.of(
                 new MapEventParticipantDto(
-                        new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null),
+                        new CarSummaryDto(CAR_ID, "Brand", "Model", 2021, 300, 400, null, null, null),
                         "rejected", Instant.parse("2026-08-01T12:00:00Z"), "not a fit")));
 
         mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/cars/mine").with(TestJwts.user(USER_ID)))
@@ -308,7 +308,7 @@ class MapEventControllerWebTest {
         when(mapEventsService.listWithdrawalRequests(USER_ID, EVENT_ID)).thenReturn(List.of(
                 new MapEventWithdrawalRequestDto(
                         new ProfileSearchResultDto(OWNER_ID, "Owner Name", "owner_username", null),
-                        List.of(new CarSummaryDto(CAR_ID, "Brand", "Model", null, null, null)),
+                        List.of(new CarSummaryDto(CAR_ID, "Brand", "Model", 2021, 300, 400, null, null, null)),
                         "moving away")));
 
         mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/withdrawals").with(TestJwts.user(USER_ID)))

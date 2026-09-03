@@ -962,6 +962,9 @@ class GarageServiceImpl implements GarageService {
                 c.getId(),
                 c.getBrand().getName(),
                 c.getModel().getModel(),
+                c.getYear(),
+                c.getHorsepower(),
+                c.getTorque(),
                 toMediaRef(c.getCoverImageKey()),
                 toStatusOptionDto(c.getStatus()),
                 owner);

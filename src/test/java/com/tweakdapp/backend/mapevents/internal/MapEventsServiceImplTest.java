@@ -176,7 +176,7 @@ class MapEventsServiceImplTest {
     }
 
     private static CarSummaryDto carSummary(UUID carId) {
-        return new CarSummaryDto(carId, "Brand", "Model", null, null, null);
+        return new CarSummaryDto(carId, "Brand", "Model", 2021, 300, 400, null, null, null);
     }
 
     // ---- visibility ---------------------------------------------------------
