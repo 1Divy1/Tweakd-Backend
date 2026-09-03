@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.profile.internal.controller;
 
+import com.tweakdapp.backend.badges.dto.BadgeDto;
+import com.tweakdapp.backend.badges.dto.UserBadgeDto;
 import com.tweakdapp.backend.profile.ProfileService;
 import com.tweakdapp.backend.profile.dto.LanguageOptionDto;
 import com.tweakdapp.backend.profile.dto.LocationRequest;
@@ -23,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -57,7 +60,18 @@ class ProfileControllerWebTest {
 
     private ProfileDto sampleProfile() {
         return new ProfileDto(ID, "user", "Racer", "racer", "http://a/x.png", "vroom",
-                "http://link", 12, 7, true, false, false, "cluj", 25, "en");
+                "http://link", 12, 7, true, false, false, 340, "cluj", 25, "en",
+                List.of(pioneerBadge()));
+    }
+
+    /** The badge row the profile screen renders alongside the header — see the badges module. */
+    private static UserBadgeDto pioneerBadge() {
+        return new UserBadgeDto(
+                new BadgeDto("pioneer", "Pioneer", "One of the first members.",
+                        "https://assets/badges/pioneer/badge-unlocked.svg",
+                        "https://assets/badges/pioneer/badge-locked.svg",
+                        true, Instant.parse("2026-09-03T16:22:34Z")),
+                Instant.parse("2026-09-03T17:00:00Z"));
     }
 
     // ---- auth ---------------------------------------------------------------
@@ -346,13 +360,31 @@ class ProfileControllerWebTest {
     void getByUsernameReturnsPublicProfileWithoutOnboardingFlag() throws Exception {
         when(profileService.getPublicProfileByUsername("racer"))
                 .thenReturn(new PublicProfileDto(ID, "Racer", "racer", "http://a/x.png", "vroom",
-                        "http://link", 12, 7, true, false));
+                        "http://link", 12, 7, true, false, 340, List.of(pioneerBadge())));
 
         mockMvc.perform(get("/api/v1/profile/by-username/{u}", "racer").with(TestJwts.user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("racer"))
                 .andExpect(jsonPath("$.followers_count").value(12))
-                .andExpect(jsonPath("$.requires_onboarding").doesNotExist());
+                .andExpect(jsonPath("$.requires_onboarding").doesNotExist())
+                // The badge row rides in the profile response: no second request for it.
+                .andExpect(jsonPath("$.badges[0].badge.id").value("pioneer"))
+                .andExpect(jsonPath("$.badges[0].badge.unlocked_url")
+                        .value("https://assets/badges/pioneer/badge-unlocked.svg"))
+                .andExpect(jsonPath("$.badges[0].earned_at").exists());
+    }
+
+    // ---- GET /by-username/{username}/badges ---------------------------------
+
+    /** The refetch path: the same list, on its own, for refreshing the row after an unlock. */
+    @Test
+    void badgesCanBeRefetchedWithoutTheWholeProfile() throws Exception {
+        when(profileService.getBadgesByUsername("racer")).thenReturn(List.of(pioneerBadge()));
+
+        mockMvc.perform(get("/api/v1/profile/by-username/{u}/badges", "racer").with(TestJwts.user()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].badge.id").value("pioneer"))
+                .andExpect(jsonPath("$[0].earned_at").exists());
     }
 
     @Test

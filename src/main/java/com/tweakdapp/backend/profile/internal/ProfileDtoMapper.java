@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.profile.internal;
 
+import com.tweakdapp.backend.badges.dto.UserBadgeDto;
 import com.tweakdapp.backend.profile.dto.ProfileDto;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 import com.tweakdapp.backend.profile.dto.PublicProfileDto;
@@ -7,6 +8,8 @@ import com.tweakdapp.backend.profile.internal.entity.ProfileEntity;
 import com.tweakdapp.backend.storage.StorageBucket;
 import com.tweakdapp.backend.storage.StorageService;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * Single place that turns a {@link ProfileEntity} into its outward DTOs. Centralises avatar-URL
@@ -40,24 +43,32 @@ class ProfileDtoMapper {
         return storageService.publicUrl(StorageBucket.AVATARS, stored);
     }
 
-    ProfileDto toDto(ProfileEntity p) {
+    /**
+     * @param badges the profile owner's unlocked badges. Passed in rather than looked up here: this
+     *               is a mapper, and hiding a query behind it would make one fire per row the day
+     *               someone maps a list.
+     */
+    ProfileDto toDto(ProfileEntity p, List<UserBadgeDto> badges) {
         return new ProfileDto(
                 p.getId(), p.getRole(), p.getName(), p.getUsername(),
                 resolveAvatarUrl(p.getAvatarUrl()), p.getBio(),
                 p.getExternalLink(), p.getFollowersCount(), p.getFollowingCount(),
-                p.isVerified(), p.isBusiness(), p.isRequiresOnboarding(),
+                p.isVerified(), p.isBusiness(), p.isRequiresOnboarding(), p.getReputationScore(),
                 p.getCity().getId(),
                 p.getDiscoveryRadiusKm(),
-                p.getAppLanguage()
+                p.getAppLanguage(),
+                badges
         );
     }
 
-    PublicProfileDto toPublicDto(ProfileEntity p) {
+    /** @param badges the profile owner's unlocked badges — see {@link #toDto}. */
+    PublicProfileDto toPublicDto(ProfileEntity p, List<UserBadgeDto> badges) {
         return new PublicProfileDto(
                 p.getId(), p.getName(), p.getUsername(),
                 resolveAvatarUrl(p.getAvatarUrl()), p.getBio(),
                 p.getExternalLink(), p.getFollowersCount(), p.getFollowingCount(),
-                p.isVerified(), p.isBusiness()
+                p.isVerified(), p.isBusiness(), p.getReputationScore(),
+                badges
         );
     }
 

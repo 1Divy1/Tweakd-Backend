@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.profile.internal;
 
+import com.tweakdapp.backend.badges.BadgeService;
 import com.tweakdapp.backend.profile.ProfileService;
 import com.tweakdapp.backend.shared.geo.CityDto;
 import com.tweakdapp.backend.shared.geo.CountryDto;
@@ -14,6 +15,7 @@ import com.tweakdapp.backend.profile.dto.ProfileModerationSnapshotDto;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 import com.tweakdapp.backend.profile.dto.PublicProfileDto;
 import com.tweakdapp.backend.profile.dto.RealtimeLocationRequest;
+import com.tweakdapp.backend.profile.dto.ReputationAdjustmentDto;
 import com.tweakdapp.backend.profile.exception.CannotReportSelfException;
 import com.tweakdapp.backend.profile.exception.InvalidReferenceException;
 import com.tweakdapp.backend.profile.exception.ProfileNotFoundException;
@@ -51,6 +53,7 @@ class ProfileServiceImpl implements ProfileService {
     private final ReportService reportService;
     private final StorageService storageService;
     private final ProfileDtoMapper mapper;
+    private final BadgeService badgeService;
     private final BanCache banCache;
 
     ProfileServiceImpl(ProfileRepository profileRepository,
@@ -61,6 +64,7 @@ class ProfileServiceImpl implements ProfileService {
                        ReportService reportService,
                        StorageService storageService,
                        ProfileDtoMapper mapper,
+                       BadgeService badgeService,
                        BanCache banCache) {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
@@ -71,14 +75,29 @@ class ProfileServiceImpl implements ProfileService {
         this.storageService = storageService;
         this.mapper = mapper;
         this.banCache = banCache;
+        this.badgeService = badgeService;
+    }
+
+    /**
+     * Every {@link ProfileDto} / {@link PublicProfileDto} carries its owner's badges, so the profile
+     * screen renders its badge row without a second request. One extra indexed read per profile
+     * response — cheap, and it keeps the field always present rather than populated on some paths
+     * and empty on others.
+     *
+     * <p>The arrow points this way on purpose. {@code badges} reads nothing from {@code profiles},
+     * which is what leaves {@code profile} free to depend on it; the reverse would be a cycle.
+     */
+    private List<com.tweakdapp.backend.badges.dto.UserBadgeDto> badgesOf(UUID userId) {
+        return badgeService.listUserBadges(userId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public ProfileDto getProfile(String userId) {
-        return mapper.toDto(profileRepository
+        ProfileEntity profile = profileRepository
                 .findById(UUID.fromString(userId))
-                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId)));
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
+        return mapper.toDto(profile, badgesOf(profile.getId()));
     }
 
     @Override
@@ -114,7 +133,7 @@ class ProfileServiceImpl implements ProfileService {
 
         ensureDefaultNotificationPreferences(id);
 
-        return mapper.toDto(profile);
+        return mapper.toDto(profile, badgesOf(profile.getId()));
     }
 
     @Override
@@ -130,7 +149,7 @@ class ProfileServiceImpl implements ProfileService {
             profile.setBio(request.bio());
         }
         profileRepository.save(profile);
-        return mapper.toDto(profile);
+        return mapper.toDto(profile, badgesOf(profile.getId()));
     }
 
     @Override
@@ -148,15 +167,25 @@ class ProfileServiceImpl implements ProfileService {
         profile.setAvatarUrl(key);
         profileRepository.save(profile);
         deleteAvatarAfterCommit(previous);
-        return mapper.toDto(profile);
+        return mapper.toDto(profile, badgesOf(profile.getId()));
     }
 
     @Override
     @Transactional(readOnly = true)
     public PublicProfileDto getPublicProfileByUsername(String username) {
-        return mapper.toPublicDto(profileRepository
+        ProfileEntity profile = profileRepository
                 .findByUsername(username)
-                .orElseThrow(() -> ProfileNotFoundException.byUsername(username)));
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
+        return mapper.toPublicDto(profile, badgesOf(profile.getId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(String username) {
+        return badgesOf(profileRepository
+                .findByUsername(username)
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username))
+                .getId());
     }
 
     @Override
@@ -237,6 +266,29 @@ class ProfileServiceImpl implements ProfileService {
         banCache.evict(profileId);
     }
 
+    // ---- reputation ---------------------------------------------------------
+
+    @Override
+    @Transactional
+    public ReputationAdjustmentDto applyReputationDelta(UUID userId, int delta) {
+        ProfileEntity profile = profileRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> ProfileNotFoundException.byUserId(userId.toString()));
+
+        int previousScore = profile.getReputationScore();
+        // Clamped, so a run of penalties bottoms out at zero rather than going negative. The
+        // history row records the clamped pair, which is why the caller cannot just derive it.
+        int newScore = Math.max(0, previousScore + delta);
+        profile.setReputationScore(newScore);
+
+        return new ReputationAdjustmentDto(previousScore, newScore);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Integer> findReputationScore(UUID userId) {
+        return profileRepository.findReputationScore(userId);
+    }
+
     // ---- onboarding reference data -----------------------------------------
 
     @Override
@@ -271,7 +323,7 @@ class ProfileServiceImpl implements ProfileService {
         }
         profile.setAppLanguage(languageId);
         profileRepository.save(profile);
-        return mapper.toDto(profile);
+        return mapper.toDto(profile, badgesOf(profile.getId()));
     }
 
     // ---- location ----------------------------------------------------------
@@ -284,7 +336,7 @@ class ProfileServiceImpl implements ProfileService {
                 .orElseThrow(() -> ProfileNotFoundException.byUserId(userId));
         applyLocation(profile, request.cityId(), request.discoveryRadiusKm());
         profileRepository.save(profile);
-        return mapper.toDto(profile);
+        return mapper.toDto(profile, badgesOf(profile.getId()));
     }
 
     @Override

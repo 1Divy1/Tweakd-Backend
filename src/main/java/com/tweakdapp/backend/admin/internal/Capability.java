@@ -26,6 +26,13 @@ public enum Capability {
      * {@link #APPROVE_EVENTS}.
      */
     MANAGE_ROADMAP,
+    /**
+     * Curate the badge catalogue, and grant or take back a badge by hand. Deliberately separate
+     * from {@link #REVIEW_CONTENT}: putting a badge on someone's profile is a recognition decision,
+     * not a moderation one, and the hand-granted badges are exactly the ones a rule cannot judge —
+     * the same reasoning as {@link #APPROVE_EVENTS} and {@link #MANAGE_ROADMAP}.
+     */
+    MANAGE_BADGES,
     /** Process refunds (capability flag only — no billing integration yet). */
     REFUNDS,
     /** The overview / analytics pages. */

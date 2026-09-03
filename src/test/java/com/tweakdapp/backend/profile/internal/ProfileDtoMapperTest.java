@@ -8,6 +8,7 @@ import com.tweakdapp.backend.storage.StorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,7 +74,7 @@ class ProfileDtoMapperTest {
         p.setAppLanguage("ro");
         p.setCity(city);
 
-        ProfileDto dto = mapper.toDto(p);
+        ProfileDto dto = mapper.toDto(p, List.of());
 
         assertThat(dto.avatarUrl()).isEqualTo("http://cdn/avatars/u/pic.webp");
         assertThat(dto.appLanguage()).isEqualTo("ro");

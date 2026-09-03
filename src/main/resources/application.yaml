@@ -29,6 +29,9 @@ cloudflare:
     map-events:
       bucket: ${CLOUDFLARE_MAP_EVENTS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_MAP_EVENTS_BUCKET_URL}
+    assets:
+      bucket: ${CLOUDFLARE_ASSETS_BUCKET_NAME}
+      public-url: ${CLOUDFLARE_ASSETS_BUCKET_URL}
 
 firebase:
   # Push delivery for every notification type except `dm`, which a Supabase edge function owns.

@@ -9,6 +9,7 @@ import com.tweakdapp.backend.profile.dto.ProfileEditRequest;
 import com.tweakdapp.backend.profile.dto.NotificationPreferencesDto;
 import com.tweakdapp.backend.profile.dto.NotificationPreferencesRequest;
 import com.tweakdapp.backend.profile.dto.OnboardingRequest;
+import com.tweakdapp.backend.badges.dto.UserBadgeDto;
 import com.tweakdapp.backend.profile.dto.ProfileDto;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 import com.tweakdapp.backend.profile.dto.PublicProfileDto;
@@ -49,6 +50,16 @@ class ProfileController {
     @GetMapping("/by-username/{username}")
     public PublicProfileDto getProfileByUsername(@PathVariable String username) {
         return profileService.getPublicProfileByUsername(username);
+    }
+
+    /**
+     * Just the badge row of a profile — the same list {@code /by-username/{username}} already
+     * returns inside the profile. For refreshing the row after an unlock animation without
+     * re-fetching the whole profile.
+     */
+    @GetMapping("/by-username/{username}/badges")
+    public List<UserBadgeDto> getBadgesByUsername(@PathVariable String username) {
+        return profileService.getBadgesByUsername(username);
     }
 
     @GetMapping("/exists/{username}")

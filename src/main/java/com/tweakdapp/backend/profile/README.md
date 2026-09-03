@@ -20,6 +20,7 @@ Manages user profile data and onboarding. Owns the `profiles` table plus the
 | `getProfile(userId)` | Returns the authenticated user's own profile |
 | `completeOnboarding(userId, request)` | Saves name, username, city, discovery radius (required) and bio (optional) after first sign-in |
 | `getPublicProfileByUsername(username)` | Returns a public view of any profile by username |
+| `getBadgesByUsername(username)` | Just the badge row of a profile — the same list the profile already carries, for refetching it alone |
 | `searchByUsername(prefix)` | Prefix search across all usernames |
 | `findIdByUsername(username)` | Lookup helper for sibling modules — resolves a username to its UUID |
 | `findByIds(ids)` | Lookup helper for sibling modules — bulk hydrate a list of UUIDs to search result DTOs |
@@ -27,13 +28,15 @@ Manages user profile data and onboarding. Owns the `profiles` table plus the
 | `updateLocation(userId, request)` | Sets city, discovery radius, and/or home-location point |
 | `updateRealtimeLocation(userId, request)` | Stores the user's live location after opt-in |
 | `getNotificationPreferences(userId)` / `updateNotificationPreferences(userId, request)` | Read (lazily defaults) / replace notification toggles |
+| `applyReputationDelta(userId, delta)` | Moves `reputation_score` under a row lock and reports the before/after pair. Called only by the `reputation` module |
+| `findReputationScore(userId)` | The current score, or empty if no such profile |
 
 ### DTOs / records
 
 | Type | Fields | Used for |
 |---|---|---|
-| `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding | Own-profile responses |
-| `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness | Public profile view (no `requiresOnboarding`) |
+| `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding, reputationScore | Own-profile responses |
+| `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, reputationScore | Public profile view (no `requiresOnboarding`) |
 | `ProfileSearchResultDto` | id, name, username, avatarUrl | Search results and cross-module hydration |
 | `OnboardingRequest` | name, username, cityId, discoveryRadiusKm (required), bio (optional) | POST /onboarding body |
 | `LocationRequest` | cityId, discoveryRadiusKm (all optional) | PATCH /me/location body |
@@ -60,6 +63,7 @@ Base path: `/api/v1/profile`
 | GET | `/me` | required | Own profile |
 | POST | `/onboarding` | required | Complete onboarding (set username / bio) |
 | GET | `/by-username/{username}` | required | Public view of any profile |
+| GET | `/by-username/{username}/badges` | required | Just that profile's badge row |
 | GET | `/search?q={prefix}` | required | Username prefix search |
 | PATCH | `/me/location` | required | Update city / radius |
 | PATCH | `/me/realtime-location` | required | Push live location after opt-in |
@@ -88,6 +92,7 @@ Reference reads (base path `/api/v1/profile/reference`):
 | isVerified | boolean | |
 | isBusiness | boolean | |
 | requiresOnboarding | boolean | |
+| reputationScore | int | Community reputation. Moved only via `applyReputationDelta`; the `reputation` module owns the history behind it |
 | city | CityEntity (`shared.geo`) | `@ManyToOne` on `city_id`, nullable |
 | discoveryRadiusKm | Integer | nullable, DB check 1–100 |
 | realtimeLocation | Point | `geography` (unconstrained), nullable |
@@ -111,6 +116,18 @@ proximity-based features.
 > `profiles.realtime_location` to `geography(Point,4326)`, and set `cities.region`
 > NOT NULL to match the entity (`region` is mapped `nullable = false`).
 
+## Reputation
+
+`profiles.reputation_score` lives here, but only the number. The itemised history behind it
+(`reputation_score_history`) and the reason catalogue belong to the
+[`reputation` module](../reputation/README.md), which is the only caller of
+`applyReputationDelta` — it moves the score under a pessimistic write lock and records the
+before/after pair on its history row in the same transaction. Nothing else, including any trigger,
+writes this column.
+
+`applyReputationDelta` also serves revocation, called with a negated delta. It clamps at zero in
+both directions, so a heavily penalised account bottoms out rather than going negative.
+
 ## Supabase triggers
 
 Counter columns (`followersCount`, `followingCount`) are maintained by triggers in Supabase. The Java layer never writes them directly.
@@ -128,3 +145,22 @@ has a row to read.
   `BannedUserInterceptor` (an MVC interceptor, so it runs after the security chain) through
   `BanCache` (60s TTL, evicted on ban/unban) → 403 "Your account has been banned". An expired temp
   ban reads as not banned. `profiles.created_at` was backfilled from `auth.users` for account age.
+
+
+## Badges on a profile
+
+`ProfileDto` and `PublicProfileDto` both carry a `badges` array — the profile owner's unlocked
+badges, newest first, resolved artwork URLs and all. It is embedded rather than fetched separately
+so the profile screen paints its badge row in the same round trip as the header, the way Instagram
+highlights sit under the bio. Empty, never null; every path that returns a profile populates it,
+including the write paths, so the field is never conditionally present.
+
+That is why this module **depends on `badges` and not the other way round**. `badges` reads nothing
+from `profiles` — it has no username-keyed endpoint and no profile existence check — precisely so
+this dependency can exist without Modulith seeing a cycle. Username resolution for badges therefore
+lives here: `getBadgesByUsername` is the refetch path, for refreshing the row after an unlock
+animation without re-pulling the profile.
+
+Badges a user has *not* earned are not here. That list is the user's own business and is served by
+`GET /api/v1/badges/me/locked`; it grows with the catalogue and is only wanted when that section of
+their own profile is opened. See the [`badges` module](../badges/README.md).

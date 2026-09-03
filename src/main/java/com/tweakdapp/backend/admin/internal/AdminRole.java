@@ -17,7 +17,8 @@ enum AdminRole {
     senior_admin(EnumSet.complementOf(EnumSet.of(Capability.TRANSFER_OWNERSHIP))),
 
     // Note: no APPROVE_EVENTS — content moderators handle reported content, but publishing an
-    // event to the map is an owner / senior-admin decision.
+    // event to the map is an owner / senior-admin decision. No MANAGE_BADGES either: handing
+    // someone a badge is recognition, the opposite end of the job from taking content down.
     content_moderator(EnumSet.of(Capability.REVIEW_CONTENT, Capability.WARN_BAN)),
 
     // Note: no MANAGE_ROADMAP — ANSWER_TICKETS covers the older feedback board and support tickets,

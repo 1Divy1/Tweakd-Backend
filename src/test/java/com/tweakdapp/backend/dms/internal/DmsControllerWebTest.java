@@ -149,7 +149,7 @@ class DmsControllerWebTest {
         UUID msgId = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
         UUID watermark = UUID.fromString("00000000-0000-0000-0000-0000000000a2");
         UUID carId = UUID.fromString("00000000-0000-0000-0000-0000000000ca");
-        CarSummaryDto car = new CarSummaryDto(carId, "BMW", "M3", null, null, null);
+        CarSummaryDto car = new CarSummaryDto(carId, "BMW", "M3", 2020, 473, 550, null, null, null);
         when(dmsService.listMessages(eq(TestJwts.USER_ID), eq(CONV), any(), eq(30)))
                 .thenReturn(new DmMessagePageDto(
                         List.of(new DmMessageDto(msgId, CONV, PEER, "hey", false,

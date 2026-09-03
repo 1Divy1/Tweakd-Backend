@@ -47,7 +47,7 @@ users' garages.
 | Type | Used for |
 |---|---|
 | `GarageDto` | Garage view with embedded list of `CarSummaryDto` |
-| `CarSummaryDto` | Compact list item (brand, model, year, cover image) |
+| `CarSummaryDto` | Compact list item (brand, model, year, horsepower, torque, cover image) |
 | `CarDto` | Full car detail with embedded `CarModificationDto` list |
 | `CarModificationDto` | A single modification |
 | `CreateCarRequest` | Single-shot "add car" payload: car specs + modifications + `galleryCount` (0–50); no file bytes |

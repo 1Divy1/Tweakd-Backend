@@ -58,6 +58,32 @@ public interface ProfileService {
      */
     void unbanUser(UUID profileId);
 
+    // ---- reputation (called by the reputation module) ----------------------
+
+    /**
+     * Moves a profile's {@code reputation_score} by {@code delta} and reports where it started and
+     * ended. Negative deltas are allowed (moderation penalties); the resulting score is clamped at
+     * zero, so a heavily penalised account bottoms out rather than going negative.
+     *
+     * <p>Reputation lives on {@code profiles}, which this module owns, but the reason catalogue and
+     * the per-achievement history belong to the {@code reputation} module — so this is the seam
+     * between them. The row is read under a pessimistic write lock and must be called from inside
+     * the caller's transaction: the history row and the score have to move together or not at all.
+     *
+     * @return the before/after pair to record on the history row
+     * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if no such profile
+     */
+    com.tweakdapp.backend.profile.dto.ReputationAdjustmentDto applyReputationDelta(UUID userId, int delta);
+
+    /**
+     * The profile's current {@code reputation_score}, or empty if there is no such profile.
+     *
+     * <p>The authoritative read for the {@code reputation} module's profile block: that module owns
+     * the itemised history, this one owns the total, and the two are kept from drifting by nobody
+     * ever re-deriving one from the other.
+     */
+    Optional<Integer> findReputationScore(UUID userId);
+
     // TODO: Add docs for the below methods.
 
     ProfileDto getProfile(String userId);
@@ -74,6 +100,22 @@ public interface ProfileService {
     ProfileDto updateAvatar(String userId, String key);
 
     PublicProfileDto getPublicProfileByUsername(String username);
+
+    /**
+     * Just the badges on a profile, by username — the same list
+     * {@link PublicProfileDto#badges()} already carries.
+     *
+     * <p>It exists as its own read so the client can refresh the badge row on its own after an
+     * unlock animation, without re-pulling the profile. The profile response stays the primary
+     * path; this is the cheap follow-up.
+     *
+     * <p>Lives here rather than in {@code badges} because resolving a username to an id is this
+     * module's job, and {@code badges} deliberately reads nothing from {@code profiles} — that is
+     * what keeps the dependency one-way.
+     *
+     * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if the username does not resolve
+     */
+    List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(String username);
 
     List<ProfileSearchResultDto> searchByUsername(String prefix);
 
