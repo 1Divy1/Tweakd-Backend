@@ -45,6 +45,11 @@ or staff) 409s — `StaffEmailInUseException`. Removing a member deletes the row
 
 The overview page is gated on team membership only, so every member has a landing page.
 
+`MANAGE_BADGES` (curating the badge catalogue, and granting or taking back a badge by hand) sits
+with `APPROVE_EVENTS` and `MANAGE_ROADMAP` as owner / senior-admin only. Handing someone a badge is
+recognition — the opposite end of the job from taking content down — and the hand-granted badges are
+exactly the ones no rule can judge.
+
 ## Moderation model
 
 - **Cases** group all reports against one target: `moderation_cases` rows are upserted by a DB
@@ -90,6 +95,13 @@ The overview page is gated on team membership only, so every member has a landin
 | GET | `/support/tickets/{id}` | ANSWER_TICKETS |
 | POST | `/support/tickets/{id}/messages` (→ notifies requester) | ANSWER_TICKETS |
 | PATCH | `/support/tickets/{id}` (priority / status / assignee) | ANSWER_TICKETS |
+| GET | `/badges` (catalogue + holder counts, retired included) | MANAGE_BADGES |
+| POST | `/badges/{badgeId}` (create; 409 if the code is taken) | MANAGE_BADGES |
+| PUT | `/badges/{badgeId}` (edit; `available: false` retires) | MANAGE_BADGES |
+| DELETE | `/badges/{badgeId}` (409 while anyone holds it) | MANAGE_BADGES |
+| GET | `/badges/holders/{userId}` (the only read that returns `granted_by`) | MANAGE_BADGES |
+| POST | `/badges/{badgeId}/holders/{userId}` (grant by hand) | MANAGE_BADGES |
+| DELETE | `/badges/{badgeId}/holders/{userId}` (take it back) | MANAGE_BADGES |
 
 Team/owner rules: `owner` is never assignable via add/re-role; the owner's row can be neither
 re-roled nor removed (ownership transfer is a TODO).

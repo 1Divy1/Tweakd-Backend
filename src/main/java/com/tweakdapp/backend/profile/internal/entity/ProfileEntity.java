@@ -60,6 +60,14 @@ public class ProfileEntity {
     @Column(name = "requires_onboarding")
     private boolean requiresOnboarding;
 
+    /**
+     * Community reputation, maintained by the {@code reputation} module through
+     * {@code ProfileService.applyReputationDelta}. Never written directly here — every change must
+     * leave a matching {@code reputation_score_history} row behind it.
+     */
+    @Column(name = "reputation_score", nullable = false)
+    private int reputationScore;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "city_id")
     private CityEntity city;

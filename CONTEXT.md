@@ -55,6 +55,11 @@ com.tweakdapp.backend/
 ├── notification/     ← public API: NotificationService, DTOs. In-app notifications + FCM push
 │   └── internal/     ← private: controller, service impl, entities, repositories, producer listeners
 │       └── push/     ← private: device registry (endpoints + entity), Firebase config, FCM sender, dispatcher
+├── reputation/       ← public API: ReputationService (award SPI + reads), DTOs, reason-code constants
+│   └── internal/     ← private: controller, service impl, entities (reason catalogue / history), repositories, keyset cursor
+├── badges/           ← public API: BadgeService (award SPI + reads + admin ops), DTOs, badge-code constants
+│   └── internal/     ← private: read-only controller, service impl, entities (catalogue / unlocks), repositories
+│                       depends on NOTHING but storage+shared, so `profile` can embed badges in its response
 └── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
     └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
@@ -114,6 +119,63 @@ RLS-denied and revoked from `anon`/`authenticated`: only the backend (table owne
 function (`service_role`, select + delete) can see it. FCM tokens are device-addressable secrets and
 are never returned by any endpoint.
 
+## Reputation
+
+`profiles.reputation_score` is owned by the **profile** module; the itemised timeline behind it
+(`reputation_score_history`) and the reason catalogue (`reputation_score_reason_options`) are owned
+by **reputation**. The seam is `ProfileService.applyReputationDelta`, which moves the score under a
+pessimistic write lock and reports the before/after pair for the history row — so no module writes
+another's table, and `previous_score + score_gain = new_score` holds on every row.
+
+There is deliberately **no database trigger**. A trigger would compute its own before/after, and two
+concurrent awards could record the same `previous_score`; the row lock is what serialises them.
+Callers must award inside the achievement's own transaction so the points and the thing that earned
+them commit together.
+
+Awards carry a `source_type`/`source_id`/`source_label` triple identifying what earned them. It is
+**not** a foreign key — a history entry has to outlive the event or car behind it, and sources are
+polymorphic across too many tables for one FK column each. `source_label` is snapshotted at award
+time, so the reputation module never reads another module's tables to render a timeline. A partial
+unique index over live rows makes sourced awards exactly-once, so callers need no dedup guard.
+
+Awards are revocable (`revoked_at`), for facts retracted after payout. Revoked entries are visible
+to the owner on `/me/history` but **omitted entirely** from the public
+`/users/{username}/history` — surfacing them to strangers would make the timeline a shaming
+mechanic. Summary aggregates count live entries only, so the breakdown always matches the score.
+
+Reputation is never granted over HTTP: the module's endpoints are all reads, and awarding is
+SPI-only from the module that witnessed the achievement.
+
+## Badges
+
+Badges sit next to reputation and behave differently on purpose. Reputation is a running total with
+a ledger behind it; a badge is a **current-state fact** — you hold it or you don't. So there is no
+history table, no points, and no revocation tombstone: taking a badge back deletes the row, and the
+badge becomes earnable again.
+
+`badges` is an admin-curated catalogue; `user_badges` records who holds what. A unique index on
+`(user_id, badge_id)` is what makes `BadgeService.award` exactly-once, so callers fire it from a
+retried listener with no guard of their own — the same "the guarantee is in the database" reasoning
+as reputation's source index.
+
+The badge artwork lives in the Cloudflare R2 `app-assets` bucket. The database stores **object
+keys**; the backend builds the full public URLs at read time through `StorageService`, exactly as it
+does for avatars and post images. Each badge has an unlocked variant and an optional locked one.
+
+Two ways a badge is granted, and neither is reachable by the user receiving it: automatically via
+the SPI from the module that witnessed the achievement, or by hand from the dashboard
+(`MANAGE_BADGES`, owner and senior admin only), which stamps the granting staff member on the row.
+That granter is **staff-only** — the app-facing DTO has no field for it, and only the dashboard's
+holder read returns it.
+
+A user's earned badges are **embedded in the profile response** (`ProfileDto` / `PublicProfileDto`
+each carry a `badges` array), so the profile screen paints its badge row with the header. That is
+what fixes the dependency direction: `profile` → `badges`, and therefore `badges` reads nothing from
+`profiles` — no username-keyed endpoint, no existence check on award. The badges a user has *not*
+earned are their own separate read (`/api/v1/badges/me/locked`), for the locked section of their own
+profile only.
+
+
 ## REST conventions
 
 - Base path: `/api/v1/<module>/...`
@@ -141,6 +203,8 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`feedback` module](src/main/java/com/tweakdapp/backend/feedback/README.md)
 - [`feedbackfeed` module](src/main/java/com/tweakdapp/backend/feedbackfeed/README.md)
 - [`notification` module](src/main/java/com/tweakdapp/backend/notification/README.md)
+- [`reputation` module](src/main/java/com/tweakdapp/backend/reputation/README.md)
+- [`badges` module](src/main/java/com/tweakdapp/backend/badges/README.md)
 - [`support` module](src/main/java/com/tweakdapp/backend/support/README.md)
 - [`dms` module](src/main/java/com/tweakdapp/backend/dms/README.md)
 - [`presence` module](src/main/java/com/tweakdapp/backend/presence/README.md)

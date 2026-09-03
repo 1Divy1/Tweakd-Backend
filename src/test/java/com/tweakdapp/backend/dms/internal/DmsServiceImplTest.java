@@ -130,7 +130,7 @@ class DmsServiceImplTest {
     }
 
     private static CarSummaryDto car(UUID id) {
-        return new CarSummaryDto(id, "BMW", "M3", null, null, null);
+        return new CarSummaryDto(id, "BMW", "M3", 2020, 473, 550, null, null, null);
     }
 
     private static DmMessageCarTagEntity tag(UUID messageId, UUID carId) {

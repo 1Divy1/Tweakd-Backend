@@ -13,5 +13,12 @@ public enum StorageBucket {
     POSTS,
     AVATARS,
     BUSINESS,
-    MAP_EVENTS
+    MAP_EVENTS,
+    /**
+     * Shared app assets that ship with the product rather than being uploaded by users: badge
+     * artwork today, any other static SVG/image the app fetches by key tomorrow. Nothing presigns
+     * into this bucket — its contents are put there out of band, and the backend only ever builds
+     * public URLs for keys already recorded in the database.
+     */
+    ASSETS
 }

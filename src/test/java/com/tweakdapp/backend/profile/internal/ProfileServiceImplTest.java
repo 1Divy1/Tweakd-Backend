@@ -1,6 +1,7 @@
 package com.tweakdapp.backend.profile.internal;
 
 import com.tweakdapp.backend.shared.geo.CountryDto;
+import com.tweakdapp.backend.badges.BadgeService;
 import com.tweakdapp.backend.profile.dto.LanguageOptionDto;
 import com.tweakdapp.backend.profile.dto.LocationRequest;
 import com.tweakdapp.backend.profile.dto.ProfileEditRequest;
@@ -71,6 +72,7 @@ class ProfileServiceImplTest {
     private LanguageOptionRepository languageOptionRepository;
     private ReportService reportService;
     private StorageService storageService;
+    private BadgeService badgeService;
     private BanCache banCache;
 
     private ProfileServiceImpl service;
@@ -85,12 +87,15 @@ class ProfileServiceImplTest {
         reportService = mock(ReportService.class);
         storageService = mock(StorageService.class);
         banCache = mock(BanCache.class);
+        // Every profile DTO carries its owner's badges; these fixtures have none.
+        badgeService = mock(BadgeService.class);
+        when(badgeService.listUserBadges(any())).thenReturn(List.of());
         // Real mapper over a mocked StorageService: avatar values in these fixtures are blank or
         // http URLs, so publicUrl() is never hit — but the mapper still exercises the real resolution.
         ProfileDtoMapper mapper = new ProfileDtoMapper(storageService);
         service = new ProfileServiceImpl(profileRepository, countryRepository, cityRepository,
                 notificationPreferencesRepository, languageOptionRepository,
-                reportService, storageService, mapper, banCache);
+                reportService, storageService, mapper, badgeService, banCache);
     }
 
     // ---- fixture helpers ----------------------------------------------------

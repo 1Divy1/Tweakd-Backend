@@ -58,7 +58,7 @@ class DmEventPusherTest {
     @Test
     void messageCreatedIsPushedToBothTheRecipientAndTheSendersOtherDevicesCarryingTaggedCars() {
         CarSummaryDto car = new CarSummaryDto(
-                UUID.fromString("00000000-0000-0000-0000-0000000000ca"), "BMW", "M3", null, null, null);
+                UUID.fromString("00000000-0000-0000-0000-0000000000ca"), "BMW", "M3", 2020, 473, 550, null, null, null);
         DmMessageDto message = new DmMessageDto(
                 UUID.fromString("00000000-0000-0000-0000-0000000000a1"), CONV, SENDER, "hi", false,
                 Instant.now(), List.of(car));

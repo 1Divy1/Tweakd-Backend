@@ -36,6 +36,9 @@ cloudflare:
     map-events:
       bucket: test-map-events-bucket
       public-url: http://localhost:9000/test-map-events-bucket
+    assets:
+      bucket: test-assets-bucket
+      public-url: http://localhost:9000/test-assets-bucket
 
 spring:
   application:
