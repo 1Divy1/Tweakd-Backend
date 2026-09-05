@@ -148,6 +148,73 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
         assertThat(userBadgeRepository.existsByUserIdAndBadgeId(OTHER_USER, "pioneer")).isTrue();
     }
 
+    // ---- the unlock-animation queue --------------------------------------------
+
+    /** A fresh unlock owes an animation — the column default puts it on the pending list. */
+    @Test
+    void aFreshUnlockIsPendingCelebration() {
+        createBadge("pioneer", true);
+        award(USER, "pioneer");
+
+        assertThat(userBadgeRepository.findPendingCelebrationForUser(USER))
+                .extracting(ub -> ub.getBadge().getId()).containsExactly("pioneer");
+    }
+
+    /** Oldest unlock first, so a client several badges behind animates them in earned order. */
+    @Test
+    void pendingCelebrationsComeBackOldestUnlockFirst() {
+        createBadge("pioneer", true);
+        createBadge("veteran", true);
+        award(USER, "pioneer");
+        jdbc.update("update public.user_badges set created_at = now() - interval '1 day' where badge_id = 'pioneer'");
+        award(USER, "veteran");
+
+        assertThat(userBadgeRepository.findPendingCelebrationForUser(USER))
+                .extracting(ub -> ub.getBadge().getId()).containsExactly("pioneer", "veteran");
+    }
+
+    /** The acknowledgement flips exactly one row and takes it off the pending list. */
+    @Test
+    void markCelebratedFlipsTheRowAndRemovesItFromPending() {
+        createBadge("pioneer", true);
+        createBadge("veteran", true);
+        award(USER, "pioneer");
+        award(USER, "veteran");
+
+        assertThat(userBadgeRepository.markCelebrated(USER, "pioneer")).isEqualTo(1);
+
+        assertThat(userBadgeRepository.findPendingCelebrationForUser(USER))
+                .extracting(ub -> ub.getBadge().getId()).containsExactly("veteran");
+        assertThat(jdbc.queryForObject(
+                "select granted_in_app from public.user_badges where user_id = ? and badge_id = 'pioneer'",
+                Boolean.class, USER)).isTrue();
+    }
+
+    /** Idempotent: a second acknowledgement, or one for a badge not held, matches no row. */
+    @Test
+    void markCelebratedIsANoOpTheSecondTimeAndForBadgesNotHeld() {
+        createBadge("pioneer", true);
+        award(USER, "pioneer");
+        userBadgeRepository.markCelebrated(USER, "pioneer");
+
+        assertThat(userBadgeRepository.markCelebrated(USER, "pioneer")).isZero();
+        assertThat(userBadgeRepository.markCelebrated(USER, "veteran")).isZero();
+        assertThat(userBadgeRepository.markCelebrated(OTHER_USER, "pioneer")).isZero();
+    }
+
+    /** One user acknowledging their animation does not touch another user's pending badge. */
+    @Test
+    void markCelebratedIsScopedToTheUser() {
+        createBadge("pioneer", true);
+        award(USER, "pioneer");
+        award(OTHER_USER, "pioneer");
+
+        userBadgeRepository.markCelebrated(USER, "pioneer");
+
+        assertThat(userBadgeRepository.findPendingCelebrationForUser(OTHER_USER))
+                .extracting(ub -> ub.getBadge().getId()).containsExactly("pioneer");
+    }
+
     // ---- the locked list ----------------------------------------------------
 
     /** The anti-join behind the locked section: available badges minus the ones they hold. */

@@ -1,7 +1,7 @@
 package com.tweakdapp.backend.feed.internal;
 
 import com.tweakdapp.backend.feed.FeedService;
-import com.tweakdapp.backend.posts.dto.PostPageDto;
+import com.tweakdapp.backend.feed.dto.GlobalFeedDto;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,11 +23,16 @@ public class FeedController {
      * One keyset page of the global feed (most viral posts across the app), highest ranked first.
      * The client passes the {@code nextCursor} from the previous response back as {@code ?cursor=}
      * to page on.
+     *
+     * <p>The first page also carries {@code pending_badge_celebrations} — the badges the caller has
+     * earned but not yet seen animated. The app fetches this on launch and plays the animation for
+     * each, then acknowledges them via {@code POST /api/v1/badges/me/pending-celebration/{badgeId}}.
+     * Paged requests ({@code ?cursor=}) return an empty list there.
      */
     @GetMapping("/global")
-    public PostPageDto getGlobalFeed(@AuthenticationPrincipal Jwt jwt,
-                                     @RequestParam(required = false) String cursor,
-                                     @RequestParam(defaultValue = "20") int size) {
+    public GlobalFeedDto getGlobalFeed(@AuthenticationPrincipal Jwt jwt,
+                                       @RequestParam(required = false) String cursor,
+                                       @RequestParam(defaultValue = "20") int size) {
         return feedService.getGlobalFeed(jwt.getSubject(), cursor, size);
     }
 }

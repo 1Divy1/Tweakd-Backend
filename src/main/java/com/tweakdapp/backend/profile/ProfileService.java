@@ -32,6 +32,26 @@ public interface ProfileService {
     /** Which of the given profile ids are business accounts (e.g. for support-ticket badges). */
     List<UUID> findBusinessProfileIds(Collection<UUID> ids);
 
+    /**
+     * The same profile {@link #getPublicProfileByUsername} returns, addressed by id.
+     *
+     * <p>For callers that already hold an owner's UUID and would otherwise have to resolve a
+     * username first only to look it back up — the {@code garage} module building the owner card on
+     * a public car page, for one. Empty rather than throwing: the caller's own row exists, so a
+     * missing profile here is a race with a deleted account, not a 404 they should surface.
+     */
+    Optional<PublicProfileDto> findPublicProfileById(UUID profileId);
+
+    /**
+     * Whether this profile is currently banned (a temporary ban whose {@code banned_until} has
+     * passed reads as not banned).
+     *
+     * <p>{@code BannedUserInterceptor} covers every authenticated request, so this exists for the
+     * paths it cannot see: unauthenticated ones. A banned user's public share links must stop
+     * serving, and nothing else would notice.
+     */
+    boolean isBanned(UUID profileId);
+
     // ---- moderation (called by the admin module; no auth logic here) --------
 
     /**

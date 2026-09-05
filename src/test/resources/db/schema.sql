@@ -1946,6 +1946,82 @@ COMMENT ON COLUMN public.car_modifications.price_currency IS 'Valuta pentru pric
 
 
 --
+-- Name: car_share_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_share_links (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    car_id uuid NOT NULL,
+    owner_id uuid NOT NULL,
+    code text NOT NULL,
+    is_enabled boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    revoked_at timestamp with time zone,
+    view_count bigint DEFAULT 0 NOT NULL,
+    qr_scan_count bigint DEFAULT 0 NOT NULL,
+    last_viewed_at timestamp with time zone,
+    CONSTRAINT car_share_links_code_format_check CHECK ((code ~ '^[0-9A-HJKMNP-TV-Z]{10}$'::text)),
+    CONSTRAINT car_share_links_qr_scan_count_check CHECK ((qr_scan_count >= 0)),
+    CONSTRAINT car_share_links_view_count_check CHECK ((view_count >= 0))
+);
+
+
+--
+-- Name: TABLE car_share_links; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_share_links IS 'Public share links (web URL + QR payload) for cars. One live row per car; revoked rows are kept so an old printed code answers 410 rather than 404 or, worse, another car.';
+
+
+--
+-- Name: COLUMN car_share_links.code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.code IS 'Immutable random public identifier used in https://tweakdapp.com/c/{code}. 10 Crockford-base32 characters, canonical uppercase. Unique across every row ever issued. Printed on physical QR stickers: it must stay valid for as long as the owner owns the car, which is why there is no regenerate action.';
+
+
+--
+-- Name: COLUMN car_share_links.owner_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.owner_id IS 'The owner the code was issued to (the car''s garages.owner_id at creation). A code belongs to the (car, owner) pair: when the marketplace transfers a car, the live row is revoked, never re-pointed at the new owner.';
+
+
+--
+-- Name: COLUMN car_share_links.is_enabled; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.is_enabled IS 'Owner-controlled pause. false = the public endpoint answers 410, but the code stays reserved and can be re-enabled, so a printed sticker starts working again.';
+
+
+--
+-- Name: COLUMN car_share_links.revoked_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.revoked_at IS 'Set by system events only: car transferred. A revoked code answers 410 forever and is never reissued. Deleting the car or the account removes the row through the FK cascade instead.';
+
+
+--
+-- Name: COLUMN car_share_links.view_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.view_count IS 'Public page views plus in-app resolves that did not carry ?s=qr. Known crawler user-agents are not counted. Analytics only — never authoritative, and never read on a hot path.';
+
+
+--
+-- Name: COLUMN car_share_links.qr_scan_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.qr_scan_count IS 'The same, for requests carrying ?s=qr — the tag baked into the URL the QR code encodes. Separating the two is the only way to tell whether the printed sticker is doing any work.';
+
+
+--
+-- Name: COLUMN car_share_links.last_viewed_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.last_viewed_at IS 'Last counted view or scan, for the owner-facing "viewed X times, last on Y" stat.';
+
+--
 -- Name: car_status_options; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3576,7 +3652,8 @@ CREATE TABLE public.user_badges (
     user_id uuid NOT NULL,
     badge_id text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    granted_by uuid
+    granted_by uuid,
+    granted_in_app boolean DEFAULT false NOT NULL
 );
 
 
@@ -3592,6 +3669,13 @@ COMMENT ON TABLE public.user_badges IS 'Which badges a user has unlocked. One ro
 --
 
 COMMENT ON COLUMN public.user_badges.granted_by IS 'The staff member who granted this by hand, from admin_team_members. NULL = awarded automatically by the backend. Not an FK: staff and app users live in different tables, and removing a staff member must not disturb the badges they granted.';
+
+
+--
+-- Name: COLUMN user_badges.granted_in_app; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.user_badges.granted_in_app IS 'Has the app played the one-time unlock animation for this badge? false = still owed. Raised by the client via POST /api/v1/badges/me/pending-celebration/{badgeId} after it animates. Not a fact about the badge — purely client-celebration bookkeeping.';
 
 
 --
@@ -4177,6 +4261,14 @@ ALTER TABLE ONLY public.car_modification_gallery
 
 ALTER TABLE ONLY public.car_modifications
     ADD CONSTRAINT car_modifications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_share_links car_share_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_share_links
+    ADD CONSTRAINT car_share_links_pkey PRIMARY KEY (id);
 
 
 --
@@ -5054,6 +5146,27 @@ CREATE INDEX forum_thread_topics_thread_id_idx ON public.forum_thread_topics USI
 --
 
 CREATE INDEX forum_topics_thread_count_idx ON public.forum_thread_topic_options USING btree (thread_count);
+
+
+--
+-- Name: car_share_links_active_car_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_share_links_active_car_uq ON public.car_share_links USING btree (car_id) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: car_share_links_code_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_share_links_code_uq ON public.car_share_links USING btree (code);
+
+
+--
+-- Name: car_share_links_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_share_links_owner_idx ON public.car_share_links USING btree (owner_id);
 
 
 --
@@ -6077,6 +6190,22 @@ ALTER TABLE ONLY public.car_modifications
 
 ALTER TABLE ONLY public.car_modifications
     ADD CONSTRAINT car_modifications_price_currency_fkey FOREIGN KEY (price_currency) REFERENCES public.price_currencies_options(id);
+
+
+--
+-- Name: car_share_links car_share_links_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_share_links
+    ADD CONSTRAINT car_share_links_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON DELETE CASCADE;
+
+
+--
+-- Name: car_share_links car_share_links_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_share_links
+    ADD CONSTRAINT car_share_links_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 
 --
@@ -7199,6 +7328,11 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: car_events; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_share_links; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 

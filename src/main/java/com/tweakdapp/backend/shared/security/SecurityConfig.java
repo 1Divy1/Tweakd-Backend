@@ -30,6 +30,12 @@ public class SecurityConfig {
                         // WebSocket handshake; the real authentication happens at the STOMP
                         // CONNECT frame (shared/realtime/JwtChannelInterceptor).
                         .requestMatchers("/ws/**").permitAll()
+                        // Unauthenticated by design: the public car page behind a shared link or a
+                        // scanned QR code (garage/internal/controllers/PublicCarController), which
+                        // the website's edge function fetches for someone who does not have the app.
+                        // Anything mounted under /public/** is on the open internet — it must
+                        // return a hand-written projection, never a DTO the app happens to use.
+                        .requestMatchers("/public/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 ->

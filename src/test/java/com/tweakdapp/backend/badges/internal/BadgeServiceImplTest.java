@@ -239,6 +239,39 @@ class BadgeServiceImplTest {
         assertThat(locked.getFirst().lockedUrl()).isEqualTo("https://assets/badges/pioneer/badge-locked.svg");
     }
 
+    // ---- the unlock-animation queue --------------------------------------------
+
+    /** The pending-celebration read resolves artwork the same way every other badge read does. */
+    @Test
+    void pendingCelebrationsCarryResolvedArtwork() {
+        when(userBadgeRepository.findPendingCelebrationForUser(USER)).thenReturn(List.of(held(Instant.now())));
+
+        List<UserBadgeDto> pending = service.listPendingCelebrations(USER);
+
+        assertThat(pending).extracting(dto -> dto.badge().id()).containsExactly(PIONEER);
+        assertThat(pending.getFirst().badge().unlockedUrl())
+                .isEqualTo("https://assets/badges/pioneer/badge-unlocked.svg");
+    }
+
+    /** The first acknowledgement flips a row, so the service reports it as the one that counted. */
+    @Test
+    void acknowledgingACelebrationThatFlipsARowReturnsTrue() {
+        when(userBadgeRepository.markCelebrated(USER, PIONEER)).thenReturn(1);
+
+        assertThat(service.markCelebrated(USER, PIONEER)).isTrue();
+    }
+
+    /**
+     * A repeat acknowledgement, or one for a badge the user does not hold, matches no row — the
+     * {@code granted_in_app = false} predicate in the update is the idempotency, not a pre-check.
+     */
+    @Test
+    void acknowledgingACelebrationThatChangesNothingReturnsFalse() {
+        when(userBadgeRepository.markCelebrated(USER, PIONEER)).thenReturn(0);
+
+        assertThat(service.markCelebrated(USER, PIONEER)).isFalse();
+    }
+
     // ---- the granter is staff-only ------------------------------------------
 
     /**
