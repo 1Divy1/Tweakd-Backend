@@ -1,6 +1,6 @@
 package com.tweakdapp.backend.feed;
 
-import com.tweakdapp.backend.posts.dto.PostPageDto;
+import com.tweakdapp.backend.feed.dto.GlobalFeedDto;
 
 /**
  * Assembles the feeds shown on the app's feed page.
@@ -18,10 +18,15 @@ public interface FeedService {
      * One keyset page of the global feed: the most viral posts across the app, highest ranked
      * first. Ordering is driven by the Supabase-maintained {@code ranking_score}.
      *
+     * <p>The first page ({@code cursor == null}) also carries the caller's pending badge
+     * celebrations — the app fetches it on launch, which is when it plays the unlock animation, so
+     * this saves a dedicated request. Paged requests carry an empty list.
+     *
      * @param currentUserId the viewing user's UUID from the JWT subject (for per-post like / save flags)
      * @param cursor opaque cursor from the previous page, or {@code null} for the first page
      * @param size max posts to return (clamped to a sane maximum by the posts module)
-     * @return the page of posts plus the cursor for the next page (or {@code null} if last)
+     * @return the page of posts plus the cursor for the next page (or {@code null} if last), and —
+     *         on the first page only — the badges awaiting their in-app animation
      */
-    PostPageDto getGlobalFeed(String currentUserId, String cursor, int size);
+    GlobalFeedDto getGlobalFeed(String currentUserId, String cursor, int size);
 }

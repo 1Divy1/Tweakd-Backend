@@ -32,10 +32,26 @@ accepted trade-off for a ranked feed.
 
 There is no privacy gate: every account in the app is public.
 
+## Badge celebrations ride the first page
+
+`GET /api/v1/feed/global` is the request the app fires on startup, and startup is exactly when it
+plays the Duolingo-style badge-unlock animation. So the **first page** (`cursor` omitted) carries
+`pending_badge_celebrations` — the caller's earned-but-not-yet-animated badges, oldest first — and
+the app never needs a dedicated request for them. Paged requests (`?cursor=`) carry an empty list,
+so scrolling the feed cannot re-trigger an animation.
+
+The list comes from `BadgeService.listPendingCelebrations`; the app acknowledges each animation it
+plays through `POST /api/v1/badges/me/pending-celebration/{badgeId}` (the `badges` module owns the
+write). `badges`' own `GET /me/pending-celebration` still exists for a mid-session refetch.
+
+The response record `GlobalFeedDto` keeps `items` and `next_cursor` byte-for-byte where
+`PostPageDto` had them, so the extra field is backward-compatible for the client.
+
 ## Public API — `FeedService`
 
 | Method | REST | Notes |
 |--------|------|-------|
-| `getGlobalFeed(currentUserId, cursor, size)` | `GET /api/v1/feed/global?cursor=&size=` | Keyset page of `PostPageDto`, most viral first. `cursor` omitted = first page; echo `nextCursor` back to page on. |
+| `getGlobalFeed(currentUserId, cursor, size)` | `GET /api/v1/feed/global?cursor=&size=` | Keyset page (`GlobalFeedDto`: `items` + `next_cursor`, as `PostPageDto` had them), most viral first. `cursor` omitted = first page and includes `pending_badge_celebrations`; echo `next_cursor` back to page on. |
 
-Depends on the `posts` module (ranked post data + `PostDto` assembly).
+Depends on the `posts` module (ranked post data + `PostDto` assembly) and the `badges` module
+(pending unlock celebrations for the first page).

@@ -55,6 +55,15 @@ public class CarModificationEntity {
     /** The cost of the modification (optional, null if not set). */
     private Integer price;
 
+    /**
+     * Currency of {@link #price} (FK to price_currencies_options.id). Read-only from the ORM: the
+     * column predates the write paths here, which have never set it, and the public car page is the
+     * first reader that needs it. Mapping it {@code insertable = false, updatable = false} exposes
+     * it without changing what any existing write does.
+     */
+    @Column(name = "price_currency", insertable = false, updatable = false)
+    private String priceCurrency;
+
     /** The car's mileage reading when the modification was installed (nullable). */
     @Column(name = "mileage_at_install")
     private Integer mileageAtInstall;

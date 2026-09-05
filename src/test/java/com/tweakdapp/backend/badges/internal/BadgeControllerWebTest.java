@@ -25,7 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * The REST surface of {@link BadgeController}: the auth requirement, the exact snake_case JSON the
  * mobile app parses (a rename here is a silent client break), that {@code /me} is scoped to the
- * caller's own JWT subject, and that the module exposes no write path.
+ * caller's own JWT subject, and that the module's one write path can only acknowledge an animation,
+ * never award a badge.
  */
 @AppWebMvcTest(BadgeController.class)
 class BadgeControllerWebTest {
@@ -53,18 +54,22 @@ class BadgeControllerWebTest {
     void everyEndpointRequiresAuthentication() throws Exception {
         mockMvc.perform(get("/api/v1/badges/me")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/badges/me/locked")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/badges/me/pending-celebration")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/badges/me/pending-celebration/pioneer")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/badges/catalogue")).andExpect(status().isUnauthorized());
     }
 
     /**
-     * The module is read-only: a client must not be able to award itself a badge. The mapped paths
-     * answer GET and nothing else, and there is no path at all that would take a write.
+     * The only write the module has is the animation acknowledgement. Every other path is GET-only,
+     * and nothing a client can call awards a badge.
      */
     @Test
-    void thereIsNoWritePath() throws Exception {
+    void theOnlyWritePathIsTheAnimationAcknowledgement() throws Exception {
         mockMvc.perform(post("/api/v1/badges/catalogue").with(TestJwts.user()))
                 .andExpect(status().isMethodNotAllowed());
         mockMvc.perform(post("/api/v1/badges/me").with(TestJwts.user()))
+                .andExpect(status().isMethodNotAllowed());
+        mockMvc.perform(post("/api/v1/badges/me/locked").with(TestJwts.user()))
                 .andExpect(status().isMethodNotAllowed());
         mockMvc.perform(post("/api/v1/badges/pioneer").with(TestJwts.user()))
                 .andExpect(status().isNotFound());
@@ -149,5 +154,43 @@ class BadgeControllerWebTest {
     void thereIsNoWayToAskWhatSomebodyElseHasNotUnlocked() throws Exception {
         mockMvc.perform(get("/api/v1/badges/users/{username}/locked", "racer").with(TestJwts.user()))
                 .andExpect(status().isNotFound());
+    }
+
+    // ---- the unlock-animation queue --------------------------------------------
+
+    /** Pending celebrations serialize as a held badge does — same widget, same snake_case. */
+    @Test
+    void pendingCelebrationsSerializeAsHeldBadges() throws Exception {
+        when(badgeService.listPendingCelebrations(eq(TestJwts.USER_ID)))
+                .thenReturn(List.of(new UserBadgeDto(pioneer(), Instant.parse("2026-09-03T17:00:00Z"))));
+
+        mockMvc.perform(get("/api/v1/badges/me/pending-celebration").with(TestJwts.user()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].badge.id").value("pioneer"))
+                .andExpect(jsonPath("$[0].earned_at").exists());
+
+        verify(badgeService).listPendingCelebrations(TestJwts.USER_ID);
+    }
+
+    /** The acknowledgement is scoped to the caller's own subject and the badge id from the path. */
+    @Test
+    void acknowledgingACelebrationDelegatesWithTheSubjectAndBadgeId() throws Exception {
+        when(badgeService.markCelebrated(eq(TestJwts.USER_ID), eq("pioneer"))).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/badges/me/pending-celebration/{badgeId}", "pioneer").with(TestJwts.user()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.celebrated").value(true));
+
+        verify(badgeService).markCelebrated(TestJwts.USER_ID, "pioneer");
+    }
+
+    /** A repeat acknowledgement is not an error — the service reports nothing changed. */
+    @Test
+    void acknowledgingACelebrationThatChangedNothingIsStillOk() throws Exception {
+        when(badgeService.markCelebrated(eq(TestJwts.USER_ID), eq("pioneer"))).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/badges/me/pending-celebration/{badgeId}", "pioneer").with(TestJwts.user()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.celebrated").value(false));
     }
 }

@@ -98,6 +98,33 @@ public interface BadgeService {
     List<UserBadgeDto> listUserBadges(UUID userId);
 
     /**
+     * The badges the user has earned but whose one-time unlock animation the app still owes them —
+     * oldest unlock first.
+     *
+     * <p>The app calls this on launch, plays the Duolingo-style celebration for each, and then
+     * acknowledges each one through {@link #markCelebrated(UUID, String)} so it never plays again.
+     * A badge is on this list from the moment it is awarded — automatically or by hand from the
+     * dashboard — until that acknowledgement.
+     *
+     * <p>The caller's own only, like {@link #listLockedBadges(UUID)}: a pending celebration is a
+     * client-state detail, not something anyone else can see.
+     */
+    List<UserBadgeDto> listPendingCelebrations(UUID userId);
+
+    /**
+     * Records that the app has finished the unlock animation for one of the user's badges, so it
+     * drops off {@link #listPendingCelebrations(UUID)} and does not animate again.
+     *
+     * <p><strong>Idempotent.</strong> Calling it twice, or for a badge the user does not hold, is a
+     * no-op that returns {@code false}. It cannot award, change or reveal a badge — the only thing
+     * it can do is flip an already-held badge's celebration latch on.
+     *
+     * @return {@code true} if this call is what flipped the latch; {@code false} if it was already
+     *         set or there was no such held badge
+     */
+    boolean markCelebrated(UUID userId, String badgeId);
+
+    /**
      * The badges a user has <em>not</em> unlocked yet — every available badge they don't hold,
      * oldest first.
      *

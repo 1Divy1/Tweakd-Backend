@@ -52,6 +52,18 @@ public class UserBadgeEntity {
     @Column(name = "granted_by")
     private UUID grantedBy;
 
+    /**
+     * Whether the app has played the one-time unlock animation for this badge yet.
+     *
+     * <p>{@code false} on every fresh unlock — the award path never sets it, it takes the column's
+     * {@code DEFAULT false}. The client raises it to {@code true} through
+     * {@code POST /api/v1/badges/me/pending-celebration/{badgeId}} once it has shown the
+     * celebration, so the animation fires exactly once. It says nothing about the badge itself; a
+     * held badge is held whether or not its confetti has run.
+     */
+    @Column(name = "granted_in_app", nullable = false)
+    private boolean grantedInApp;
+
     /** When the badge was unlocked. DB-managed: DEFAULT now() in Supabase. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;

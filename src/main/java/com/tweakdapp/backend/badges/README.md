@@ -62,7 +62,8 @@ it. Concretely, this module gives up two things to stay importable:
 
 ## Awarding
 
-Two ways in, and no way for a user to award themselves — the module's own controller is read-only.
+Two ways in, and no way for a user to award themselves — the module's own controller has no award
+path (its one write only acknowledges an animation; see the API section).
 
 **Automatically**, from the module that witnessed the achievement:
 
@@ -106,13 +107,29 @@ dashboard gets a 409 that says how many users hold it, rather than a 500.
 
 Public interface: `BadgeService`. Badge codes the backend awards by name are constants on `Badges`.
 
-### App endpoints — `/api/v1/badges` (authenticated, all reads)
+### App endpoints — `/api/v1/badges` (authenticated)
 
 | Method | Path | Returns |
 |---|---|---|
 | GET | `/me` | the caller's own earned badges, newest unlock first |
 | GET | `/me/locked` | every available badge the caller has **not** earned, oldest first |
+| GET | `/me/pending-celebration` | earned badges whose unlock animation the app still owes, oldest first |
+| POST | `/me/pending-celebration/{badgeId}` | acknowledge that animation played → `{"celebrated": <bool>}` |
 | GET | `/catalogue` | every badge that can currently be unlocked, oldest first |
+
+All reads bar one. The `POST` is the only write, and it cannot award or change a badge — it flips
+`user_badges.granted_in_app` to `true` for a badge the caller already holds, so its one-time
+Duolingo-style unlock animation does not replay. Idempotent: a repeat, or a call for a badge the
+caller doesn't hold, returns `{"celebrated": false}`. Badges earned before this feature shipped
+were backfilled to `granted_in_app = true`, so they never retro-animate.
+
+**On launch the app does not call `GET /me/pending-celebration` at all.** That list is folded into
+the first page of the global feed (`GET /api/v1/feed/global` with no cursor) as
+`pending_badge_celebrations` — the request the app already fires on startup. The `feed` module
+composes it via `BadgeService.listPendingCelebrations`; paged feed requests carry an empty list, so
+scrolling never replays an animation. The standalone `GET /me/pending-celebration` stays for a
+mid-session refetch. Either way, the app plays each animation and then `POST`s the id back to the
+badges endpoint above.
 
 Plus, served by the `profile` module:
 
@@ -158,7 +175,7 @@ unlock references it), so it is chosen once, and addressing the resource by it m
 | Entity | Table | Notes |
 |---|---|---|
 | `BadgeEntity` | `badges` | text PK — the stable code. `unlockedKey` / `lockedKey` map the two url columns |
-| `UserBadgeEntity` | `user_badges` | uuid PK, `@ManyToOne` to the badge (LAZY, always `join fetch`ed) |
+| `UserBadgeEntity` | `user_badges` | uuid PK, `@ManyToOne` to the badge (LAZY, always `join fetch`ed). `grantedInApp` is the unlock-animation latch |
 
 ## Schema dependencies
 
@@ -170,6 +187,9 @@ unlock references it), so it is chosen once, and addressing the resource by it m
 - The locked list is an anti-join (`not exists`) rather than fetch-both-and-subtract-in-Java: one
   query instead of two, and the `not exists` is served by the unique index above.
 - `badges_urls_are_keys` — CHECK: neither url column may start with `http`.
+- `user_badges.granted_in_app` — `boolean NOT NULL DEFAULT false`. The unlock-animation latch. No
+  index of its own: "the caller's un-celebrated badges" filters on `user_id` through the unique
+  index, then this flag in memory over the handful that returns.
 - `user_badges.badge_id` → `badges.id`, `ON DELETE RESTRICT ON UPDATE CASCADE`.
 - `user_badges.user_id` → `profiles.id`, `ON DELETE CASCADE` — deleting a profile takes its badges.
 

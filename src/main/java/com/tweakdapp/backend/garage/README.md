@@ -1,8 +1,8 @@
 # garage module
 
 Manages each user's garage (one per user) and the cars and modifications inside it.
-Owns the `garages`, `cars`, `car_modifications`, `dream_cars` and the seven
-car-reference lookup tables (`car_brands`, `car_models`, `car_drivetrain_options`,
+Owns the `garages`, `cars`, `car_modifications`, `car_share_links`, `dream_cars` and the
+seven car-reference lookup tables (`car_brands`, `car_models`, `car_drivetrain_options`,
 `car_color_options`, `car_distance_units`, `car_status_options`, `car_mod_categories`).
 
 > `dream_cars` (a user's wishlist) lives here rather than in `profile` because it
@@ -64,6 +64,24 @@ users' garages.
 | `DreamCarDto` | A dream car with denormalized brand/model names, createdAt |
 | `DreamCarRequest` | Create payload: a non-empty `dreamCars` list of `DreamCarRequestBody` |
 | `DreamCarRequestBody` | A single dream car: `brandId` (required), `modelId` (optional). Also the body of a single-item update |
+| `CarShareDto` | The owner's view of a share link: `code`, `url`, `qrUrl`, `enabled`, `createdAt`, `viewCount`, `qrScanCount`, `lastViewedAt` |
+| `CarShareQrDto` | `code` + the rendered SVG bytes, returned together so the controller can name the download without a second lookup |
+| `CarShareResolutionDto` | `carId` + `ownerUsername` — all the app needs to open its own car screen |
+| `ShareLinkUpdateRequest` | `{ "enabled": bool }`. The only editable field; there is no regenerate |
+| `ShareSource` | `LINK` / `QR`, parsed from the URL's `?s=` tag |
+| `PublicCarDto`, `PublicCarModificationDto`, `PublicCarOwnerDto`, `PublicBadgeDto`, `PublicMediaDto` | The public page's shape — a hand-written projection, never a rename of `CarDto`. No ids, no R2 keys, no licence plate |
+
+### Share links (public link + QR code)
+
+| Method | Description |
+|---|---|
+| `ensureShareLink(currentUserId, carId)` | The car's share link, minting one on first call. **Idempotent** — the app POSTs on every share-sheet open and must always get the same code back |
+| `getShareLink(currentUserId, carId)` | The car's share link; 404 if never shared |
+| `setShareLinkEnabled(currentUserId, carId, enabled)` | Pause / resume. The code never changes, so a printed sticker survives both |
+| `renderShareQrSvg(currentUserId, carId)` | The share URL as a print-ready SVG QR code, plus the code it encodes |
+| `revokeShareLinksForCar(carId)` | Retires the live link so its code answers 410 forever. **No HTTP caller** — see *Transfers* below |
+| `resolveShareCode(currentUserId, rawCode, source)` | Code → `{carId, ownerUsername}` for the installed app. Authenticated |
+| `getPublicCar(rawCode, source, countView)` | The public page. **Unauthenticated** |
 
 ### Exceptions
 
@@ -76,6 +94,8 @@ users' garages.
 | `NotCarOwnerException` | 403 | Caller is not the owner of the car they're trying to mutate |
 | `DreamCarNotFoundException` | 404 | Dream car id doesn't exist or isn't owned by the caller (queries are owner-scoped) |
 | `InvalidReferenceException` | 400 | Request references an unknown brand / model / drivetrain / color / unit / category, or a model that doesn't belong to the brand id provided |
+| `ShareLinkNotFoundException` | 404 | Share code unknown or malformed, or the owner asked for a link on a car they have never shared |
+| `ShareLinkGoneException` | 410 | The link is paused, revoked (transfer), or its owner is banned. Distinct from 404 for crawlers only — the website renders the same screen for both |
 | `InvalidStoragePathException` | 400 | `storagePath` in a download-url request doesn't match the canonical `car-photos/{ownerId}/{carId}/...` format |
 
 ## REST endpoints
@@ -128,6 +148,35 @@ Base path: `/api/v1/garage`
 | POST | `/dream-cars` | Add one or more dream cars from a `dreamCars` list (201) |
 | PUT | `/dream-cars/{dreamCarId}` | Update one of your dream cars (single `DreamCarRequestBody`) |
 | DELETE | `/dream-cars/{dreamCarId}` | Remove one of your dream cars (204) |
+
+### Share links
+
+Owner-only. Base path `/api/v1/garage/cars/{carId}/share`.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `` | The car's share link, creating one on first call. Always 200 — it is idempotent |
+| GET | `` | The car's share link; 404 if never shared |
+| PATCH | `` | `{ "enabled": bool }` — pause / resume |
+| GET | `/qr.svg` | `image/svg+xml`, `Content-Disposition: attachment; filename="tweakd-{code}.svg"`, `Cache-Control: private, no-store` |
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/garage/share/resolve/{code}?s=` | **Authenticated.** Code → `{car_id, owner_username}` for a deep link the installed app received |
+
+### Public car page (unauthenticated)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/public/v1/cars/{code}?s=` | The public build sheet behind `https://web.tweakdapp.com/c/{code}`. `Cache-Control: public, max-age=60, s-maxage=300`. 404 unknown / malformed, 410 paused / revoked / owner banned |
+
+> **Not** under `/api/v1`. `/public/**` is `permitAll` in `SecurityConfig`, and this is
+> the first and so far only route under it. Anything added there is on the open internet
+> and must return a hand-written projection, never a DTO the app happens to share.
+>
+> The website's Cloudflare Pages Function fetches this at the edge and injects the `og:*`
+> tags into `index.html`; browsers never call it directly, which is why the backend needs
+> no CORS configuration.
 
 ### Reference data (for dropdowns)
 
@@ -182,6 +231,25 @@ the DB enforces the same via `car_modifications_price_visibility_check`.
 Cover image and modification before/after image paths are stored as plain `String` columns
 on `CarEntity` and `CarModificationEntity` respectively — they are not rows in `car_images`.
 
+### `CarShareLinkEntity` → `car_share_links`
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID | PK; app-generated |
+| car | CarEntity | `@ManyToOne(LAZY)`, required (`car_id`), `ON DELETE CASCADE` |
+| ownerId | UUID | FK → `profiles.id`, raw UUID (no cross-module entity ref), `ON DELETE CASCADE` |
+| code | String | The public identifier. 10 Crockford-base32 chars, canonical uppercase, `updatable = false` |
+| enabled | boolean | Owner's pause switch (`is_enabled`) |
+| createdAt | Instant | DB default `now()`; read-only |
+| revokedAt | Instant | Null = live. Set only by `revokeShareLinksForCar` |
+| viewCount / qrScanCount / lastViewedAt | long / long / Instant | `insertable = false, updatable = false` — moved **only** by `CarShareLinkRepository.recordView`, a bulk update, so concurrent scans do not lose counts |
+
+The code recipe and the reason for it live in `internal/share/ShareCodeGenerator`; the QR
+in `internal/share/QrSvgRenderer` (ZXing `core` only — `javase` needs AWT, which the Cloud
+Run image's slim JRE does not ship). `sharing.public-base-url` (default
+`https://web.tweakdapp.com/c`, env `SHARING_PUBLIC_BASE_URL`) is where codes become URLs; the
+database stores bare codes so a domain change is config, not a data migration.
+
 ### `DreamCarEntity` → `dream_cars`
 
 | Column | Type | Notes |
@@ -211,11 +279,47 @@ in Supabase.
 | `car_modifications_car_id_fkey ON DELETE CASCADE` | FK on `car_modifications` | Deleting a car drops its mods — `deleteCar` relies on this; the application does not explicitly clear them |
 | `car_images_car_id_fkey ON DELETE CASCADE` | FK on `car_images` | Deleting a car drops its gallery rows |
 | `car_modifications_price_visibility_check` | CHECK | `is_price_public = true` requires `price IS NOT NULL` |
+| `car_share_links_code_uq` | UNIQUE index | A share code is never reused — **including across revoked rows**, so a retired code can never come back pointing at a different car than the sticker it is printed on |
+| `car_share_links_active_car_uq` | partial UNIQUE index `WHERE revoked_at IS NULL` | At most one live link per car. This, not the service's pre-check, is what makes `ensureShareLink` idempotent under two simultaneous taps of "Share" |
+| `car_share_links_code_format_check` | CHECK | Only canonical Crockford base32 can be stored — the database half of the normalise-on-lookup contract |
+| `car_share_links_car_id_fkey ON DELETE CASCADE` | FK | Deleting a car drops its share links, so a deleted car's code 404s instead of dangling |
+| `car_share_links_owner_id_fkey ON DELETE CASCADE` | FK | Deleting an account drops its share links |
 
 ## Visibility
 
 All accounts are public, so any garage and any car is viewable by any authenticated user;
 there is no privacy gate.
+
+**Sharing splits that in two.** The *share surface* — whether a car is shared, its code, its
+QR and its counters — is **owner-only**: a non-owner gets 403, and cannot discover through
+the API that a car is shared at all. The *public read* is unauthenticated and open to
+anyone holding the code, but it is served through a hand-written projection
+(`PublicCarDto`) rather than the in-app `CarDto`. That distinction is the safety property:
+a field added to `CarDto` next year reaches the open internet only if somebody deliberately
+adds it to `toPublicCarDto` too. Never public, whatever the car grows: the licence plate,
+the owner's UUID, the garage id, the car id, R2 object keys and the owner's location.
+
+A public read is refused (410) when the link is paused, revoked, or **its owner is banned**
+— `BannedUserInterceptor` only sees authenticated requests, so `getPublicCar` runs that
+check itself via `ProfileService.isBanned`.
+
+Visits are counted inline, in the database, split into `view_count` and `qr_scan_count` by
+the URL's `?s=` tag. Known link-preview crawlers (`internal/share/CrawlerUserAgents`) are
+served in full but not counted: one WhatsApp link sent to a group of forty produces forty
+fetches before a human has tapped anything.
+
+## Transfers
+
+**Whoever implements car transfer (marketplace) must call
+`GarageService.revokeShareLinksForCar(carId)` inside the transfer transaction.** Nothing
+calls it over HTTP today; it exists only as that seam. Without it, a QR sticker glued to a
+sold car keeps pointing strangers at the new owner's build under the old owner's name. The
+new owner's first "Share" then mints a fresh code, and the old sticker answers 410 —
+which still advertises the app.
+
+There is deliberately **no regenerate action** for owners. The code may already be printed
+on a physical sticker; a button that silently invalidates it is a foot-gun, not a feature.
+Pause and resume cover the real need, and they keep the code.
 
 Modification prices have a per-mod check: when the viewer is not the owner and the mod's
 `isPricePublic` is false, `price` is returned as `null` regardless of the stored value.
@@ -225,6 +329,9 @@ Modification prices have a per-mod check: when the viewer is not the owner and t
 - **`profile.ProfileService`** — `findIdByUsername` for username resolution.
 - **`profile.exception.ProfileNotFoundException`** — thrown when a target username
   cannot be resolved.
+- **`profile.ProfileService`** — `findPublicProfileById` and `isBanned` for the public car
+  page's owner card and its ban gate. The badges on that card arrive nested inside
+  `PublicProfileDto`, so `garage` needs no direct edge to `badges`.
 - **`storage.StorageService`** — `createUploadUrl(path)` and `createDownloadUrl(path)` to
   generate presigned Supabase Storage URLs. The garage module owns path construction and
   ownership validation; the storage module only handles the HTTP calls.

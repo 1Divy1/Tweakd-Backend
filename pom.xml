@@ -31,6 +31,7 @@
 		<spring-modulith.version>2.0.3</spring-modulith.version>
 		<firebase-admin.version>9.10.0</firebase-admin.version>
 		<google-http-client.version>2.1.0</google-http-client.version>
+		<zxing.version>3.5.3</zxing.version>
 	</properties>
 
 	<dependencyManagement>
@@ -184,6 +185,17 @@
 			<groupId>com.google.http-client</groupId>
 			<artifactId>google-http-client-jackson2</artifactId>
 			<version>${google-http-client.version}</version>
+		</dependency>
+		<!--
+			QR code generation for car share links (garage/internal/share/QrSvgRenderer). Only
+			`core`, never `javase`: the latter's encoders go through java.awt.image, which the slim
+			JRE in the Cloud Run image does not ship. `core` is pure Java and hands back a
+			BitMatrix that the renderer turns into SVG itself.
+		-->
+		<dependency>
+			<groupId>com.google.zxing</groupId>
+			<artifactId>core</artifactId>
+			<version>${zxing.version}</version>
 		</dependency>
 	</dependencies>
 

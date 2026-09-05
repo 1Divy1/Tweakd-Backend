@@ -76,9 +76,14 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
 
 `shared/security/SecurityConfig.java` configures stateless JWT authentication using Supabase as an OAuth2 resource server.
 
-- All endpoints require authentication unless under `/public/**`. The WebSocket handshake at
-  `/ws/**` is also `permitAll` — the real authentication happens at the STOMP CONNECT frame
-  (`shared/realtime/JwtChannelInterceptor`, same JWT validation as REST).
+- All endpoints require authentication unless under `/public/**`. Exactly one route lives
+  there today: `GET /public/v1/cars/{code}`, the public car page behind a share link
+  (see *Car sharing*). Anything added under `/public/**` is on the open internet — it must
+  return a hand-written projection, never a DTO the app happens to share, and it must apply
+  the ban check itself, because `BannedUserInterceptor` only sees authenticated requests.
+  The WebSocket handshake at `/ws/**` is also `permitAll` — the real authentication happens
+  at the STOMP CONNECT frame (`shared/realtime/JwtChannelInterceptor`, same JWT validation
+  as REST).
 - `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
   module then applies fine-grained team-role capability checks (`admin_team_members`). Approving
   user-submitted map events is gated on `APPROVE_EVENTS`, and managing the community feedback feed
@@ -174,6 +179,46 @@ what fixes the dependency direction: `profile` → `badges`, and therefore `badg
 `profiles` — no username-keyed endpoint, no existence check on award. The badges a user has *not*
 earned are their own separate read (`/api/v1/badges/me/locked`), for the locked section of their own
 profile only.
+
+
+## Car sharing
+
+An owner shares a car as `https://web.tweakdapp.com/c/{code}` and as a printable QR code that
+encodes the same URL plus `?s=qr`. Scanning it opens the app when installed (Universal
+Links / App Links on `/c/*`) and the public web page otherwise. It lives in the `garage`
+module, in `car_share_links`.
+
+The host is the **`web.` subdomain**, not the apex: `tweakdapp.com` is the presentation site
+(Cloudflare Pages, repo `Tweakd Website`) and knows nothing about share codes, while
+`web.tweakdapp.com` is a separate Cloudflare Worker (repo `Tweakd-Web-App`) that exists only
+to render this page. `sharing.public-base-url` must always match the host the app claims for
+deep links — the iOS Associated Domains entitlement and the Android intent filter — or links
+open a browser instead of the app.
+
+The one thing that shapes every decision here: **the code can end up printed on a sticker
+glued to a car**, so it has to keep meaning what it meant when it was printed.
+
+- The code is opaque, random and immutable — 10 Crockford-base32 characters, no `I L O U`.
+  It encodes nothing renameable, so changing a username or a model does not break a sticker.
+  Lookups normalise (uppercase, `O→0`, `I/L→1`, dashes stripped), so a code read off a
+  scratched sticker and typed in by hand still resolves.
+- Minting is idempotent and there is **no regenerate**. Owners get pause / resume, which keeps
+  the code: a resumed link brings an already-printed sticker back to life. Only system events
+  revoke — car transfer, and cascades on car or account deletion.
+- The QR is rendered server-side as **SVG** (ZXing `core`, error correction H), so a reprint
+  years later is byte-identical and prints at any size.
+- The public read is a hand-written projection (`PublicCarDto`), never `CarDto`. A new car
+  field is public only if somebody adds it to the projection on purpose.
+- Views and QR scans are counted separately from the `?s=` tag; known link-preview crawlers
+  are served but not counted.
+- The `web.` Worker fetches the public endpoint at the edge and renders finished HTML with the
+  `og:*` tags already in it — link-preview crawlers run no JavaScript, and a share that does not
+  unfurl loses most of its taps. Browsers therefore never call this backend cross-origin, which
+  is why it needs no CORS configuration at all.
+
+**Whoever implements car transfer must call `GarageService.revokeShareLinksForCar(carId)` in
+the transfer transaction**, or a sticker on a sold car keeps pointing strangers at the new
+owner's build.
 
 
 ## REST conventions
