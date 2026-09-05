@@ -127,6 +127,20 @@ class BadgeServiceImpl implements BadgeService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<UserBadgeDto> listPendingCelebrations(UUID userId) {
+        return userBadgeRepository.findPendingCelebrationForUser(userId).stream().map(this::toDto).toList();
+    }
+
+    @Override
+    @Transactional
+    public boolean markCelebrated(UUID userId, String badgeId) {
+        // The predicate in the update carries the idempotency: an already-celebrated badge, or one
+        // the user doesn't hold, matches nothing. No pre-check, no need to load the row.
+        return userBadgeRepository.markCelebrated(userId, badgeId) > 0;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<BadgeDto> listLockedBadges(UUID userId) {
         return badgeRepository.findLockedForUser(userId).stream().map(this::toDto).toList();
     }

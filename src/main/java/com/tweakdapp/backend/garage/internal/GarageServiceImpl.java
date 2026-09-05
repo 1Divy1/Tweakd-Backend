@@ -10,6 +10,15 @@ import com.tweakdapp.backend.garage.dto.CarDto;
 import com.tweakdapp.backend.garage.dto.CarModCategoryDto;
 import com.tweakdapp.backend.garage.dto.CarModelDto;
 import com.tweakdapp.backend.garage.dto.CarOwnerDto;
+import com.tweakdapp.backend.garage.dto.CarShareDto;
+import com.tweakdapp.backend.garage.dto.CarShareQrDto;
+import com.tweakdapp.backend.garage.dto.CarShareResolutionDto;
+import com.tweakdapp.backend.garage.dto.PublicBadgeDto;
+import com.tweakdapp.backend.garage.dto.PublicCarDto;
+import com.tweakdapp.backend.garage.dto.PublicCarModificationDto;
+import com.tweakdapp.backend.garage.dto.PublicCarOwnerDto;
+import com.tweakdapp.backend.garage.dto.PublicMediaDto;
+import com.tweakdapp.backend.garage.dto.ShareSource;
 import com.tweakdapp.backend.garage.dto.response.AddModificationResponse;
 import com.tweakdapp.backend.garage.dto.CarModificationDto;
 import com.tweakdapp.backend.garage.dto.CarModificationMediaDto;
@@ -31,8 +40,13 @@ import com.tweakdapp.backend.garage.exception.DreamCarNotFoundException;
 import com.tweakdapp.backend.garage.exception.GarageNotFoundException;
 import com.tweakdapp.backend.garage.exception.InvalidReferenceException;
 import com.tweakdapp.backend.garage.exception.NotCarOwnerException;
+import com.tweakdapp.backend.garage.exception.ShareLinkGoneException;
+import com.tweakdapp.backend.garage.exception.ShareLinkNotFoundException;
 import com.tweakdapp.backend.garage.internal.entities.*;
 import com.tweakdapp.backend.garage.internal.repositories.*;
+import com.tweakdapp.backend.garage.internal.share.QrSvgRenderer;
+import com.tweakdapp.backend.garage.internal.share.ShareCodeGenerator;
+import com.tweakdapp.backend.garage.internal.share.SharingProperties;
 import com.tweakdapp.backend.profile.ProfileService;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 import com.tweakdapp.backend.profile.exception.ProfileNotFoundException;
@@ -42,17 +56,21 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -76,8 +94,15 @@ class GarageServiceImpl implements GarageService {
     private final CarStatusOptionRepository statusOptionRepository;
     private final CarModCategoryRepository modCategoryRepository;
     private final DreamCarRepository dreamCarRepository;
+    private final CarShareLinkRepository shareLinkRepository;
     private final ProfileService profileService;
     private final StorageService storageService;
+    private final ShareCodeGenerator shareCodeGenerator;
+    private final QrSvgRenderer qrSvgRenderer;
+    private final SharingProperties sharingProperties;
+
+    /** How many times minting a share code retries past a unique-index collision. See {@code ensureLink}. */
+    private static final int CODE_INSERT_ATTEMPTS = 3;
 
     // Question: what does it do and why do we need it ?
     @PersistenceContext
@@ -97,8 +122,12 @@ class GarageServiceImpl implements GarageService {
                       CarStatusOptionRepository statusOptionRepository,
                       CarModCategoryRepository modCategoryRepository,
                       DreamCarRepository dreamCarRepository,
+                      CarShareLinkRepository shareLinkRepository,
                       ProfileService profileService,
-                      StorageService storageService) {
+                      StorageService storageService,
+                      ShareCodeGenerator shareCodeGenerator,
+                      QrSvgRenderer qrSvgRenderer,
+                      SharingProperties sharingProperties) {
         this.garageRepository = garageRepository;
         this.carRepository = carRepository;
         this.modificationRepository = modificationRepository;
@@ -113,8 +142,12 @@ class GarageServiceImpl implements GarageService {
         this.statusOptionRepository = statusOptionRepository;
         this.modCategoryRepository = modCategoryRepository;
         this.dreamCarRepository = dreamCarRepository;
+        this.shareLinkRepository = shareLinkRepository;
         this.profileService = profileService;
         this.storageService = storageService;
+        this.shareCodeGenerator = shareCodeGenerator;
+        this.qrSvgRenderer = qrSvgRenderer;
+        this.sharingProperties = sharingProperties;
     }
 
     // -------------------------------------------------------------------
@@ -488,6 +521,263 @@ class GarageServiceImpl implements GarageService {
 
         modificationGalleryRepository.deleteAllByModification_IdAndKeyIn(modificationId, toDelete);
         deleteR2ObjectsAfterCommit(toDelete, carId);
+    }
+
+    // -------------------------------------------------------------------
+    // SHARE LINKS
+    // -------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public CarShareDto ensureShareLink(String currentUserId, UUID carId) {
+        CarEntity car = loadOwnedCar(currentUserId, carId);
+        return toShareDto(ensureLink(car));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CarShareDto getShareLink(String currentUserId, UUID carId) {
+        loadOwnedCar(currentUserId, carId);
+        return shareLinkRepository.findLiveByCarId(carId)
+                .map(this::toShareDto)
+                .orElseThrow(ShareLinkNotFoundException::new);
+    }
+
+    @Override
+    @Transactional
+    public CarShareDto setShareLinkEnabled(String currentUserId, UUID carId, boolean enabled) {
+        CarEntity car = loadOwnedCar(currentUserId, carId);
+        CarShareLinkEntity link = ensureLink(car);
+        link.setEnabled(enabled);
+        return toShareDto(shareLinkRepository.save(link));
+    }
+
+    @Override
+    @Transactional
+    public CarShareQrDto renderShareQrSvg(String currentUserId, UUID carId) {
+        CarEntity car = loadOwnedCar(currentUserId, carId);
+        CarShareLinkEntity link = ensureLink(car);
+        return new CarShareQrDto(
+                link.getCode(),
+                qrSvgRenderer.renderBytes(sharingProperties.qrUrlFor(link.getCode())));
+    }
+
+    @Override
+    @Transactional
+    public int revokeShareLinksForCar(UUID carId) {
+        // Deliberately no ownership check: the only caller is a transfer, which runs after the car
+        // has already changed hands and so has no "current owner" to check against.
+        return shareLinkRepository.findLiveByCarId(carId)
+                .map(link -> {
+                    link.setRevokedAt(Instant.now());
+                    shareLinkRepository.save(link);
+                    log.info("Revoked share link {} on car {}", link.getCode(), carId);
+                    return 1;
+                })
+                .orElse(0);
+    }
+
+    @Override
+    @Transactional
+    public CarShareResolutionDto resolveShareCode(String currentUserId, String rawCode, ShareSource source) {
+        CarShareLinkEntity link = resolveServableLink(rawCode);
+        recordVisit(link, source);
+
+        UUID ownerId = link.getCar().getGarage().getOwnerId();
+        String username = profileService.findByIds(List.of(ownerId)).stream()
+                .findFirst()
+                .map(ProfileSearchResultDto::username)
+                .orElse(null);
+
+        return new CarShareResolutionDto(link.getCar().getId(), username);
+    }
+
+    @Override
+    @Transactional
+    public PublicCarDto getPublicCar(String rawCode, ShareSource source, boolean countView) {
+        CarShareLinkEntity link = resolveServableLink(rawCode);
+        if (countView) {
+            recordVisit(link, source);
+        }
+
+        UUID carId = link.getCar().getId();
+        CarEntity car = carRepository.findDetailById(carId)
+                .orElseThrow(() -> new CarNotFoundException(carId));
+        List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
+
+        // Project from the in-app DTO rather than from the entity: the mapping from entity to
+        // CarDto is already proven, and going through it means the public shape is visibly a
+        // subset. A field added to CarDto reaches the open internet only if somebody adds it to
+        // toPublicCarDto too.
+        CarDto carDto = toCarDto(car, mods);
+        return toPublicCarDto(carDto, link, car.getGarage().getOwnerId());
+    }
+
+    // ---- share helpers ------------------------------------------------------
+
+    /** Loads a car and asserts the caller owns it — the gate on every owner-facing share method. */
+    private CarEntity loadOwnedCar(String currentUserId, UUID carId) {
+        CarEntity car = carRepository.findById(carId)
+                .orElseThrow(() -> new CarNotFoundException(carId));
+        ensureOwnership(car, UUID.fromString(currentUserId));
+        return car;
+    }
+
+    /**
+     * The car's live link, minting one on first use.
+     *
+     * <p>The generate-and-insert is retried because {@code existsByCode} is a read followed by a
+     * write: two callers can both pass it. The database's unique index is what actually decides,
+     * and a lost race just means one more attempt out of 1.1e15 possibilities.
+     */
+    private CarShareLinkEntity ensureLink(CarEntity car) {
+        Optional<CarShareLinkEntity> existing = shareLinkRepository.findLiveByCarId(car.getId());
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        for (int attempt = 1; attempt <= CODE_INSERT_ATTEMPTS; attempt++) {
+            String code = shareCodeGenerator.next();
+            if (shareLinkRepository.existsByCode(code)) {
+                continue;
+            }
+            CarShareLinkEntity link = new CarShareLinkEntity();
+            link.setId(UUID.randomUUID());
+            link.setCar(car);
+            link.setOwnerId(car.getGarage().getOwnerId());
+            link.setCode(code);
+            link.setEnabled(true);
+            try {
+                CarShareLinkEntity saved = shareLinkRepository.saveAndFlush(link);
+                log.info("Minted share code {} for car {}", code, car.getId());
+                return saved;
+            } catch (DataIntegrityViolationException e) {
+                // Either the code collided or another request minted this car's link first. Both
+                // are decided by a unique index, and both are fixed by going round again: the
+                // second pass finds the live row and returns it.
+                log.debug("Share link insert lost a race for car {} (attempt {})", car.getId(), attempt);
+                Optional<CarShareLinkEntity> raced = shareLinkRepository.findLiveByCarId(car.getId());
+                if (raced.isPresent()) {
+                    return raced.get();
+                }
+            }
+        }
+        throw new IllegalStateException("Could not mint a share code for car " + car.getId());
+    }
+
+    /**
+     * Turns a code from the outside world into a link that is allowed to serve a page, or throws
+     * the status the caller should return.
+     *
+     * <p>Unknown or malformed is 404; paused, revoked or owned by a banned account is 410. The
+     * difference exists for crawlers — a 410 gets dropped from an index, a 404 gets retried — and
+     * the human-facing page is the same either way.
+     */
+    private CarShareLinkEntity resolveServableLink(String rawCode) {
+        CarShareLinkEntity link = ShareCodeGenerator.normalize(rawCode)
+                .flatMap(shareLinkRepository::findByCode)
+                .orElseThrow(ShareLinkNotFoundException::new);
+
+        if (link.getRevokedAt() != null || !link.isEnabled()) {
+            throw new ShareLinkGoneException();
+        }
+        // BannedUserInterceptor only sees authenticated requests, so the public page has to make
+        // this check itself — otherwise a banned account keeps a public shopfront.
+        if (profileService.isBanned(link.getCar().getGarage().getOwnerId())) {
+            throw new ShareLinkGoneException();
+        }
+        return link;
+    }
+
+    /** Counts one visit against the link, in the database, in the bucket the source tag chose. */
+    private void recordVisit(CarShareLinkEntity link, ShareSource source) {
+        boolean qr = source == ShareSource.QR;
+        shareLinkRepository.recordView(link.getId(), qr ? 0 : 1, qr ? 1 : 0, Instant.now());
+    }
+
+    private CarShareDto toShareDto(CarShareLinkEntity link) {
+        return new CarShareDto(
+                link.getCode(),
+                sharingProperties.urlFor(link.getCode()),
+                sharingProperties.qrUrlFor(link.getCode()),
+                link.isEnabled(),
+                link.getCreatedAt(),
+                link.getViewCount(),
+                link.getQrScanCount(),
+                link.getLastViewedAt());
+    }
+
+    /**
+     * The allow-list that is the public page. Every field here was chosen; anything not written out
+     * below is not on the internet. Notably absent: the car's id, the garage id, the owner's UUID,
+     * the licence plate, the owner's location, and every R2 object key.
+     */
+    private PublicCarDto toPublicCarDto(CarDto car, CarShareLinkEntity link, UUID ownerId) {
+        List<String> galleryUrls = car.gallery().stream()
+                .map(MediaRefDto::url)
+                .filter(Objects::nonNull)
+                .toList();
+
+        List<PublicCarModificationDto> mods = car.modifications().stream()
+                .map(m -> new PublicCarModificationDto(
+                        m.categoryName(),
+                        m.title(),
+                        m.description(),
+                        m.media().stream()
+                                .map(media -> new PublicMediaDto(media.url(), media.type(), media.phase()))
+                                .toList(),
+                        m.installationDate(),
+                        m.price(),
+                        m.priceCurrency(),
+                        m.mileageAtInstall()))
+                .toList();
+
+        return new PublicCarDto(
+                link.getCode(),
+                sharingProperties.urlFor(link.getCode()),
+                car.brandName(),
+                car.modelName(),
+                car.year(),
+                car.modelCode(),
+                car.chassisCode(),
+                car.engineCode(),
+                car.horsepower(),
+                car.torque(),
+                car.weight(),
+                car.engineDisplacement(),
+                car.zeroToOneHundred(),
+                car.drivetrainName(),
+                car.colorName(),
+                car.colorCode(),
+                car.fuelTypeName(),
+                car.statusName(),
+                car.mileage(),
+                car.mileageUnitName(),
+                car.story(),
+                car.coverImage() == null ? null : car.coverImage().url(),
+                galleryUrls,
+                mods,
+                toPublicOwnerDto(ownerId),
+                link.getCreatedAt());
+    }
+
+    /**
+     * The owner card. Reputation and badges are on it deliberately: a stranger deciding whether to
+     * trust a build sheet has nothing else to go on, and it is the same credibility signal the app
+     * shows.
+     */
+    private PublicCarOwnerDto toPublicOwnerDto(UUID ownerId) {
+        return profileService.findPublicProfileById(ownerId)
+                .map(profile -> new PublicCarOwnerDto(
+                        profile.username(),
+                        profile.name(),
+                        profile.avatarUrl(),
+                        profile.isVerified(),
+                        profile.reputationScore(),
+                        profile.badges().stream()
+                                .map(b -> new PublicBadgeDto(b.badge().title(), b.badge().unlockedUrl()))
+                                .toList()))
+                .orElse(null);
     }
 
     // -------------------------------------------------------------------
@@ -997,6 +1287,7 @@ class GarageServiceImpl implements GarageService {
                 mediaDtos,
                 mod.getInstallationDate(),
                 mod.getPrice(),
+                mod.getPriceCurrency(),
                 mod.getMileageAtInstall(),
                 mod.getCreatedAt());
     }

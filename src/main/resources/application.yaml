@@ -33,6 +33,17 @@ cloudflare:
       bucket: ${CLOUDFLARE_ASSETS_BUCKET_NAME}
       public-url: ${CLOUDFLARE_ASSETS_BUCKET_URL}
 
+sharing:
+  # Origin + path prefix that a car's share code is appended to, producing the URL printed on the
+  # QR sticker and unfurled by WhatsApp/iMessage/X. Codes are stored bare, so pointing the feature
+  # at a different domain (staging, a rename) is a config change and never a data migration.
+  #
+  # `web.` is a separate Cloudflare Worker (repo: Tweakd-Web-App) that renders the public car page;
+  # the apex tweakdapp.com is the presentation site and knows nothing about share codes. The host
+  # here must match the one the app claims for deep links (the iOS Associated Domains entitlement
+  # and the Android intent filter) — a mismatch means links open a browser instead of the app.
+  public-base-url: ${SHARING_PUBLIC_BASE_URL:https://web.tweakdapp.com/c}
+
 firebase:
   # Push delivery for every notification type except `dm`, which a Supabase edge function owns.
   # Credentials come from Application Default Credentials: the Cloud Run runtime service account in

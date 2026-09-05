@@ -15,7 +15,8 @@ import java.util.UUID;
  * @param description detailed description of the modification (up to 1000 chars)
  * @param media all before/after images and videos attached to this modification
  * @param installationDate when the modification was installed
- * @param price the cost of the modification in the car owner's currency (null if not set)
+ * @param price the cost of the modification (null if not set)
+ * @param priceCurrency the currency of {@code price} (null if not set)
  * @param mileageAtInstall the car's mileage when the modification was installed
  * @param createdAt when this modification record was created
  */
@@ -29,6 +30,7 @@ public record CarModificationDto(
         List<CarModificationMediaDto> media,
         Instant installationDate,
         Integer price,
+        String priceCurrency,
         Integer mileageAtInstall,
         Instant createdAt
 ) {}

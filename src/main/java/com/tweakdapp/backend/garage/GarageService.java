@@ -8,7 +8,12 @@ import com.tweakdapp.backend.garage.dto.CarDrivetrainDto;
 import com.tweakdapp.backend.garage.dto.CarDto;
 import com.tweakdapp.backend.garage.dto.CarModCategoryDto;
 import com.tweakdapp.backend.garage.dto.CarModelDto;
+import com.tweakdapp.backend.garage.dto.CarShareDto;
+import com.tweakdapp.backend.garage.dto.CarShareQrDto;
+import com.tweakdapp.backend.garage.dto.CarShareResolutionDto;
 import com.tweakdapp.backend.garage.dto.DreamCarDto;
+import com.tweakdapp.backend.garage.dto.PublicCarDto;
+import com.tweakdapp.backend.garage.dto.ShareSource;
 import com.tweakdapp.backend.garage.dto.request.DreamCarRequest;
 import com.tweakdapp.backend.garage.dto.request.DreamCarRequestBody;
 import com.tweakdapp.backend.garage.dto.response.AddModificationResponse;
@@ -288,6 +293,118 @@ public interface GarageService {
      * @throws NotCarOwnerException if the current user is not the car owner
      */
     void deleteModificationMedia(String currentUserId, UUID carId, UUID modificationId, List<String> keys);
+
+    // ---- SHARE LINKS -------------------------------------------------------
+
+    /**
+     * The car's share link, creating one on first call.
+     *
+     * <p>Idempotent: a car has at most one live link, and every later call returns that same code.
+     * The app calls this every time the share sheet opens, so it must never mint a second code —
+     * the first one may already be printed on a sticker.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @return the car's live share link
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    CarShareDto ensureShareLink(String currentUserId, UUID carId);
+
+    /**
+     * The car's share link, without creating one.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @return the car's live share link
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     * @throws com.tweakdapp.backend.garage.exception.ShareLinkNotFoundException if the car has
+     *         never been shared
+     */
+    CarShareDto getShareLink(String currentUserId, UUID carId);
+
+    /**
+     * Pauses or resumes the car's share link, creating one if the car has never been shared.
+     *
+     * <p>The code does not change either way. That is the whole design: a paused link answers 410
+     * to the public but keeps its code reserved, so resuming brings an already-printed sticker back
+     * to life. There is no regenerate — see {@code ShareLinkUpdateRequest}.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @param enabled true to publish, false to pause
+     * @return the updated share link
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    CarShareDto setShareLinkEnabled(String currentUserId, UUID carId, boolean enabled);
+
+    /**
+     * The car's share URL rendered as a QR code, in SVG. Creates the link if it does not exist yet,
+     * exactly like {@link #ensureShareLink}.
+     *
+     * <p>The encoded payload is the share URL plus {@code ?s=qr}, and nothing else: a plain https
+     * URL is what every phone camera opens natively and what iOS Universal Links / Android App
+     * Links match on.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param carId the car ID
+     * @return the SVG document and the code it encodes
+     * @throws CarNotFoundException if the car does not exist
+     * @throws NotCarOwnerException if the current user is not the car owner
+     */
+    CarShareQrDto renderShareQrSvg(String currentUserId, UUID carId);
+
+    /**
+     * Retires every live share link on a car, so its codes answer 410 Gone forever.
+     *
+     * <p>Nothing calls this over HTTP and nothing should: the owner gets pause/resume, not
+     * revocation. It exists for one future caller — the marketplace transfer, which must run it
+     * inside the transfer transaction. Without that, a sticker on a sold car keeps pointing
+     * strangers at the new owner's build under the old owner's name.
+     *
+     * <p>Idempotent; a no-op for a car that was never shared.
+     *
+     * @param carId the car whose links to retire
+     * @return how many links were retired
+     */
+    int revokeShareLinksForCar(UUID carId);
+
+    /**
+     * Resolves a scanned or tapped share code to the car it points at, for the installed app.
+     *
+     * <p>Authenticated, unlike {@link #getPublicCar}: a device with the app open wants its own
+     * native car screen, so all it needs from here is where to navigate. Counts as a view.
+     *
+     * @param currentUserId the current user's UUID from the JWT subject
+     * @param rawCode the code exactly as it arrived in the URL (case and dashes are tolerated)
+     * @param source parsed from the URL's {@code ?s=} tag
+     * @return the car id and its owner's username
+     * @throws com.tweakdapp.backend.garage.exception.ShareLinkNotFoundException if the code is
+     *         unknown or malformed
+     * @throws com.tweakdapp.backend.garage.exception.ShareLinkGoneException if the link is paused
+     *         or revoked, or the owner is banned
+     */
+    CarShareResolutionDto resolveShareCode(String currentUserId, String rawCode, ShareSource source);
+
+    /**
+     * The public car page behind {@code https://web.tweakdapp.com/c/{code}}. <strong>Unauthenticated:
+     * there is no caller identity here at all.</strong>
+     *
+     * <p>Returns a hand-written projection of the car, never the in-app {@code CarDto} — see
+     * {@link PublicCarDto} for what that guarantees and what it deliberately omits.
+     *
+     * @param rawCode the code exactly as it arrived in the URL
+     * @param source parsed from the URL's {@code ?s=} tag
+     * @param countView false for a known link-preview crawler, whose fetches would otherwise
+     *                  dominate the owner's view count
+     * @throws com.tweakdapp.backend.garage.exception.ShareLinkNotFoundException if the code is
+     *         unknown or malformed
+     * @throws com.tweakdapp.backend.garage.exception.ShareLinkGoneException if the link is paused
+     *         or revoked, or the owner is banned
+     */
+    PublicCarDto getPublicCar(String rawCode, ShareSource source, boolean countView);
 
     // ---- REFERENCE DATA ----------------------------------------------------
 

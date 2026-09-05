@@ -181,6 +181,22 @@ class ProfileServiceImpl implements ProfileService {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<PublicProfileDto> findPublicProfileById(UUID profileId) {
+        return profileRepository.findById(profileId)
+                .map(profile -> mapper.toPublicDto(profile, badgesOf(profile.getId())));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isBanned(UUID profileId) {
+        // Through the same cache the interceptor uses, so an unauthenticated public read costs no
+        // extra query on the 2-connection pool and a moderator's ban takes effect at the same speed
+        // everywhere.
+        return banCache.isBanned(profileId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(String username) {
         return badgesOf(profileRepository
                 .findByUsername(username)
