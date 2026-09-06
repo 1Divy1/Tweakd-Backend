@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.badges.internal;
 
+import com.tweakdapp.backend.badges.BadgeTrigger;
 import com.tweakdapp.backend.badges.dto.BadgeDto;
 import com.tweakdapp.backend.badges.dto.BadgeGrantDto;
 import com.tweakdapp.backend.badges.dto.BadgeUpsertRequest;
@@ -7,6 +8,7 @@ import com.tweakdapp.backend.badges.dto.UserBadgeDto;
 import com.tweakdapp.backend.badges.exception.BadgeAlreadyExistsException;
 import com.tweakdapp.backend.badges.exception.BadgeInUseException;
 import com.tweakdapp.backend.badges.exception.BadgeNotFoundException;
+import com.tweakdapp.backend.badges.exception.InvalidBadgeDefinitionException;
 import com.tweakdapp.backend.badges.internal.entity.BadgeEntity;
 import com.tweakdapp.backend.badges.internal.entity.UserBadgeEntity;
 import com.tweakdapp.backend.badges.internal.repository.BadgeRepository;
@@ -17,6 +19,7 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -31,6 +34,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -52,6 +57,9 @@ class BadgeServiceImplTest {
     private static final UUID USER = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
     private static final UUID STAFF = UUID.fromString("00000000-0000-0000-0000-000000000099");
     private static final String PIONEER = "pioneer";
+
+    /** Inside `pioneer`'s configured window — the moment an account was created, not "now". */
+    private static final Instant SIGNED_UP_AT = Instant.parse("2026-09-06T12:00:00Z");
 
     @Mock private BadgeRepository badgeRepository;
     @Mock private UserBadgeRepository userBadgeRepository;
@@ -79,6 +87,15 @@ class BadgeServiceImplTest {
         badge.setUnlockedKey("badges/pioneer/badge-unlocked.svg");
         badge.setLockedKey("badges/pioneer/badge-locked.svg");
         badge.setAvailable(available);
+        return badge;
+    }
+
+    /** The badge as `pioneer` is actually configured: signup-triggered, offered for one year. */
+    private static BadgeEntity windowed(Instant from, Instant until) {
+        BadgeEntity badge = badge(true);
+        badge.setAwardTrigger(BadgeTrigger.ACCOUNT_CREATED.code());
+        badge.setEarnableFrom(from);
+        badge.setEarnableUntil(until);
         return badge;
     }
 
@@ -207,7 +224,7 @@ class BadgeServiceImplTest {
     /** The client never sees an R2 key; the module resolves both variants on the way out. */
     @Test
     void bothArtworkKeysAreResolvedToPublicUrls() {
-        when(badgeRepository.findByAvailableTrueOrderByCreatedAtAsc()).thenReturn(List.of(badge(true)));
+        when(badgeRepository.findEarnableAt(any())).thenReturn(List.of(badge(true)));
 
         BadgeDto dto = service.listCatalogue().getFirst();
 
@@ -221,7 +238,7 @@ class BadgeServiceImplTest {
     void aBadgeWithNoLockedVariantResolvesToANullLockedUrl() {
         BadgeEntity noLocked = badge(true);
         noLocked.setLockedKey(null);
-        when(badgeRepository.findByAvailableTrueOrderByCreatedAtAsc()).thenReturn(List.of(noLocked));
+        when(badgeRepository.findEarnableAt(any())).thenReturn(List.of(noLocked));
 
         assertThat(service.listCatalogue().getFirst().lockedUrl()).isNull();
     }
@@ -231,7 +248,7 @@ class BadgeServiceImplTest {
     /** The locked list is an anti-join in the database, not a subtraction done here. */
     @Test
     void lockedBadgesComeFromTheAntiJoin() {
-        when(badgeRepository.findLockedForUser(USER)).thenReturn(List.of(badge(true)));
+        when(badgeRepository.findLockedForUser(eq(USER), any())).thenReturn(List.of(badge(true)));
 
         List<BadgeDto> locked = service.listLockedBadges(USER);
 
@@ -295,6 +312,145 @@ class BadgeServiceImplTest {
         assertThat(appFacing.badge().id()).isEqualTo(PIONEER);
     }
 
+    // ---- awarding for an event ----------------------------------------------
+
+    /**
+     * The point of the trigger SPI: the caller reports what happened and the catalogue decides what
+     * it is worth, so a second badge on an existing event needs no deploy — here, two of them.
+     */
+    @Test
+    void awardingForATriggerUnlocksEveryBadgeTheEventIsCurrentlyWorth() {
+        BadgeEntity veteran = windowed(null, null);
+        veteran.setId("founder");
+        when(badgeRepository.findUnheldForTrigger(eq("account_created"), any(), eq(USER)))
+                .thenReturn(List.of(windowed(null, null), veteran));
+        when(userBadgeRepository.findForUserAndBadge(eq(USER), any())).thenReturn(Optional.empty());
+        when(userBadgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        List<UserBadgeDto> unlocked =
+                service.awardForTrigger(USER, BadgeTrigger.ACCOUNT_CREATED, SIGNED_UP_AT);
+
+        assertThat(unlocked).extracting(ub -> ub.badge().id()).containsExactly(PIONEER, "founder");
+    }
+
+    /**
+     * The usual case on any repeat — a re-run onboarding, a retried listener. The query has already
+     * excluded what the user holds, so there is nothing left to write.
+     */
+    @Test
+    void awardingForATriggerThatMatchesNothingWritesNothing() {
+        when(badgeRepository.findUnheldForTrigger(any(), any(), any())).thenReturn(List.of());
+
+        assertThat(service.awardForTrigger(USER, BadgeTrigger.ACCOUNT_CREATED, SIGNED_UP_AT)).isEmpty();
+        verify(userBadgeRepository, never()).saveAndFlush(any());
+    }
+
+    /**
+     * The whole reason the moment is a parameter: a limited-time badge is judged against when the
+     * user signed up, not when this call happens. Onboarding a week after the cutoff must still
+     * pay out a badge earned by signing up before it.
+     */
+    @Test
+    void awardingForATriggerJudgesTheWindowAtTheMomentGivenRatherThanNow() {
+        when(badgeRepository.findUnheldForTrigger(any(), any(), any())).thenReturn(List.of());
+
+        service.awardForTrigger(USER, BadgeTrigger.ACCOUNT_CREATED, SIGNED_UP_AT);
+
+        ArgumentCaptor<Instant> at = ArgumentCaptor.forClass(Instant.class);
+        verify(badgeRepository).findUnheldForTrigger(eq("account_created"), at.capture(), eq(USER));
+        assertThat(at.getValue()).isEqualTo(SIGNED_UP_AT);
+    }
+
+    /** A rule awarded it, not a person — so there is no staff member to blame or thank. */
+    @Test
+    void aBadgeAwardedByARuleRecordsNoGranter() {
+        when(badgeRepository.findUnheldForTrigger(any(), any(), any()))
+                .thenReturn(List.of(windowed(null, null)));
+        when(userBadgeRepository.findForUserAndBadge(eq(USER), any())).thenReturn(Optional.empty());
+        when(userBadgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.awardForTrigger(USER, BadgeTrigger.ACCOUNT_CREATED, SIGNED_UP_AT);
+
+        ArgumentCaptor<UserBadgeEntity> saved = ArgumentCaptor.forClass(UserBadgeEntity.class);
+        verify(userBadgeRepository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getGrantedBy()).isNull();
+    }
+
+    /** A caller that cannot say what happened, or when, would award the wrong badges silently. */
+    @Test
+    void awardingForATriggerNeedsBothTheEventAndItsMoment() {
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> service.awardForTrigger(USER, null, SIGNED_UP_AT));
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> service.awardForTrigger(USER, BadgeTrigger.ACCOUNT_CREATED, null));
+        verify(userBadgeRepository, never()).saveAndFlush(any());
+    }
+
+    // ---- the offer window ---------------------------------------------------
+
+    /**
+     * What makes `pioneer` limited-time without anybody remembering a date: once the window closes,
+     * the automatic path refuses it. Its own message, because this refusal is by design and must
+     * not read as a missing badge.
+     */
+    @Test
+    void awardingRefusesABadgeWhoseOfferWindowHasClosed() {
+        catalogueHas(windowed(Instant.parse("2020-01-01T00:00:00Z"), Instant.parse("2021-01-01T00:00:00Z")));
+
+        assertThatExceptionOfType(BadgeNotFoundException.class)
+                .isThrownBy(() -> service.award(USER, PIONEER))
+                .withMessageContaining("outside its earnable window");
+        verify(userBadgeRepository, never()).saveAndFlush(any());
+    }
+
+    /** The other half of the same column pair: a badge staged to open later is not awardable yet. */
+    @Test
+    void awardingRefusesABadgeWhoseOfferWindowHasNotOpenedYet() {
+        catalogueHas(windowed(Instant.parse("2099-01-01T00:00:00Z"), null));
+
+        assertThatExceptionOfType(BadgeNotFoundException.class)
+                .isThrownBy(() -> service.award(USER, PIONEER))
+                .withMessageContaining("outside its earnable window");
+    }
+
+    /** An unbounded badge is the ordinary case and answers on availability alone. */
+    @Test
+    void aBadgeWithNoWindowIsAlwaysAwardable() {
+        catalogueHas(windowed(null, null));
+        when(userBadgeRepository.findForUserAndBadge(USER, PIONEER)).thenReturn(Optional.empty());
+        when(userBadgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.award(USER, PIONEER).badge().id()).isEqualTo(PIONEER);
+    }
+
+    /**
+     * The deliberate asymmetry: a window bounds the automatic offer, not what staff may do. Support
+     * has to be able to hand `pioneer` to someone who qualified and lost the account — and that
+     * path is the one that records who did it.
+     */
+    @Test
+    void staffCanStillGrantABadgeWhoseOfferWindowHasClosed() {
+        catalogueHas(windowed(Instant.parse("2020-01-01T00:00:00Z"), Instant.parse("2021-01-01T00:00:00Z")));
+        when(userBadgeRepository.findForUserAndBadge(USER, PIONEER)).thenReturn(Optional.empty());
+        when(userBadgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.grant(USER, PIONEER, STAFF);
+
+        ArgumentCaptor<UserBadgeEntity> saved = ArgumentCaptor.forClass(UserBadgeEntity.class);
+        verify(userBadgeRepository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getGrantedBy()).isEqualTo(STAFF);
+    }
+
+    /** Retiring is still absolute — it is the switch that stops a badge being handed out at all. */
+    @Test
+    void staffCannotGrantARetiredBadge() {
+        catalogueHas(badge(false));
+
+        assertThatExceptionOfType(BadgeNotFoundException.class)
+                .isThrownBy(() -> service.grant(USER, PIONEER, STAFF))
+                .withMessageContaining("retired");
+    }
+
     // ---- administration -----------------------------------------------------
 
     @Test
@@ -347,8 +503,76 @@ class BadgeServiceImplTest {
         assertThat(service.holderCounts()).containsEntry(PIONEER, 7L).containsEntry("veteran", 0L);
     }
 
+    /**
+     * A trigger the backend never fires would leave a badge that looks live on the dashboard and
+     * silently never unlocks — the kind of failure nobody notices for weeks. Refused at the edge,
+     * and by the column's CHECK constraint for anything that arrives another way.
+     */
+    @Test
+    void aBadgeCannotBeSavedWithATriggerTheBackendDoesNotFire() {
+        when(badgeRepository.existsById(PIONEER)).thenReturn(false);
+
+        assertThatExceptionOfType(InvalidBadgeDefinitionException.class)
+                .isThrownBy(() -> service.create(PIONEER, upsert("first_haircut", null, null)))
+                .withMessageContaining("account_created");
+        verify(badgeRepository, never()).saveAndFlush(any());
+    }
+
+    /** Blank means "no trigger; staff hand this one out" — the normal case, not an error. */
+    @Test
+    void aBadgeWithNoTriggerIsHandGrantedAndThatIsFine() {
+        when(badgeRepository.existsById(PIONEER)).thenReturn(false);
+        when(badgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.create(PIONEER, upsert("   ", null, null)).awardTrigger()).isNull();
+    }
+
+    /** Typed into a form, compared against a stored string — so it is canonicalised on the way in. */
+    @Test
+    void aTriggerCodeIsNormalisedOnSave() {
+        when(badgeRepository.existsById(PIONEER)).thenReturn(false);
+        when(badgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.create(PIONEER, upsert(" ACCOUNT_CREATED ", null, null)).awardTrigger())
+                .isEqualTo("account_created");
+    }
+
+    /** A window that ends before it opens is a typo that presents as a badge nobody can earn. */
+    @Test
+    void aBadgeCannotBeSavedWithAWindowThatEndsBeforeItOpens() {
+        catalogueHas(badge(true));
+
+        assertThatExceptionOfType(InvalidBadgeDefinitionException.class)
+                .isThrownBy(() -> service.update(PIONEER, upsert(
+                        "account_created",
+                        Instant.parse("2027-09-06T00:00:00Z"),
+                        Instant.parse("2026-09-06T00:00:00Z"))));
+    }
+
+    /** The window round-trips to the client, which is what lets the app show "X days left". */
+    @Test
+    void theOfferWindowIsCarriedOnTheBadgeTheDashboardReadsBack() {
+        when(badgeRepository.existsById(PIONEER)).thenReturn(false);
+        when(badgeRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        BadgeDto saved = service.create(PIONEER, upsert(
+                "account_created",
+                Instant.parse("2026-09-06T00:00:00Z"),
+                Instant.parse("2027-09-06T00:00:00Z")));
+
+        assertThat(saved.earnableFrom()).isEqualTo(Instant.parse("2026-09-06T00:00:00Z"));
+        assertThat(saved.earnableUntil()).isEqualTo(Instant.parse("2027-09-06T00:00:00Z"));
+    }
+
+    private static BadgeUpsertRequest upsert(String trigger, Instant from, Instant until) {
+        return new BadgeUpsertRequest("Pioneer", "Early member",
+                "badges/pioneer/badge-unlocked.svg", "badges/pioneer/badge-locked.svg", true,
+                trigger, from, until);
+    }
+
     private static BadgeUpsertRequest upsert() {
         return new BadgeUpsertRequest("Pioneer", "Early member",
-                "badges/pioneer/badge-unlocked.svg", "badges/pioneer/badge-locked.svg", true);
+                "badges/pioneer/badge-unlocked.svg", "badges/pioneer/badge-locked.svg", true,
+                null, null, null);
     }
 }

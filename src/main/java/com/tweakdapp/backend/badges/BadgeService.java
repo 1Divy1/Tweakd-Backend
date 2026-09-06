@@ -5,6 +5,7 @@ import com.tweakdapp.backend.badges.dto.BadgeGrantDto;
 import com.tweakdapp.backend.badges.dto.BadgeUpsertRequest;
 import com.tweakdapp.backend.badges.dto.UserBadgeDto;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -48,11 +49,61 @@ public interface BadgeService {
      * is not a profile fails on the foreign key rather than with a tidy 404 — callers award from
      * inside the transaction that just handled that user, so there is nothing to look up.
      *
+     * <p>This is the by-name path, for a badge whose rule is genuinely specific to one call site.
+     * Where the event is the thing worth reporting, {@link #awardForTrigger} is better: it lets the
+     * badge be chosen in the {@code badges} table instead of here, so a second badge for the same
+     * event needs no deploy.
+     *
+     * <p>Judged against <strong>now</strong>: a badge outside its offer window is refused, the same
+     * as a retired one. Award something whose window is judged against another moment — an
+     * achievement dated earlier than the call — through {@link #awardForTrigger}, which takes that
+     * moment as an argument.
+     *
      * @return the badge as the user now holds it
-     * @throws com.tweakdapp.backend.badges.exception.BadgeNotFoundException if the code is unknown
-     *         or the badge has been retired
+     * @throws com.tweakdapp.backend.badges.exception.BadgeNotFoundException if the code is unknown,
+     *         the badge has been retired, or its offer window has closed (or not yet opened)
      */
     UserBadgeDto award(UUID userId, String badgeId);
+
+    /**
+     * Unlocks every badge that this event is worth, for this user — the way the backend awards
+     * badges automatically.
+     *
+     * <p><strong>Prefer this to {@link #award(UUID, String)}.</strong> The caller reports what
+     * happened and names no badge at all; which badges the event unlocks, and for how long that
+     * offer stands, is data in the {@code badges} table. Adding a second badge to an event that is
+     * already reported is then a row on the dashboard rather than a deploy — which is the whole
+     * reason this method exists, and why {@code profile} can award {@code pioneer} without ever
+     * mentioning it.
+     *
+     * <p>Call it from inside the achievement's own transaction, for the same reason
+     * {@link #award(UUID, String)} says: the badges and the thing that earned them commit together.
+     *
+     * <p><strong>Idempotent</strong>, on the same guarantee — the unique index on
+     * {@code (user_id, badge_id)}. A badge the user already holds is skipped rather than re-dated,
+     * so a retried listener or a re-run job awards nothing the second time.
+     *
+     * <p>A trigger that matches no badge is normal and silent: it returns an empty list, having
+     * done one indexed read and no writes. Reporting an event nothing currently rewards costs
+     * essentially nothing, so a call site does not have to be removed when a badge is withdrawn.
+     *
+     * @param userId     the profile unlocking them. Taken on trust, exactly as in
+     *                   {@link #award(UUID, String)} — this module reads nothing from
+     *                   {@code profiles}
+     * @param trigger    what happened
+     * @param occurredAt <strong>when the thing being rewarded happened</strong>, which is what each
+     *                   badge's offer window is judged against — not necessarily now. For
+     *                   {@link BadgeTrigger#ACCOUNT_CREATED} it is the account's creation date, so
+     *                   that someone who signed up inside a limited-time badge's window still earns
+     *                   it when they finish onboarding after the window has closed, and someone who
+     *                   signed up after it does not earn it by onboarding promptly. Passing
+     *                   {@code Instant.now()} is right only when the event <em>is</em> now
+     * @return the badges newly unlocked by this call, oldest badge first — empty when the user
+     *         already held everything the event unlocks, which is the usual case on a retry. Never
+     *         includes a badge the user already had, so a caller can use a non-empty result as
+     *         "something to celebrate" without checking anything else
+     */
+    List<UserBadgeDto> awardForTrigger(UUID userId, BadgeTrigger trigger, Instant occurredAt);
 
     /**
      * As {@link #award(UUID, String)}, but recording the staff member who granted it by hand.
@@ -60,6 +111,13 @@ public interface BadgeService {
      * <p>For badges that are a judgement call rather than something a rule can detect. The granter
      * is stamped on {@code user_badges.granted_by} so a privileged write to someone else's profile
      * can be reviewed afterwards; {@code null} there means the backend awarded it automatically.
+     *
+     * <p>Unlike {@link #award}, this <strong>ignores the offer window</strong>. A window bounds the
+     * automatic offer, not what staff may do: granting an expired badge is exactly the case
+     * hand-granting exists for — an account recreated after a support issue, someone who qualified
+     * and hit a bug — and it is accountable, because this is the path that records who did it.
+     * Retiring the badge ({@code available = false}) is the switch that stops it being handed out
+     * at all, and that one is still respected here.
      *
      * @param grantedBy the granting staff member's id, from {@code admin_team_members}
      */
@@ -169,6 +227,12 @@ public interface BadgeService {
      * <p>Editing is a full replace of the mutable fields, so the dashboard sends the whole shape
      * back. Flipping {@code available} to {@code false} is how a badge is retired: it stops being
      * awardable and drops out of the catalogue, while the profiles holding it are untouched.
+     *
+     * <p><strong>Full replace includes the unlock rule.</strong> {@code awardTrigger},
+     * {@code earnableFrom} and {@code earnableUntil} are replaced like everything else, so a client
+     * that omits them clears them — which would turn an automatic badge back into a hand-granted
+     * one, silently, on an edit that meant to change the title. Any caller of this endpoint must
+     * round-trip all three, exactly as it already round-trips {@code available}.
      *
      * @throws com.tweakdapp.backend.badges.exception.BadgeNotFoundException if the code is unknown
      */

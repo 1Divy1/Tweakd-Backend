@@ -18,7 +18,7 @@ Manages user profile data and onboarding. Owns the `profiles` table plus the
 | Method | Description |
 |---|---|
 | `getProfile(userId)` | Returns the authenticated user's own profile |
-| `completeOnboarding(userId, request)` | Saves name, username, city, discovery radius (required) and bio (optional) after first sign-in |
+| `completeOnboarding(userId, request)` | Saves name, username, city, discovery radius (required) and bio (optional) after first sign-in. Also reports `BadgeTrigger.ACCOUNT_CREATED` to `badges` — the backend's only signal that a new member exists, since signup happens in Supabase's `handle_new_user` trigger. Names no badge: the catalogue decides what a signup is worth, and the account's `created_at` is what its offer window is judged against |
 | `getPublicProfileByUsername(username)` | Returns a public view of any profile by username |
 | `getBadgesByUsername(username)` | Just the badge row of a profile — the same list the profile already carries, for refetching it alone |
 | `searchByUsername(prefix)` | Prefix search across all usernames |

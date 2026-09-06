@@ -1,6 +1,7 @@
 package com.tweakdapp.backend.badges.internal;
 
 import com.tweakdapp.backend.badges.BadgeService;
+import com.tweakdapp.backend.badges.BadgeTrigger;
 import com.tweakdapp.backend.badges.dto.BadgeDto;
 import com.tweakdapp.backend.badges.dto.BadgeGrantDto;
 import com.tweakdapp.backend.badges.dto.BadgeUpsertRequest;
@@ -8,6 +9,7 @@ import com.tweakdapp.backend.badges.dto.UserBadgeDto;
 import com.tweakdapp.backend.badges.exception.BadgeAlreadyExistsException;
 import com.tweakdapp.backend.badges.exception.BadgeInUseException;
 import com.tweakdapp.backend.badges.exception.BadgeNotFoundException;
+import com.tweakdapp.backend.badges.exception.InvalidBadgeDefinitionException;
 import com.tweakdapp.backend.badges.internal.entity.BadgeEntity;
 import com.tweakdapp.backend.badges.internal.entity.UserBadgeEntity;
 import com.tweakdapp.backend.badges.internal.repository.BadgeRepository;
@@ -19,11 +21,15 @@ import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 class BadgeServiceImpl implements BadgeService {
@@ -48,17 +54,51 @@ class BadgeServiceImpl implements BadgeService {
     @Override
     @Transactional
     public UserBadgeDto award(UUID userId, String badgeId) {
-        return doAward(userId, badgeId, null);
+        // Judged against now: the by-name path has no better moment to offer. A caller whose
+        // achievement is dated earlier than the call wants awardForTrigger, which takes the moment.
+        return doAward(userId, requireEarnableBadge(badgeId, Instant.now()), null);
+    }
+
+    @Override
+    @Transactional
+    public List<UserBadgeDto> awardForTrigger(UUID userId, BadgeTrigger trigger, Instant occurredAt) {
+        if (trigger == null || occurredAt == null) {
+            // A caller who cannot say what happened or when has no business awarding anything, and
+            // guessing either would award the wrong badges silently.
+            throw new IllegalArgumentException("trigger and occurredAt are required");
+        }
+
+        // One query settles the whole decision: bound to this trigger, inside its window at the
+        // moment being judged, not already held. Usually it returns nothing — a user who onboards
+        // twice, or any retry — and then this method has done a single indexed read and no writes.
+        List<BadgeEntity> toAward =
+                badgeRepository.findUnheldForTrigger(trigger.code(), occurredAt, userId);
+
+        List<UserBadgeDto> unlocked = new ArrayList<>(toAward.size());
+        for (BadgeEntity badge : toAward) {
+            // granted_by stays null: the backend is applying a rule, not a staff member reaching for
+            // a person. doAward re-checks "already held" per badge, which is what keeps this correct
+            // if two of these run at once — and the unique index is what makes that guarantee real.
+            unlocked.add(doAward(userId, badge, null));
+        }
+        return unlocked;
     }
 
     @Override
     @Transactional
     public UserBadgeDto grant(UUID userId, String badgeId, UUID grantedBy) {
-        return doAward(userId, badgeId, grantedBy);
+        // Deliberately the availability check without the window: staff may hand out a badge whose
+        // offer has closed — that is what hand-granting is for — and this path records who did.
+        return doAward(userId, requireAvailableBadge(badgeId), grantedBy);
     }
 
     /**
-     * The unlock itself.
+     * The unlock itself, for a badge the caller has already resolved.
+     *
+     * <p>Resolution is the caller's because the three award paths ask different questions of the
+     * catalogue: {@code award} wants a badge earnable now, {@code grant} one that is merely
+     * available, and {@code awardForTrigger} has already selected its badges in SQL. Doing it here
+     * would mean either re-reading rows that are in hand or collapsing three rules into one.
      *
      * <p>An unlock already on file short-circuits and is returned as it stands — that is what makes
      * a retried listener harmless, and it is why {@code earnedAt} never moves: the date on the badge
@@ -75,8 +115,8 @@ class BadgeServiceImpl implements BadgeService {
      * refuses an unlock for a user who is not there; callers award from inside the transaction
      * that just handled that user, so there is nothing to look up.
      */
-    private UserBadgeDto doAward(UUID userId, String badgeId, UUID grantedBy) {
-        BadgeEntity badge = requireAwardableBadge(badgeId);
+    private UserBadgeDto doAward(UUID userId, BadgeEntity badge, UUID grantedBy) {
+        String badgeId = badge.getId();
 
         Optional<UserBadgeEntity> existing = userBadgeRepository.findForUserAndBadge(userId, badgeId);
         if (existing.isPresent()) {
@@ -100,8 +140,9 @@ class BadgeServiceImpl implements BadgeService {
     @Override
     @Transactional
     public boolean revoke(UUID userId, String badgeId) {
-        // Deliberately not requireAwardableBadge: a retired badge granted by mistake still has to
-        // be removable, and the row is what matters here, not the catalogue entry behind it.
+        // Deliberately no catalogue check at all: a badge granted by mistake has to be removable
+        // whether it has since been retired or its offer window has closed. The row is what matters
+        // here, not the definition behind it.
         Optional<UserBadgeEntity> held = userBadgeRepository.findForUserAndBadge(userId, badgeId);
         if (held.isEmpty()) {
             // Never awarded, or already taken back. Both are the state the caller asked for.
@@ -142,13 +183,13 @@ class BadgeServiceImpl implements BadgeService {
     @Override
     @Transactional(readOnly = true)
     public List<BadgeDto> listLockedBadges(UUID userId) {
-        return badgeRepository.findLockedForUser(userId).stream().map(this::toDto).toList();
+        return badgeRepository.findLockedForUser(userId, Instant.now()).stream().map(this::toDto).toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<BadgeDto> listCatalogue() {
-        return badgeRepository.findByAvailableTrueOrderByCreatedAtAsc().stream().map(this::toDto).toList();
+        return badgeRepository.findEarnableAt(Instant.now()).stream().map(this::toDto).toList();
     }
 
     // ---- administration -----------------------------------------------------
@@ -226,8 +267,11 @@ class BadgeServiceImpl implements BadgeService {
 
     // ---- helpers ------------------------------------------------------------
 
-    /** Resolves a badge that may still be awarded; unknown and retired codes are both refused. */
-    private BadgeEntity requireAwardableBadge(String badgeId) {
+    /**
+     * Resolves a badge staff may hand out: it exists and is not retired. Its offer window is not
+     * consulted — see {@link #grant} for why that is the right asymmetry.
+     */
+    private BadgeEntity requireAvailableBadge(String badgeId) {
         if (badgeId == null || badgeId.isBlank()) {
             throw BadgeNotFoundException.byId(String.valueOf(badgeId));
         }
@@ -235,6 +279,22 @@ class BadgeServiceImpl implements BadgeService {
                 .orElseThrow(() -> badgeRepository.existsById(badgeId)
                         ? BadgeNotFoundException.retired(badgeId)
                         : BadgeNotFoundException.byId(badgeId));
+    }
+
+    /**
+     * Resolves a badge the backend may award by itself for something that happened at {@code at}:
+     * available <em>and</em> inside its offer window.
+     *
+     * <p>Three distinguishable refusals, because "no such badge", "we withdrew it" and "the offer
+     * closed" send whoever is reading the log somewhere different. A closed window is the one that
+     * will happen on purpose — {@code pioneer} after its year — so it must not read as a bug.
+     */
+    private BadgeEntity requireEarnableBadge(String badgeId, Instant at) {
+        BadgeEntity badge = requireAvailableBadge(badgeId);
+        if (!badge.isEarnableAt(at)) {
+            throw BadgeNotFoundException.outsideWindow(badgeId);
+        }
+        return badge;
     }
 
     /**
@@ -255,6 +315,40 @@ class BadgeServiceImpl implements BadgeService {
         badge.setUnlockedKey(request.unlockedKey().strip());
         badge.setLockedKey(blankToNull(request.lockedKey()));
         badge.setAvailable(request.available());
+        badge.setAwardTrigger(resolveTrigger(request.awardTrigger()));
+        badge.setEarnableFrom(request.earnableFrom());
+        badge.setEarnableUntil(request.earnableUntil());
+
+        // Both of the definitions this refuses fail silently if stored: a badge that is on the
+        // dashboard, looks live, and can never be awarded. The database refuses them too; this is
+        // the half that says which field is wrong.
+        if (request.earnableFrom() != null
+                && request.earnableUntil() != null
+                && !request.earnableFrom().isBefore(request.earnableUntil())) {
+            throw InvalidBadgeDefinitionException.invalidWindow();
+        }
+    }
+
+    /**
+     * Validates the submitted trigger code and canonicalises it.
+     *
+     * <p>Blank means "no trigger; this badge is hand-granted", which is the normal case. Anything
+     * else must be a code the backend actually fires — an unrecognised one would leave a badge that
+     * matches no event and therefore never unlocks, with nothing anywhere to say so. Rejecting it
+     * at the edge is that failure made loud; the column's CHECK constraint is the same rule for
+     * anything that reaches the database another way.
+     */
+    private String resolveTrigger(String submitted) {
+        if (submitted == null || submitted.isBlank()) {
+            return null;
+        }
+        return BadgeTrigger.fromCode(submitted)
+                .map(BadgeTrigger::code)
+                .orElseThrow(() -> InvalidBadgeDefinitionException.unknownTrigger(
+                        submitted,
+                        Arrays.stream(BadgeTrigger.values())
+                                .map(BadgeTrigger::code)
+                                .collect(Collectors.joining(", "))));
     }
 
     private static String blankToNull(String value) {
@@ -274,6 +368,9 @@ class BadgeServiceImpl implements BadgeService {
                 storageService.publicUrl(StorageBucket.ASSETS, badge.getUnlockedKey()),
                 storageService.publicUrl(StorageBucket.ASSETS, badge.getLockedKey()),
                 badge.isAvailable(),
+                badge.getAwardTrigger(),
+                badge.getEarnableFrom(),
+                badge.getEarnableUntil(),
                 badge.getCreatedAt());
     }
 

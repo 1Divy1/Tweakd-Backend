@@ -12,6 +12,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -36,6 +37,14 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
 
     private static final UUID USER = UUID.fromString("00000000-0000-0000-0000-0000000000b1");
     private static final UUID OTHER_USER = UUID.fromString("00000000-0000-0000-0000-0000000000b2");
+
+    /**
+     * The moment every awardability question below is asked about. A fixed instant rather than
+     * {@code Instant.now()} so the window tests state their boundaries relative to something the
+     * test controls — the production callers pass the moment the achievement happened, which is
+     * exactly this parameter.
+     */
+    private static final Instant NOW = Instant.parse("2027-01-01T00:00:00Z");
 
     @Autowired
     private UserBadgeRepository userBadgeRepository;
@@ -67,6 +76,16 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
                 insert into public.badges (id, title, unlocked_badge_url, locked_badge_url, is_available)
                 values (?, ?, ?, ?, ?)
                 """, id, id, "badges/" + id + "/badge-unlocked.svg", "badges/" + id + "/badge-locked.svg", available);
+    }
+
+    /** A badge configured the way `pioneer` is: bound to an event, offered for a bounded window. */
+    private void createTriggeredBadge(String id, String trigger, Instant from, Instant until) {
+        createBadge(id, true);
+        jdbc.update("update public.badges set award_trigger = ?, earnable_from = ?, earnable_until = ? where id = ?",
+                trigger,
+                from == null ? null : java.sql.Timestamp.from(from),
+                until == null ? null : java.sql.Timestamp.from(until),
+                id);
     }
 
     private void award(UUID userId, String badgeId) {
@@ -224,7 +243,7 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
         createBadge("veteran", true);
         award(USER, "pioneer");
 
-        assertThat(badgeRepository.findLockedForUser(USER))
+        assertThat(badgeRepository.findLockedForUser(USER, NOW))
                 .extracting(b -> b.getId()).containsExactly("veteran");
     }
 
@@ -233,7 +252,7 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
     void retiredBadgesAreNotOfferedAsLocked() {
         createBadge("pioneer", false);
 
-        assertThat(badgeRepository.findLockedForUser(USER)).isEmpty();
+        assertThat(badgeRepository.findLockedForUser(USER, NOW)).isEmpty();
     }
 
     /**
@@ -247,8 +266,8 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
         jdbc.update("update public.badges set is_available = false where id = 'pioneer'");
 
         assertThat(userBadgeRepository.findAllForUser(USER)).hasSize(1);
-        assertThat(badgeRepository.findLockedForUser(OTHER_USER)).isEmpty();
-        assertThat(badgeRepository.findByAvailableTrueOrderByCreatedAtAsc()).isEmpty();
+        assertThat(badgeRepository.findLockedForUser(OTHER_USER, NOW)).isEmpty();
+        assertThat(badgeRepository.findEarnableAt(NOW)).isEmpty();
     }
 
     /** The locked list is per user, not a global "unearned" set. */
@@ -257,9 +276,124 @@ class UserBadgeRepositoryIT extends AbstractPostgresIT {
         createBadge("pioneer", true);
         award(USER, "pioneer");
 
-        assertThat(badgeRepository.findLockedForUser(USER)).isEmpty();
-        assertThat(badgeRepository.findLockedForUser(OTHER_USER))
+        assertThat(badgeRepository.findLockedForUser(USER, NOW)).isEmpty();
+        assertThat(badgeRepository.findLockedForUser(OTHER_USER, NOW))
                 .extracting(b -> b.getId()).containsExactly("pioneer");
+    }
+
+    // ---- the trigger query --------------------------------------------------
+
+    /**
+     * The single query behind {@code awardForTrigger}: bound to this event, inside its window, not
+     * already held. A badge on a different trigger is another event's business.
+     */
+    @Test
+    void theTriggerQueryReturnsOnlyBadgesBoundToThatEvent() {
+        createTriggeredBadge("pioneer", "account_created", null, null);
+        createBadge("veteran", true);   // hand-granted: no trigger at all
+
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", NOW, USER))
+                .extracting(b -> b.getId()).containsExactly("pioneer");
+    }
+
+    /** The anti-join that makes a repeated onboarding write nothing at all. */
+    @Test
+    void theTriggerQueryExcludesBadgesTheUserAlreadyHolds() {
+        createTriggeredBadge("pioneer", "account_created", null, null);
+        award(USER, "pioneer");
+
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", NOW, USER)).isEmpty();
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", NOW, OTHER_USER))
+                .extracting(b -> b.getId()).containsExactly("pioneer");
+    }
+
+    /**
+     * The window is half-open, [from, until). The boundary matters in exactly one place — the
+     * instant a limited-time badge expires — and both ends are checked here so an off-by-one
+     * cannot hand out a badge for a year longer than intended, or a day less.
+     */
+    @Test
+    void theTriggerWindowIncludesItsStartAndExcludesItsEnd() {
+        Instant from = Instant.parse("2026-09-06T00:00:00Z");
+        Instant until = Instant.parse("2027-09-06T00:00:00Z");
+        createTriggeredBadge("pioneer", "account_created", from, until);
+
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", from, USER))
+                .as("an account created at the instant the offer opens qualifies")
+                .hasSize(1);
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", until.minusMillis(1), USER))
+                .as("the last instant inside the window still qualifies")
+                .hasSize(1);
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", until, USER))
+                .as("the instant the offer closes does not")
+                .isEmpty();
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", from.minusMillis(1), USER))
+                .as("nor does anything before it opened")
+                .isEmpty();
+    }
+
+    /** Retiring stops the automatic path too — it is the switch that overrides everything. */
+    @Test
+    void theTriggerQueryExcludesRetiredBadges() {
+        createTriggeredBadge("pioneer", "account_created", null, null);
+        jdbc.update("update public.badges set is_available = false where id = 'pioneer'");
+
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", NOW, USER)).isEmpty();
+    }
+
+    /**
+     * What the app sees once a limited-time badge expires: it leaves the catalogue and the locked
+     * list on its own, so nothing advertises a badge that can no longer be handed out. The users
+     * already holding it keep it — the same asymmetry retiring has.
+     */
+    @Test
+    void anExpiredBadgeLeavesTheCatalogueAndTheLockedListButNotItsHolders() {
+        createTriggeredBadge("pioneer", "account_created", null, Instant.parse("2026-09-06T00:00:00Z"));
+        award(USER, "pioneer");
+
+        assertThat(badgeRepository.findEarnableAt(NOW)).isEmpty();
+        assertThat(badgeRepository.findLockedForUser(OTHER_USER, NOW)).isEmpty();
+        assertThat(userBadgeRepository.findAllForUser(USER)).hasSize(1);
+    }
+
+    /** A badge staged to open later is not offered yet, on either read. */
+    @Test
+    void aBadgeStagedToOpenLaterIsNotOfferedYet() {
+        createTriggeredBadge("pioneer", "account_created", Instant.parse("2099-01-01T00:00:00Z"), null);
+
+        assertThat(badgeRepository.findEarnableAt(NOW)).isEmpty();
+        assertThat(badgeRepository.findLockedForUser(USER, NOW)).isEmpty();
+        assertThat(badgeRepository.findUnheldForTrigger("account_created", NOW, USER)).isEmpty();
+    }
+
+    // ---- the CHECK constraints ----------------------------------------------
+
+    /**
+     * A trigger the backend never fires would leave a badge that silently never unlocks. The
+     * service refuses it at the edge; this is the guarantee that holds for anything written
+     * straight to the database.
+     */
+    @Test
+    void aTriggerCodeTheBackendDoesNotKnowIsRefused() {
+        createBadge("pioneer", true);
+
+        assertThatExceptionOfType(DataIntegrityViolationException.class)
+                .isThrownBy(() -> jdbc.update(
+                        "update public.badges set award_trigger = 'first_haircut' where id = 'pioneer'"));
+    }
+
+    /** A window that closes before it opens can never award anything — a typo, not a configuration. */
+    @Test
+    void aWindowThatEndsBeforeItOpensIsRefused() {
+        createBadge("pioneer", true);
+
+        assertThatExceptionOfType(DataIntegrityViolationException.class)
+                .isThrownBy(() -> jdbc.update("""
+                        update public.badges
+                           set earnable_from  = timestamptz '2027-09-06 00:00:00+00',
+                               earnable_until = timestamptz '2026-09-06 00:00:00+00'
+                         where id = 'pioneer'
+                        """));
     }
 
     /** The CHECK that keeps the columns keys: a full URL would silently double the public prefix. */

@@ -1,6 +1,7 @@
 package com.tweakdapp.backend.profile.internal;
 
 import com.tweakdapp.backend.badges.BadgeService;
+import com.tweakdapp.backend.badges.BadgeTrigger;
 import com.tweakdapp.backend.profile.ProfileService;
 import com.tweakdapp.backend.shared.geo.CityDto;
 import com.tweakdapp.backend.shared.geo.CountryDto;
@@ -132,6 +133,26 @@ class ProfileServiceImpl implements ProfileService {
         }
 
         ensureDefaultNotificationPreferences(id);
+
+        // A new member exists as of now, so whatever badges signing up is currently worth are
+        // unlocked here — `pioneer` today, whatever the catalogue says tomorrow. This module names
+        // no badge on purpose: it reports the event, and `badges` decides what it is worth, so
+        // adding or withdrawing a signup badge never touches this file.
+        //
+        // Onboarding rather than signup because signup happens in Supabase — the handle_new_user
+        // trigger inserts the profile and the backend never sees it. It is also the better moment:
+        // an account that never chose a username is not a member yet.
+        //
+        // Judged against the account's creation date, not now. A limited-time badge is a statement
+        // about when someone joined, so signing up two days before a cutoff and finishing onboarding
+        // a week later still earns it — and signing up after the cutoff does not earn it by
+        // onboarding quickly.
+        //
+        // In this transaction deliberately: if onboarding rolls back there is no member and there
+        // should be no badge. Idempotent, so a retried or repeated onboarding awards nothing twice,
+        // and the return value is ignored because the app collects new unlocks from its own
+        // pending-celebration list on the next launch.
+        badgeService.awardForTrigger(id, BadgeTrigger.ACCOUNT_CREATED, profile.getCreatedAt());
 
         return mapper.toDto(profile, badgesOf(profile.getId()));
     }
