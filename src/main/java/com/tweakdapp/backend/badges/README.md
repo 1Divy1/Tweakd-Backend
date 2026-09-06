@@ -65,14 +65,19 @@ it. Concretely, this module gives up two things to stay importable:
 Two ways in, and no way for a user to award themselves — the module's own controller has no award
 path (its one write only acknowledges an animation; see the API section).
 
-**Automatically**, from the module that witnessed the achievement:
+**Automatically**, from the module that witnessed the event:
 
 ```java
-badgeService.award(userId, Badges.PIONEER);
+badgeService.awardForTrigger(userId, BadgeTrigger.ACCOUNT_CREATED, profile.getCreatedAt());
 ```
 
-Call it inside the achievement's own transaction, so the badge and the thing that earned it commit
-together.
+Note what is missing: **a badge id**. The caller reports what happened and the `badges` table
+decides what that is worth — see [Triggers and offer windows](#triggers-and-offer-windows) below.
+`award(userId, Badges.PIONEER)` is the by-name variant, for a rule genuinely specific to one call
+site; prefer the trigger.
+
+Call it inside the achievement's own transaction, so the badges and the thing that earned them
+commit together.
 
 **Idempotent.** A user who already holds the badge gets back the row they already have, with
 `earnedAt` unchanged — a retried listener, a replayed job and a double-tapped action all collapse
@@ -84,7 +89,7 @@ Because a badge is a statement about the present, "already earned" is success ra
 conflict. There is no second award to record and nothing for a caller to handle differently.
 
 **By hand**, from the dashboard, for badges that are a judgement call rather than something a rule
-can detect — `pioneer` is one. Those go through `grant(userId, badgeId, staffId)` and stamp the
+can detect — "helped at the meet". Those go through `grant(userId, badgeId, staffId)` and stamp the
 granting staff member on `user_badges.granted_by`. `null` there means the backend awarded it
 automatically, which is how the two are told apart afterwards.
 
@@ -93,6 +98,67 @@ only read that exposes it is the dashboard's `GET /admin/badges/holders/{userId}
 `BadgeGrantDto`. A badge on a profile is the user's achievement; "granted by X" beside it would read
 as a favour rather than something earned. The column exists so a hand-grant can be traced later, and
 that is all it is for.
+
+## Triggers and offer windows
+
+The reason adding a badge is a row rather than a deploy. Three columns on `badges` carry the rule:
+
+| Column | Means |
+|---|---|
+| `award_trigger` | the `BadgeTrigger` whose event unlocks it; `NULL` = hand-granted only |
+| `earnable_from` | start of the offer window, inclusive; `NULL` = unbounded |
+| `earnable_until` | end of the offer window, exclusive; `NULL` = unbounded |
+
+A badge is **awardable** when it is `is_available` **and** the moment being judged falls inside
+`[earnable_from, earnable_until)`. `is_available` is the manual kill switch staff hold; the window
+is the automatic half.
+
+`pioneer` is the worked example. It used to mean a staff member typing a `user_badges` row per new
+account, because "was here early" read as a judgement call. With a launch date it is not one:
+
+```
+id       award_trigger      earnable_from         earnable_until
+pioneer  account_created    2026-09-06T00:00:00Z  2027-09-06T00:00:00Z
+```
+
+`profile` reports `ACCOUNT_CREATED` when a new member finishes onboarding; the badge unlocks itself
+for the launch year and stops on its own afterwards. Moving the cutoff is an edit on the dashboard.
+Replacing it with a successor badge is a new row on the same trigger — no code changes either way.
+
+**The window is judged against when the achievement happened, not against now.** That is why
+`awardForTrigger` takes an `occurredAt` and why `profile` passes `profiles.created_at` rather than
+`Instant.now()`: someone who signed up two days before the cutoff and finished onboarding a week
+after it still earned the badge by signing up in time, and someone who signed up afterwards does not
+earn it by onboarding promptly.
+
+**Why onboarding and not signup.** Signup happens inside Supabase — the `handle_new_user` trigger on
+`auth.users` inserts the profile and no Java code runs — so the backend never sees it. Onboarding is
+the first moment it can act, and it is also the first moment there is a member rather than an
+abandoned signup.
+
+An expired badge leaves the catalogue and the locked list on its own, exactly as a retired one does,
+so nothing advertises a badge that can no longer be handed out. The users already holding it keep
+it.
+
+**Staff hand-grants ignore the window** but still respect retirement. Granting an expired badge is
+precisely what hand-granting is for — an account recreated after a support issue, someone who
+qualified and hit a bug — and that path is the one that records who did it.
+
+### Adding a trigger vs adding a badge
+
+|  | Needs |
+|---|---|
+| A new badge on an existing trigger | a row in `badges` (dashboard) |
+| A new badge for a new kind of event | a `BadgeTrigger` constant, a migration extending `badges_award_trigger_known_ck`, and the call site that fires it — one release |
+
+A trigger says *an event happened*, not that a condition is met. The reporting module decides
+whether its own rule fired (that this really was the user's first car); this module decides what
+that is worth. That split is what keeps `badges` free of every other module's domain logic, and so
+importable by all of them — the same constraint that keeps it from reading `profiles`.
+
+An unrecognised trigger code is rejected on write, by both the service and the CHECK constraint. It
+would otherwise produce a badge that looks live on the dashboard and silently never unlocks — the
+kind of failure nobody notices for weeks.
 
 ## Retiring vs deleting
 
@@ -157,7 +223,7 @@ else's locked list.
 |---|---|---|
 | GET | `/` | the whole catalogue with holder counts, retired ones included |
 | POST | `/{badgeId}` | create — 409 if the code is taken |
-| PUT | `/{badgeId}` | edit; `available: false` retires |
+| PUT | `/{badgeId}` | edit; `available: false` retires. Carries `award_trigger` / `earnable_from` / `earnable_until` — 400 on an unknown trigger or an inverted window |
 | DELETE | `/{badgeId}` | delete — 409 while anyone holds it |
 | GET | `/holders/{userId}` | what one user holds, **with `granted_by`** — the only read that exposes it |
 | POST | `/{badgeId}/holders/{userId}` | grant by hand (idempotent) |
@@ -170,11 +236,18 @@ recognition decision, not a moderation one — the same reasoning that keeps `AP
 The badge code sits in the path on create as well as update. It is not editable afterwards (every
 unlock references it), so it is chosen once, and addressing the resource by it makes that visible.
 
+> **`PUT` is a full replace, and that now includes the unlock rule.** `award_trigger`,
+> `earnable_from` and `earnable_until` are replaced like every other field, so a dashboard that
+> does not send them back **clears them** — turning `pioneer` from an automatic badge into a
+> hand-granted one, silently, on an edit that only meant to fix a typo in the title. The dashboard
+> must round-trip all three, exactly as it already round-trips `available`. This is the one part of
+> this feature that needs a change in the dashboard repo.
+
 ## Entities
 
 | Entity | Table | Notes |
 |---|---|---|
-| `BadgeEntity` | `badges` | text PK — the stable code. `unlockedKey` / `lockedKey` map the two url columns |
+| `BadgeEntity` | `badges` | text PK — the stable code. `unlockedKey` / `lockedKey` map the two url columns; `awardTrigger` / `earnableFrom` / `earnableUntil` carry the unlock rule, and `isEarnableAt(at)` is the single statement of it |
 | `UserBadgeEntity` | `user_badges` | uuid PK, `@ManyToOne` to the badge (LAZY, always `join fetch`ed). `grantedInApp` is the unlock-animation latch |
 
 ## Schema dependencies
@@ -187,6 +260,14 @@ unlock references it), so it is chosen once, and addressing the resource by it m
 - The locked list is an anti-join (`not exists`) rather than fetch-both-and-subtract-in-Java: one
   query instead of two, and the `not exists` is served by the unique index above.
 - `badges_urls_are_keys` — CHECK: neither url column may start with `http`.
+- `badges_award_trigger_known_ck` — CHECK: `award_trigger` is `NULL` or a code the backend fires.
+  Adding a `BadgeTrigger` means extending this constraint in the same release. It is a CHECK rather
+  than a comment because the failure it prevents is silent: a badge that never unlocks.
+- `badges_earnable_window_ck` — CHECK: `earnable_from < earnable_until` when both are set. A window
+  that closes before it opens is a typo that presents as a badge nobody can earn.
+- No index on `award_trigger`. `badges` is a handful of curated rows that every one of these lookups
+  reads in full anyway; an index would be maintenance on every dashboard edit to save a scan of one
+  page.
 - `user_badges.granted_in_app` — `boolean NOT NULL DEFAULT false`. The unlock-animation latch. No
   index of its own: "the caller's un-celebrated badges" filters on `user_id` through the unique
   index, then this flag in memory over the handful that returns.

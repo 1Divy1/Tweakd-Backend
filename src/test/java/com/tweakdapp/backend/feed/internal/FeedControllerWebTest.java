@@ -43,6 +43,7 @@ class FeedControllerWebTest {
                 new BadgeDto("pioneer", "Pioneer", "One of the first.",
                         "https://assets.tweakd.app/badges/pioneer/badge-unlocked.svg",
                         "https://assets.tweakd.app/badges/pioneer/badge-locked.svg", true,
+                        "account_created", null, null,
                         Instant.parse("2026-09-03T16:22:34Z")),
                 Instant.parse("2026-09-03T17:00:00Z"));
     }

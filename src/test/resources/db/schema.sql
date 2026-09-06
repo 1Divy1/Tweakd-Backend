@@ -1291,6 +1291,11 @@ CREATE TABLE public.badges (
     is_available boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     locked_badge_url text,
+    award_trigger text,
+    earnable_from timestamp with time zone,
+    earnable_until timestamp with time zone,
+    CONSTRAINT badges_award_trigger_known_ck CHECK (((award_trigger IS NULL) OR (award_trigger = 'account_created'::text))),
+    CONSTRAINT badges_earnable_window_ck CHECK (((earnable_from IS NULL) OR (earnable_until IS NULL) OR (earnable_from < earnable_until))),
     CONSTRAINT badges_urls_are_keys CHECK (((unlocked_badge_url !~~ 'http%'::text) AND ((locked_badge_url IS NULL) OR (locked_badge_url !~~ 'http%'::text))))
 );
 
@@ -1320,7 +1325,7 @@ COMMENT ON COLUMN public.badges.unlocked_badge_url IS 'R2 object key of the earn
 -- Name: COLUMN badges.is_available; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.badges.is_available IS 'false = retired: cannot be awarded and is hidden from the catalogue, but stays readable on the profiles that already hold it.';
+COMMENT ON COLUMN public.badges.is_available IS 'false = retired: cannot be awarded and is hidden from the catalogue, but stays readable on the profiles that already hold it. The manual half of awardability — earnable_from/earnable_until are the automatic half, and a badge must satisfy both.';
 
 
 --
@@ -1328,6 +1333,27 @@ COMMENT ON COLUMN public.badges.is_available IS 'false = retired: cannot be awar
 --
 
 COMMENT ON COLUMN public.badges.locked_badge_url IS 'R2 object key of the not-yet-earned artwork. NULL = no locked variant; the client greys the unlocked one out itself.';
+
+
+--
+-- Name: COLUMN badges.award_trigger; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.award_trigger IS 'The event that unlocks this badge automatically, matching the BadgeTrigger enum in the backend. NULL = hand-granted only. Known codes: account_created. Adding one means extending badges_award_trigger_known_ck and BadgeTrigger in the same release.';
+
+
+--
+-- Name: COLUMN badges.earnable_from; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.earnable_from IS 'Start of the window in which this badge may be awarded automatically, inclusive. NULL = no start bound. Lets a badge be staged before it opens.';
+
+
+--
+-- Name: COLUMN badges.earnable_until; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.badges.earnable_until IS 'End of the window in which this badge may be awarded automatically, exclusive. NULL = no end bound. This is how a limited-time badge retires itself; the users already holding it are untouched.';
 
 
 --
@@ -1974,17 +2000,17 @@ COMMENT ON TABLE public.car_share_links IS 'Public share links (web URL + QR pay
 
 
 --
--- Name: COLUMN car_share_links.code; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.car_share_links.code IS 'Immutable random public identifier used in https://tweakdapp.com/c/{code}. 10 Crockford-base32 characters, canonical uppercase. Unique across every row ever issued. Printed on physical QR stickers: it must stay valid for as long as the owner owns the car, which is why there is no regenerate action.';
-
-
---
 -- Name: COLUMN car_share_links.owner_id; Type: COMMENT; Schema: public; Owner: -
 --
 
 COMMENT ON COLUMN public.car_share_links.owner_id IS 'The owner the code was issued to (the car''s garages.owner_id at creation). A code belongs to the (car, owner) pair: when the marketplace transfers a car, the live row is revoked, never re-pointed at the new owner.';
+
+
+--
+-- Name: COLUMN car_share_links.code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_share_links.code IS 'Immutable random public identifier used in https://tweakdapp.com/c/{code}. 10 Crockford-base32 characters, canonical uppercase. Unique across every row ever issued. Printed on physical QR stickers: it must stay valid for as long as the owner owns the car, which is why there is no regenerate action.';
 
 
 --
@@ -2020,6 +2046,7 @@ COMMENT ON COLUMN public.car_share_links.qr_scan_count IS 'The same, for request
 --
 
 COMMENT ON COLUMN public.car_share_links.last_viewed_at IS 'Last counted view or scan, for the owner-facing "viewed X times, last on Y" stat.';
+
 
 --
 -- Name: car_status_options; Type: TABLE; Schema: public; Owner: -
@@ -3675,7 +3702,7 @@ COMMENT ON COLUMN public.user_badges.granted_by IS 'The staff member who granted
 -- Name: COLUMN user_badges.granted_in_app; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.user_badges.granted_in_app IS 'Has the app played the one-time unlock animation for this badge? false = still owed. Raised by the client via POST /api/v1/badges/me/pending-celebration/{badgeId} after it animates. Not a fact about the badge — purely client-celebration bookkeeping.';
+COMMENT ON COLUMN public.user_badges.granted_in_app IS 'Whether the badge animation was shown in the app.';
 
 
 --
@@ -5065,6 +5092,27 @@ CREATE INDEX car_events_starts_at_idx ON public.car_events USING btree (starts_a
 
 
 --
+-- Name: car_share_links_active_car_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_share_links_active_car_uq ON public.car_share_links USING btree (car_id) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: car_share_links_code_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX car_share_links_code_uq ON public.car_share_links USING btree (code);
+
+
+--
+-- Name: car_share_links_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_share_links_owner_idx ON public.car_share_links USING btree (owner_id);
+
+
+--
 -- Name: dm_conversations_user_b_a_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5146,27 +5194,6 @@ CREATE INDEX forum_thread_topics_thread_id_idx ON public.forum_thread_topics USI
 --
 
 CREATE INDEX forum_topics_thread_count_idx ON public.forum_thread_topic_options USING btree (thread_count);
-
-
---
--- Name: car_share_links_active_car_uq; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX car_share_links_active_car_uq ON public.car_share_links USING btree (car_id) WHERE (revoked_at IS NULL);
-
-
---
--- Name: car_share_links_code_uq; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX car_share_links_code_uq ON public.car_share_links USING btree (code);
-
-
---
--- Name: car_share_links_owner_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_share_links_owner_idx ON public.car_share_links USING btree (owner_id);
 
 
 --
@@ -7332,11 +7359,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_share_links; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
 -- Name: car_fuel_type_options; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7363,6 +7385,11 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: car_modifications; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_share_links; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 

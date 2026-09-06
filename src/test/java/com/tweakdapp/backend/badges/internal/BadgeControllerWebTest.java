@@ -45,6 +45,9 @@ class BadgeControllerWebTest {
                 "https://assets.tweakd.app/badges/pioneer/badge-unlocked.svg",
                 "https://assets.tweakd.app/badges/pioneer/badge-locked.svg",
                 true,
+                "account_created",
+                Instant.parse("2026-09-06T00:00:00Z"),
+                Instant.parse("2027-09-06T00:00:00Z"),
                 Instant.parse("2026-09-03T16:22:34Z"));
     }
 
@@ -99,7 +102,8 @@ class BadgeControllerWebTest {
     @Test
     void aMissingLockedVariantSerializesAsNull() throws Exception {
         BadgeDto noLocked = new BadgeDto("pioneer", "Pioneer", null,
-                "https://assets.tweakd.app/badges/pioneer/badge-unlocked.svg", null, true, Instant.now());
+                "https://assets.tweakd.app/badges/pioneer/badge-unlocked.svg", null, true,
+                null, null, null, Instant.now());
         when(badgeService.listCatalogue()).thenReturn(List.of(noLocked));
 
         mockMvc.perform(get("/api/v1/badges/catalogue").with(TestJwts.user()))

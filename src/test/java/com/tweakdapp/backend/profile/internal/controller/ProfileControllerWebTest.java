@@ -70,7 +70,8 @@ class ProfileControllerWebTest {
                 new BadgeDto("pioneer", "Pioneer", "One of the first members.",
                         "https://assets/badges/pioneer/badge-unlocked.svg",
                         "https://assets/badges/pioneer/badge-locked.svg",
-                        true, Instant.parse("2026-09-03T16:22:34Z")),
+                        true, "account_created", null, null,
+                        Instant.parse("2026-09-03T16:22:34Z")),
                 Instant.parse("2026-09-03T17:00:00Z"));
     }
 

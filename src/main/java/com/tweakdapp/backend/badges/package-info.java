@@ -12,7 +12,9 @@
  * <h2>Where the data lives</h2>
  * <ul>
  *   <li>{@code badges} — reference data, admin-managed. The badge's {@code id} is a stable code
- *       ({@code pioneer}), and the two url columns hold <strong>R2 object keys</strong>, not URLs.</li>
+ *       ({@code pioneer}), the two url columns hold <strong>R2 object keys</strong>, not URLs, and
+ *       {@code award_trigger} / {@code earnable_from} / {@code earnable_until} say what unlocks it
+ *       and for how long it is offered.</li>
  *   <li>{@code user_badges} — one row per (user, badge), FK to {@code profiles} and {@code badges}.
  *       A unique index on the pair is what makes awarding idempotent.</li>
  * </ul>
@@ -43,15 +45,35 @@
  * <h2>Awarding</h2>
  * Two ways in, and no way for a user to award themselves:
  * <ul>
- *   <li><strong>The SPI</strong> — {@code award(userId, badgeId)}, called in-process by the module
- *       that witnessed the achievement, from inside that achievement's own transaction.</li>
+ *   <li><strong>The SPI</strong> — {@code awardForTrigger(userId, trigger, occurredAt)}, called
+ *       in-process by the module that witnessed the event, from inside that event's own
+ *       transaction. The caller names <em>no badge</em>: it reports what happened, and the
+ *       {@code badges} table decides what that is worth. {@code award(userId, badgeId)} is the
+ *       by-name variant, for a rule genuinely specific to one call site.</li>
  *   <li><strong>By hand</strong> — the admin dashboard, for badges that are a judgement call
- *       ({@code pioneer}) rather than something a rule can detect. Those calls carry the granting
- *       staff member's id onto {@code user_badges.granted_by} — a staff-only audit trail, never
- *       returned by anything the app calls. A badge on a profile is the user's achievement;
+ *       ("helped at the meet") rather than something a rule can detect. Those calls carry the
+ *       granting staff member's id onto {@code user_badges.granted_by} — a staff-only audit trail,
+ *       never returned by anything the app calls. A badge on a profile is the user's achievement;
  *       "granted by X" beside it would read as a favour rather than something earned.</li>
  * </ul>
  * The module's own controller is read-only.
+ *
+ * <h2>Triggers and offer windows: why a new badge is not a deploy</h2>
+ * Two columns on {@code badges} carry the whole rule:
+ * <ul>
+ *   <li>{@code award_trigger} — the {@link com.tweakdapp.backend.badges.BadgeTrigger} whose event
+ *       unlocks it, or {@code null} for a hand-granted badge. Because the reporting module names no
+ *       badge, adding a second badge to an event already being reported is a row in this table.</li>
+ *   <li>{@code earnable_from} / {@code earnable_until} — the half-open window
+ *       {@code [from, until)} in which the trigger pays out. This is how a limited-time badge
+ *       withdraws itself on its date, with nobody having to remember: {@code pioneer} is offered
+ *       for the launch year and stops on its own.</li>
+ * </ul>
+ * A badge is awardable when it is {@code is_available} <em>and</em> inside its window. The window
+ * is judged against <strong>the moment the achievement happened</strong>, not against now — for
+ * {@code pioneer} that is the account's creation date, so signing up two days before the cutoff and
+ * onboarding a week after it still earns the badge. Staff hand-grants ignore the window (a support
+ * case is exactly what they are for) but still respect retirement.
  *
  * <h2>Main API</h2>
  * Public interface: {@link com.tweakdapp.backend.badges.BadgeService}. Badge codes are available as
