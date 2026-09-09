@@ -121,3 +121,13 @@ INSERT INTO public.feedback_feed_status_options (id, status) VALUES
     ('under_development', 'Under development'),
     ('completed', 'Completed')
 ON CONFLICT (id) DO NOTHING;
+
+-- Contest categories: car_event_contests.category_id is a RESTRICT FK.
+INSERT INTO public.car_event_contest_categories (id, label, icon, sort_order) VALUES
+  ('exhaust',  'Best exhaust system', 'exhaust',  10),
+  ('wheels',   'Best wheels',         'wheels',   20),
+  ('paint',    'Best paint / wrap',   'paint',    30),
+  ('interior', 'Best interior',       'interior', 40),
+  ('loudest',  'Loudest',             'loud',     50),
+  ('custom',   'Custom category',     'trophy',   99)
+ON CONFLICT (id) DO NOTHING;

@@ -63,4 +63,7 @@ public interface MapEventParticipantRepository extends JpaRepository<MapEventPar
     List<MapEventParticipantEntity> findByIdEventIdAndStatus(UUID eventId, String status);
 
     long countByIdEventIdAndStatus(UUID eventId, String status);
+
+    /** One car's rows across every event in a given status — the car's attendance history. */
+    List<MapEventParticipantEntity> findByIdCarIdAndStatus(UUID carId, String status);
 }
