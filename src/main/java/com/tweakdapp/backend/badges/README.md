@@ -151,6 +151,18 @@ qualified and hit a bug — and that path is the one that records who did it.
 | A new badge on an existing trigger | a row in `badges` (dashboard) |
 | A new badge for a new kind of event | a `BadgeTrigger` constant, a migration extending `badges_award_trigger_known_ck`, and the call site that fires it — one release |
 
+**Triggers fired today**
+
+| `BadgeTrigger` | Code | Fired by | On |
+|---|---|---|---|
+| `ACCOUNT_CREATED` | `account_created` | `profile` | onboarding completes (`occurredAt` = `profiles.created_at`) |
+| `CONTEST_WON` | `contest_won` | `mapevents` | a car finishes **1st** in an event contest |
+| `CONTEST_PODIUM` | `contest_podium` | `mapevents` | a car finishes **1st–3rd** in an event contest |
+
+A first place fires both, so a "won a contest" badge and a "made a podium" badge can exist side by
+side without `mapevents` knowing either exists. Both are idempotent at this module's boundary, which
+is what lets a contest finalisation be replayed safely.
+
 A trigger says *an event happened*, not that a condition is met. The reporting module decides
 whether its own rule fired (that this really was the user's first car); this module decides what
 that is worth. That split is what keeps `badges` free of every other module's domain logic, and so

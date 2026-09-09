@@ -1162,6 +1162,77 @@ $$;
 
 
 --
+-- Name: trg_contest_vote_counts(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_contest_vote_counts() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if tg_op = 'INSERT' then
+    update public.car_event_contest_entries
+       set votes_count = votes_count + 1, last_vote_at = now()
+     where contest_id = new.contest_id and car_id = new.car_id;
+    update public.car_event_contests
+       set votes_count = votes_count + 1
+     where id = new.contest_id;
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if new.car_id <> old.car_id then
+      update public.car_event_contest_entries
+         set votes_count = votes_count - 1
+       where contest_id = old.contest_id and car_id = old.car_id;
+      update public.car_event_contest_entries
+         set votes_count = votes_count + 1, last_vote_at = now()
+       where contest_id = new.contest_id and car_id = new.car_id;
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    update public.car_event_contest_entries
+       set votes_count = votes_count - 1
+     where contest_id = old.contest_id and car_id = old.car_id;
+    update public.car_event_contests
+       set votes_count = votes_count - 1
+     where id = old.contest_id;
+    return old;
+  end if;
+  return null;
+end;
+$$;
+
+
+--
+-- Name: trg_contest_entries_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_contest_entries_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'accepted' then
+      update public.car_event_contests set entries_count = entries_count + 1 where id = new.contest_id;
+    end if;
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if (old.status = 'accepted') <> (new.status = 'accepted') then
+      update public.car_event_contests
+         set entries_count = entries_count + (case when new.status = 'accepted' then 1 else -1 end)
+       where id = new.contest_id;
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    if old.status = 'accepted' then
+      update public.car_event_contests set entries_count = entries_count - 1 where id = old.contest_id;
+    end if;
+    return old;
+  end if;
+  return null;
+end;
+$$;
+
+
+--
 -- Name: update_comment_reply_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1294,7 +1365,7 @@ CREATE TABLE public.badges (
     award_trigger text,
     earnable_from timestamp with time zone,
     earnable_until timestamp with time zone,
-    CONSTRAINT badges_award_trigger_known_ck CHECK (((award_trigger IS NULL) OR (award_trigger = 'account_created'::text))),
+    CONSTRAINT badges_award_trigger_known_ck CHECK (((award_trigger IS NULL) OR (award_trigger = ANY (ARRAY['account_created'::text, 'contest_won'::text, 'contest_podium'::text])))),
     CONSTRAINT badges_earnable_window_ck CHECK (((earnable_from IS NULL) OR (earnable_until IS NULL) OR (earnable_from < earnable_until))),
     CONSTRAINT badges_urls_are_keys CHECK (((unlocked_badge_url !~~ 'http%'::text) AND ((locked_badge_url IS NULL) OR (locked_badge_url !~~ 'http%'::text))))
 );
@@ -1631,6 +1702,117 @@ CREATE TABLE public.car_event_categories (
 --
 
 COMMENT ON TABLE public.car_event_categories IS 'What type of events can occur on the virtual map of the app (eg: car meets, convoys, track days, etc.)';
+
+
+--
+-- Name: car_event_contest_categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_contest_categories (
+    id text NOT NULL,
+    label text NOT NULL,
+    icon text NOT NULL,
+    sort_order smallint NOT NULL,
+    is_available boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_contest_categories; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_contest_categories IS 'The categories an organizer can pick when creating a contest inside an event. `custom` lets them type their own title. Retire one with is_available = false; never delete (contests reference it).';
+
+
+--
+-- Name: car_event_contest_entries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_contest_entries (
+    contest_id uuid NOT NULL,
+    car_id uuid NOT NULL,
+    owner_id uuid NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    rejection_reason text,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    decided_at timestamp with time zone,
+    decided_by uuid,
+    votes_count integer DEFAULT 0 NOT NULL,
+    last_vote_at timestamp with time zone,
+    final_rank smallint,
+    final_votes_count integer,
+    CONSTRAINT car_event_contest_entries_final_rank_ck CHECK (((final_rank IS NULL) OR (final_rank >= 1))),
+    CONSTRAINT car_event_contest_entries_reason_ck CHECK (((status <> 'rejected'::text) OR (rejection_reason IS NOT NULL))),
+    CONSTRAINT car_event_contest_entries_reason_len_ck CHECK (((rejection_reason IS NULL) OR (char_length(rejection_reason) <= 300))),
+    CONSTRAINT car_event_contest_entries_status_ck CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'rejected'::text, 'withdrawn'::text]))),
+    CONSTRAINT car_event_contest_entries_votes_count_ck CHECK ((votes_count >= 0))
+);
+
+
+--
+-- Name: TABLE car_event_contest_entries; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_contest_entries IS 'A car asking to be judged in a contest. The owner requests; an organizer accepts or rejects. Only accepted rows are on the ballot.';
+
+
+--
+-- Name: car_event_contest_votes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_contest_votes (
+    contest_id uuid NOT NULL,
+    voter_id uuid NOT NULL,
+    car_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE car_event_contest_votes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_contest_votes IS 'One vote per attendee per contest. Never exposed: the API returns counts and the caller''s own choice, never who voted for what.';
+
+
+--
+-- Name: car_event_contests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.car_event_contests (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    category_id text NOT NULL,
+    title text NOT NULL,
+    criteria text,
+    status text DEFAULT 'scheduled'::text NOT NULL,
+    opens_at timestamp with time zone NOT NULL,
+    closes_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    finished_early boolean DEFAULT false NOT NULL,
+    finished_by uuid,
+    votes_count integer DEFAULT 0 NOT NULL,
+    entries_count integer DEFAULT 0 NOT NULL,
+    created_by uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT car_event_contests_criteria_len_ck CHECK (((criteria IS NULL) OR (char_length(criteria) <= 300))),
+    CONSTRAINT car_event_contests_entries_count_ck CHECK ((entries_count >= 0)),
+    CONSTRAINT car_event_contests_finished_pair_ck CHECK (((status = 'finished'::text) = (finished_at IS NOT NULL))),
+    CONSTRAINT car_event_contests_status_ck CHECK ((status = ANY (ARRAY['scheduled'::text, 'open'::text, 'finished'::text, 'canceled'::text]))),
+    CONSTRAINT car_event_contests_title_len_ck CHECK (((char_length(title) >= 3) AND (char_length(title) <= 60))),
+    CONSTRAINT car_event_contests_votes_count_ck CHECK ((votes_count >= 0)),
+    CONSTRAINT car_event_contests_window_ck CHECK ((closes_at > opens_at))
+);
+
+
+--
+-- Name: TABLE car_event_contests; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.car_event_contests IS 'A vote that runs inside a car event. scheduled = published, entries open, voting locked; open = voting; finished = results final (top 3 awarded); canceled is reserved.';
 
 
 --
@@ -7757,6 +7939,177 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: vehicle_history_entries; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contest_categories car_event_contest_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_categories
+    ADD CONSTRAINT car_event_contest_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_contests car_event_contests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contests
+    ADD CONSTRAINT car_event_contests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_pkey PRIMARY KEY (contest_id, car_id);
+
+
+--
+-- Name: car_event_contest_votes car_event_contest_votes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_votes
+    ADD CONSTRAINT car_event_contest_votes_pkey PRIMARY KEY (contest_id, voter_id);
+
+
+--
+-- Name: car_event_contests_event_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contests_event_status_idx ON public.car_event_contests USING btree (event_id, status);
+
+
+--
+-- Name: car_event_contest_entries_car_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_car_idx ON public.car_event_contest_entries USING btree (car_id);
+
+
+--
+-- Name: car_event_contest_entries_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_owner_idx ON public.car_event_contest_entries USING btree (owner_id);
+
+
+--
+-- Name: car_event_contest_entries_board_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_board_idx ON public.car_event_contest_entries USING btree (contest_id, status, votes_count DESC);
+
+
+--
+-- Name: car_event_contest_entries_podium_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_podium_idx ON public.car_event_contest_entries USING btree (car_id) WHERE (final_rank <= 3);
+
+
+--
+-- Name: car_event_contest_votes_entry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_votes_entry_idx ON public.car_event_contest_votes USING btree (contest_id, car_id);
+
+
+--
+-- Name: car_event_participants_car_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_participants_car_id_idx ON public.car_event_participants USING btree (car_id);
+
+
+--
+-- Name: car_event_contest_votes trg_contest_vote_counts; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contest_vote_counts AFTER INSERT OR DELETE OR UPDATE ON public.car_event_contest_votes FOR EACH ROW EXECUTE FUNCTION public.trg_contest_vote_counts();
+
+
+--
+-- Name: car_event_contest_entries trg_contest_entries_count; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contest_entries_count AFTER INSERT OR DELETE OR UPDATE ON public.car_event_contest_entries FOR EACH ROW EXECUTE FUNCTION public.trg_contest_entries_count();
+
+
+--
+-- Name: car_event_contests car_event_contests_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contests
+    ADD CONSTRAINT car_event_contests_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contests car_event_contests_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contests
+    ADD CONSTRAINT car_event_contests_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.car_event_contest_categories(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_contest_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_contest_id_fkey FOREIGN KEY (contest_id) REFERENCES public.car_event_contests(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_votes car_event_contest_votes_voter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_votes
+    ADD CONSTRAINT car_event_contest_votes_voter_id_fkey FOREIGN KEY (voter_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_votes car_event_contest_votes_entry_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_votes
+    ADD CONSTRAINT car_event_contest_votes_entry_fkey FOREIGN KEY (contest_id, car_id) REFERENCES public.car_event_contest_entries(contest_id, car_id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contests; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contest_entries; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contest_votes; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 

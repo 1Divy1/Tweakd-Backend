@@ -1,5 +1,9 @@
 package com.tweakdapp.backend.notification.internal;
 
+import com.tweakdapp.backend.mapevents.ContestEntryDecidedEvent;
+import com.tweakdapp.backend.mapevents.ContestEntryRequestedEvent;
+import com.tweakdapp.backend.mapevents.ContestFinishedEvent;
+import com.tweakdapp.backend.mapevents.ContestOpenedEvent;
 import com.tweakdapp.backend.mapevents.MapEventApprovedEvent;
 import com.tweakdapp.backend.mapevents.MapEventCarDecidedEvent;
 import com.tweakdapp.backend.mapevents.MapEventCarRegisteredEvent;
@@ -177,6 +181,120 @@ class MapEventsNotificationListener {
                         : "Your withdrawal from \"" + event.title() + "\" was declined",
                 null,
                 payload(event.eventId()));
+    }
+
+    // ---- contests -----------------------------------------------------------
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ContestEntryRequestedEvent event) {
+        List<UUID> recipients = event.recipientIds().stream()
+                .filter(id -> profileService.getNotificationPreferencesOrDefault(id).eventOrganizerEnabled())
+                .toList();
+        if (recipients.isEmpty()) {
+            return;
+        }
+
+        String username = resolveUsername(event.actorId());
+        Map<String, Object> payload = contestPayload(event.eventId(), event.contestId());
+        payload.put("car_id", event.carId().toString());
+        payload.put("actor_id", event.actorId().toString());
+        payload.put("actor_username", username);
+
+        notificationService.pushToAll(
+                recipients,
+                "contest_entry_requested",
+                username + " wants to enter \"" + event.contestTitle() + "\"",
+                event.eventTitle(),
+                payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ContestEntryDecidedEvent event) {
+        Map<String, Object> payload = contestPayload(event.eventId(), event.contestId());
+        payload.put("car_id", event.carId().toString());
+        payload.put("accepted", event.accepted());
+
+        // A decision on your own request is ungated, like every other "what happened to my
+        // submission" notification.
+        notificationService.push(
+                event.recipientId(),
+                "contest_entry_decided",
+                event.accepted()
+                        ? "Your car is on the ballot for \"" + event.contestTitle() + "\""
+                        : "Your car was not accepted into \"" + event.contestTitle() + "\"",
+                event.accepted() ? null : event.reason(),
+                payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ContestOpenedEvent event) {
+        List<UUID> recipients = event.recipientIds().stream()
+                .filter(id -> profileService.getNotificationPreferencesOrDefault(id).organizedEventsEnabled())
+                .toList();
+        if (recipients.isEmpty()) {
+            return;
+        }
+
+        notificationService.pushToAll(
+                recipients,
+                "contest_opened",
+                "Voting is open: " + event.contestTitle(),
+                event.eventTitle(),
+                contestPayload(event.eventId(), event.contestId()));
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ContestFinishedEvent event) {
+        // The podium first: personal, ungated — you are told when your car places.
+        for (ContestFinishedEvent.Placement place : event.podium()) {
+            Map<String, Object> payload = contestPayload(event.eventId(), event.contestId());
+            payload.put("car_id", place.carId().toString());
+            payload.put("rank", place.rank());
+            notificationService.push(
+                    place.ownerId(),
+                    "contest_placed",
+                    "Your " + place.carName() + " took " + ordinal(place.rank()) + " in \"" + event.contestTitle() + "\"",
+                    event.eventTitle(),
+                    payload);
+        }
+
+        List<UUID> audience = event.audienceIds().stream()
+                .filter(id -> profileService.getNotificationPreferencesOrDefault(id).organizedEventsEnabled())
+                .toList();
+        if (audience.isEmpty()) {
+            return;
+        }
+        Map<String, Object> payload = contestPayload(event.eventId(), event.contestId());
+        payload.put("winner_car_id", event.winnerCarId().toString());
+        notificationService.pushToAll(
+                audience,
+                "contest_results",
+                "Results are in: " + event.contestTitle(),
+                event.eventTitle(),
+                payload);
+    }
+
+    private Map<String, Object> contestPayload(UUID eventId, UUID contestId) {
+        Map<String, Object> payload = payload(eventId);
+        payload.put("contest_id", contestId.toString());
+        return payload;
+    }
+
+    private static String ordinal(int rank) {
+        return switch (rank) {
+            case 1 -> "1st";
+            case 2 -> "2nd";
+            case 3 -> "3rd";
+            default -> rank + "th";
+        };
     }
 
     /**

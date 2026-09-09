@@ -74,6 +74,29 @@ falls back to `"Someone …"` if the actor profile can't be resolved). Payload k
 snake_case strings — the global SNAKE_CASE wire strategy renames POJO fields, not JSON-map keys, so
 they're spelled out in the listener.
 
+### Map-event producers (events / contests)
+
+`mapevents` publishes domain events the same way, consumed here by `MapEventsNotificationListener`
+under the same after-commit async rules. The full gating table lives in
+[`mapevents/README.md`](../mapevents/README.md#notifications); the payload contract is below, since
+that is what the app routes on.
+
+| `type` | `payload` keys |
+|---|---|
+| `map_event_approved` / `map_event_rejected` | `event_id` |
+| `map_event_car_decided` | `event_id`, `car_id` |
+| `map_event_car_registered` | `event_id`, `car_id`, `actor_id`, `actor_username` |
+| `map_event_organizer_added` | `event_id`, `actor_id`, `actor_username` |
+| `contest_entry_requested` | `event_id`, `contest_id`, `car_id`, `actor_id`, `actor_username` |
+| `contest_entry_decided` | `event_id`, `contest_id`, `car_id`, `accepted` (boolean) |
+| `contest_opened` | `event_id`, `contest_id` |
+| `contest_results` | `event_id`, `contest_id`, `winner_car_id` |
+| `contest_placed` | `event_id`, `contest_id`, `car_id`, `rank` (1–3) |
+
+Every contest type carries `event_id` **and** `contest_id`, so the app can deep-link straight to the
+contest without first resolving the event. `contest_placed` is sent once per podium owner — the
+recipient's own car is in `car_id`, and `rank` is what the title says ("your car finished 2nd").
+
 ## Public API — `NotificationService`
 
 | Method | Description |

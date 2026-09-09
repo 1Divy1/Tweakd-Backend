@@ -41,7 +41,25 @@ public enum BadgeTrigger {
      * is the first moment the backend can act on a new account, and it is also the first moment
      * there is a member rather than an abandoned signup.
      */
-    ACCOUNT_CREATED("account_created");
+    ACCOUNT_CREATED("account_created"),
+
+    /**
+     * A car took <strong>first place</strong> in a contest run inside a car event.
+     *
+     * <p>Reported by {@code mapevents} from inside the transaction that finalises the contest,
+     * for the winning car's owner. The moment judged against a badge's window is the contest's
+     * {@code finished_at}. Fired alongside {@link #CONTEST_PODIUM} — a winner is on the podium
+     * too — so a "podium" badge and a "winner" badge can both exist as rows without either call
+     * site knowing.
+     */
+    CONTEST_WON("contest_won"),
+
+    /**
+     * A car placed in the <strong>top three</strong> of a contest run inside a car event
+     * (first place included). Reported by {@code mapevents} for each podium owner when a contest
+     * is finalised; only placements that received at least one vote are reported.
+     */
+    CONTEST_PODIUM("contest_podium");
 
     private final String code;
 
