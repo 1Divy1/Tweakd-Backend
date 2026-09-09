@@ -47,6 +47,7 @@ import com.tweakdapp.backend.mapevents.internal.entities.MapEventParticipantEnti
 import com.tweakdapp.backend.mapevents.internal.entities.MapEventParticipantId;
 import com.tweakdapp.backend.mapevents.internal.entities.MapEventRuleEntity;
 import com.tweakdapp.backend.mapevents.internal.repositories.CarMeetRepository;
+import com.tweakdapp.backend.mapevents.internal.repositories.ContestEntryRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventAttendeeRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventCategoryRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventOrganizerRepository;
@@ -111,6 +112,8 @@ class MapEventsServiceImpl implements MapEventsService {
     private final StorageService storageService;
     private final ApplicationEventPublisher events;
     private final MapboxGeocodingClient mapboxGeocodingClient;
+    private final ContestFinalizer contestFinalizer;
+    private final ContestEntryRepository contestEntryRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -127,7 +130,9 @@ class MapEventsServiceImpl implements MapEventsService {
                          BusinessService businessService,
                          StorageService storageService,
                          ApplicationEventPublisher events,
-                         MapboxGeocodingClient mapboxGeocodingClient) {
+                         MapboxGeocodingClient mapboxGeocodingClient,
+                         ContestFinalizer contestFinalizer,
+                         ContestEntryRepository contestEntryRepository) {
         this.eventRepository = eventRepository;
         this.categoryRepository = categoryRepository;
         this.carMeetRepository = carMeetRepository;
@@ -141,6 +146,8 @@ class MapEventsServiceImpl implements MapEventsService {
         this.storageService = storageService;
         this.events = events;
         this.mapboxGeocodingClient = mapboxGeocodingClient;
+        this.contestFinalizer = contestFinalizer;
+        this.contestEntryRepository = contestEntryRepository;
     }
 
     // ==================================================================
@@ -533,6 +540,9 @@ class MapEventsServiceImpl implements MapEventsService {
 
         event.setStatus(MapEventEntity.STATUS_CANCELED);
         eventRepository.save(event);
+        // A cancelled meet has no winners: its open contests close with the standings frozen and
+        // nothing paid out.
+        contestFinalizer.finalizeAllOpen(event, currentUserId, false);
         return assemble(event, currentUserId, true);
     }
 
@@ -547,6 +557,8 @@ class MapEventsServiceImpl implements MapEventsService {
         }
         event.setStatus(MapEventEntity.STATUS_PREVIOUS);
         eventRepository.save(event);
+        // Finishing the meet finishes its contests, in the same transaction, with the podium paid.
+        contestFinalizer.finalizeAllOpen(event, currentUserId, true);
         return assemble(event, currentUserId, true);
     }
 
@@ -785,10 +797,16 @@ class MapEventsServiceImpl implements MapEventsService {
             throw new InvalidMapEventException("A rejection reason is required");
         }
 
+        boolean wasAccepted = MapEventParticipantEntity.ACCEPTED.equals(participant.getStatus());
         participant.setStatus(normalised);
         // Accepting clears any reason left over from a past rejection of the same car.
         participant.setRejectionReason(MapEventParticipantEntity.REJECTED.equals(normalised) ? trimmedReason : null);
         participantRepository.save(participant);
+
+        // A car turned away after it was in the line-up leaves every contest ballot it was on.
+        if (wasAccepted && MapEventParticipantEntity.REJECTED.equals(normalised)) {
+            contestEntryRepository.deleteByEventIdAndCarIds(eventId, List.of(carId));
+        }
 
         // An organizer deciding on their own car does not need telling.
         if (!participant.getOwnerId().equals(currentUserId)) {
@@ -887,6 +905,8 @@ class MapEventsServiceImpl implements MapEventsService {
         requireOrganizer(event, currentUserId);
 
         List<MapEventParticipantEntity> rows = withdrawalRequestOrThrow(eventId, ownerId);
+        // Leaving the meet means leaving its contests too — the withdraw dialog says as much.
+        contestEntryRepository.deleteByEventIdAndCarIds(eventId, rows.stream().map(r -> r.getId().getCarId()).toList());
         participantRepository.deleteAll(rows);
 
         if (!ownerId.equals(currentUserId)) {

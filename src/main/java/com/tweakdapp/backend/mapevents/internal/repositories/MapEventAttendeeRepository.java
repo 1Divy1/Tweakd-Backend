@@ -34,4 +34,8 @@ public interface MapEventAttendeeRepository extends JpaRepository<MapEventAttend
                                           Limit limit);
 
     long countByIdEventIdAndStatus(UUID eventId, String status);
+
+    /** Everyone with a given RSVP on an event — the audience for a contest opening or its result. */
+    @Query("select a.id.userId from MapEventAttendeeEntity a where a.id.eventId = :eventId and a.status = :status")
+    List<UUID> findUserIdsByEventIdAndStatus(@Param("eventId") UUID eventId, @Param("status") String status);
 }

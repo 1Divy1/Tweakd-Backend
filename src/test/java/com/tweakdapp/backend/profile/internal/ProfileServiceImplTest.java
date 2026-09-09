@@ -2,6 +2,7 @@ package com.tweakdapp.backend.profile.internal;
 
 import com.tweakdapp.backend.shared.geo.CountryDto;
 import com.tweakdapp.backend.badges.BadgeService;
+import com.tweakdapp.backend.badges.BadgeTrigger;
 import com.tweakdapp.backend.profile.dto.LanguageOptionDto;
 import com.tweakdapp.backend.profile.dto.LocationRequest;
 import com.tweakdapp.backend.profile.dto.ProfileEditRequest;
@@ -64,6 +65,9 @@ class ProfileServiceImplTest {
     private static final UUID USER = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final String USER_S = USER.toString();
     private static final UUID PEER = UUID.fromString("00000000-0000-0000-0000-000000000002");
+
+    /** When the account was created: a while ago, and deliberately not "now" — the point of these tests. */
+    private static final Instant SIGNED_UP_AT = Instant.parse("2026-03-14T08:30:00Z");
 
     private ProfileRepository profileRepository;
     private CountryRepository countryRepository;
@@ -169,6 +173,65 @@ class ProfileServiceImplTest {
         assertThat(profile.getDiscoveryRadiusKm()).isEqualTo(25);
         verify(profileRepository).saveAndFlush(profile);
         verify(notificationPreferencesRepository).save(any(NotificationPreferencesEntity.class));
+    }
+
+    /**
+     * Where the backend's automatic badges are actually handed out. Signup happens inside Supabase —
+     * the {@code handle_new_user} trigger inserts the profile and no Java code runs — so onboarding
+     * is the first moment this can happen, and it is also the moment there is a member rather than
+     * an abandoned signup.
+     *
+     * <p>Note what is <em>not</em> asserted: any badge id. This module reports the event and names
+     * no badge, so adding or withdrawing a signup badge is a row in the catalogue and never a change
+     * here.
+     */
+    @Test
+    void completeOnboardingReportsTheNewMemberToBadges() {
+        ProfileEntity profile = profileWithCity();
+        profile.setCreatedAt(SIGNED_UP_AT);
+        when(profileRepository.findById(USER)).thenReturn(Optional.of(profile));
+        when(profileRepository.existsByUsername("newuser")).thenReturn(false);
+        when(cityRepository.findById("cluj")).thenReturn(Optional.of(cityCluj()));
+        when(notificationPreferencesRepository.existsById(USER)).thenReturn(false);
+
+        service.completeOnboarding(USER_S, onboarding("newuser", "cluj"));
+
+        verify(badgeService).awardForTrigger(USER, BadgeTrigger.ACCOUNT_CREATED, SIGNED_UP_AT);
+    }
+
+    /**
+     * The moment reported is the account's <strong>creation date</strong>, not now — which is what
+     * makes a limited-time badge fair. Someone who signed up two days before a cutoff and finished
+     * onboarding a week after it still earned the badge by signing up in time; judging against the
+     * onboarding moment would quietly take it away from them.
+     */
+    @Test
+    void onboardingJudgesSignupBadgesAgainstWhenTheAccountWasCreated() {
+        ProfileEntity profile = profileWithCity();
+        profile.setCreatedAt(SIGNED_UP_AT);
+        when(profileRepository.findById(USER)).thenReturn(Optional.of(profile));
+        when(profileRepository.existsByUsername("newuser")).thenReturn(false);
+        when(cityRepository.findById("cluj")).thenReturn(Optional.of(cityCluj()));
+        when(notificationPreferencesRepository.existsById(USER)).thenReturn(false);
+
+        service.completeOnboarding(USER_S, onboarding("newuser", "cluj"));
+
+        ArgumentCaptor<Instant> at = ArgumentCaptor.forClass(Instant.class);
+        verify(badgeService).awardForTrigger(eq(USER), eq(BadgeTrigger.ACCOUNT_CREATED), at.capture());
+        assertThat(at.getValue()).isEqualTo(SIGNED_UP_AT);
+        assertThat(at.getValue()).isBefore(Instant.now().minusSeconds(3600));
+    }
+
+    /** Onboarding that never happened cannot have produced a member, so it awards nothing. */
+    @Test
+    void noBadgeIsReportedWhenOnboardingIsRejected() {
+        when(profileRepository.findById(USER)).thenReturn(Optional.of(profileWithCity()));
+        when(profileRepository.existsByUsername("newuser")).thenReturn(true);
+
+        assertThatExceptionOfType(UsernameAlreadyTakenException.class)
+                .isThrownBy(() -> service.completeOnboarding(USER_S, onboarding("newuser", "cluj")));
+
+        verify(badgeService, never()).awardForTrigger(any(), any(), any());
     }
 
     @Test

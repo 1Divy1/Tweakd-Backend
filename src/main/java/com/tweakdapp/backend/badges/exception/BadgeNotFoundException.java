@@ -23,4 +23,18 @@ public class BadgeNotFoundException extends NotFoundException {
     public static BadgeNotFoundException retired(String badgeId) {
         return new BadgeNotFoundException("Badge is retired and can no longer be awarded: " + badgeId);
     }
+
+    /**
+     * The badge is live, but the moment being judged falls outside its offer window — a limited-time
+     * badge whose year has passed, or one staged to open later.
+     *
+     * <p>Its own message because this is the refusal that happens <em>by design</em>: {@code pioneer}
+     * after its first year reaches this every time an account onboards, and reading that as "no such
+     * badge" would send whoever is looking at the log hunting for a bug that isn't there. Staff can
+     * still hand the badge out — {@code grant} does not consult the window.
+     */
+    public static BadgeNotFoundException outsideWindow(String badgeId) {
+        return new BadgeNotFoundException(
+                "Badge '" + badgeId + "' is outside its earnable window and cannot be awarded automatically.");
+    }
 }

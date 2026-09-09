@@ -1,7 +1,8 @@
 # mapevents module
 
 Owns **car events on the map** — the pins users tap to find meets near them, the floating widget
-behind a pin, and the full event page (organizers, the car line-up, attendees; contests later).
+behind a pin, the full event page (organizers, the car line-up, attendees), and the **contests**
+run inside an event.
 
 Users create events from the app; **an admin must approve one before it appears on the map**.
 
@@ -11,7 +12,10 @@ The module is "map events" (it is a map feature) and lives at `/api/v1/map-event
 tables it owns are named `car_event*`. Types here carry the `MapEvent` prefix and name their table
 explicitly. Tables owned: `car_events`, `car_event_categories`, `car_event_organizers`,
 `car_event_organizer_rules`, `car_event_attendees_list`, `car_event_participants`, `event_car_meet`,
-plus the three status reference tables.
+`car_event_contest_categories`, `car_event_contests`, `car_event_contest_entries`,
+`car_event_contest_votes`, plus the three status reference tables. Contest types carry the
+`Contest` prefix rather than `MapEventContest` — they only exist inside an event, so the longer
+name buys nothing.
 
 ## Two independent states
 
@@ -21,7 +25,8 @@ plus the three status reference tables.
 | `status` | the event's own life: `upcoming` / `live` / `previous` / `hidden` / `canceled` | organizers |
 
 **Nothing sweeps `status` automatically.** Automatic `upcoming → live → previous` transitions were
-deliberately deferred by the owner, so there is no `@Scheduled` job here. Two consequences the code
+deliberately deferred by the owner, so there is no `@Scheduled` job here — and the same call was
+made for contests: they open and close only when an organizer taps (see § Contests). Two consequences the code
 depends on:
 
 - an organizer marks an event finished (`previous`) or cancels it (`canceled`) by hand, and
@@ -188,6 +193,26 @@ picker's result list can show what kind of match each candidate is, not just its
 | `approveWithdrawal(...)` | `POST /{eventId}/withdrawals/{ownerId}/approve` | organizer only; hard-deletes the rows; returns the full `MapEventDto` |
 | `rejectWithdrawal(...)` | `POST /{eventId}/withdrawals/{ownerId}/reject` | organizer only; rows revert to `accepted`; returns the full `MapEventDto` |
 
+### Contests — `MapEventContestsService`
+
+Every write answers with the fresh `ContestDto`, so no write needs a follow-up read.
+
+| Method | REST | Notes |
+|---|---|---|
+| `listCategories()` | `GET /contest-categories` | reference data; `custom` is the free-text one |
+| `listContests(...)` | `GET /{eventId}/contests` | every contest with its board and the viewer's standing |
+| `getContest(...)` | `GET /{eventId}/contests/{contestId}` | |
+| `createContest(...)` | `POST /{eventId}/contests` → 201 | organizer only; max 20 per event |
+| `updateContest(...)` | `PATCH /{eventId}/contests/{contestId}` | partial; once `open` only `closes_at` and `criteria` may move. Editing times never opens or closes anything |
+| `openContest(...)` | `POST /{eventId}/contests/{contestId}/open` | organizer; starts voting now and tells the meet; idempotent |
+| `finishContest(...)` | `POST /{eventId}/contests/{contestId}/finish` | organizer; closes voting now and pays the podium; idempotent |
+| `deleteContest(...)` | `DELETE /{eventId}/contests/{contestId}` → 204 | `scheduled` only |
+| `requestEntry(...)` | `POST /{eventId}/contests/{contestId}/entries` | owner of a car already accepted to the event; re-sending a live entry is a no-op |
+| `withdrawEntry(...)` | `DELETE /{eventId}/contests/{contestId}/entries/{carId}` | a pending request any time; an accepted entry only while `scheduled` |
+| `decideEntry(...)` | `PATCH /{eventId}/contests/{contestId}/entries/{carId}` | organizer verdict; `reason` required when rejecting; rejecting mid-vote clears that car's votes |
+| `vote(...)` | `PUT /{eventId}/contests/{contestId}/vote` | cast or change; 403 when neither RSVP'd `attending` nor holding an accepted car in the line-up, or for your own car, 409 while `scheduled` or once `finished` |
+| `getCarHistory(carId)` | `GET /cars/{carId}/history` | the car's attended events and podium places, newest first |
+
 Base path `/api/v1/map-events`. All endpoints require authentication; none are under `/public/**`.
 
 ### Admin surface
@@ -227,12 +252,91 @@ back on `notification` (no Modulith cycle), and a rolled-back approval never not
 | `map_event_car_decided` | an organizer accepts/rejects your car (reason in `body` when rejected) | car owner | none |
 | `map_event_car_registered` | a car is entered and needs a decision | individual organizers, minus the actor | `event_organizer_enabled` |
 | `map_event_organizer_added` | you are credited as a co-organizer | the added user | `event_organizer_enabled` |
+| `contest_entry_requested` | a car asks to enter one of your contests | individual organizers, minus the actor | `event_organizer_enabled` |
+| `contest_entry_decided` | an organizer accepts/rejects your contest entry (reason in `body` when rejected) | car owner | none |
+| `contest_opened` | voting opened on a contest at an event you are attending | attendees | `organized_events_enabled` |
+| `contest_results` | a contest you could vote in has finished | attendees | `organized_events_enabled` |
+| `contest_placed` | your car finished on the podium | each podium owner | none |
 
 The first three are decisions about the recipient's **own** submission, so they are ungated, like
 `feedback_status` and `moderation_warning` — you do not opt out of being told what happened to
 something you submitted. The last two are the running-an-event notifications aimed at organizers,
-gated on `event_organizer_enabled`. `organized_events_enabled` is reserved for attendee-facing
-event logistics (delays, cancellations) and has no producer yet.
+gated on `event_organizer_enabled`. `contest_entry_requested` follows the organizer rule and
+`contest_entry_decided` / `contest_placed` follow the own-submission rule, for the same reasons.
+`contest_opened` and `contest_results` are the first producers of `organized_events_enabled` — they
+are attendee-facing event logistics ("go vote", "results are in"), not decisions about anything the
+recipient submitted.
+
+## Contests
+
+A contest is a category vote inside one event — "best exhaust", "loudest build" — created by an
+organizer, entered by the cars already accepted to the event, and voted on by the people at the event — `attending` RSVPs and owners of accepted cars —
+it. An event can hold up to **20** contests and a contest up to **40** entries.
+
+### State machine
+
+`scheduled` → `open` → `finished`, plus `canceled` when the meet itself is cancelled.
+
+**Both transitions are an organizer's tap. Nothing here runs on a timer** — the same call the owner
+made for event status. A contest is born `scheduled`, goes `open` on `POST /open`, and `finished` on
+`POST /finish` or when the event itself is marked finished or cancelled (that cascade closes every
+still-open contest in the same transaction).
+
+- `opens_at` / `closes_at` are the **planned window, shown in the app and never enforced**. Voting
+  does not start when `opens_at` passes and does not stop when `closes_at` does; `finished_early`
+  just records whether the finish landed before the planned end. They are still bounded at write
+  time so the label reads sensibly: `closes_at > opens_at`, and no more than 12h after the event
+  ends.
+- While `scheduled`, the organizer may edit anything or delete the contest outright; once `open`,
+  only `closes_at` and `criteria` may change.
+- `POST /open` requires an **approved** event that is not over, so a submission that never gets
+  published cannot start paying out reputation.
+
+### Voting
+
+One row per (contest, voter), upserted — voting again *changes* the vote rather than adding one.
+Eligibility, in order: signed in, attendance = `attending` on that event, contest `open`, and the
+target car is a live entry that is not the voter's own. `votes_count` on both the contest and the
+entry is owned by the `trg_contest_vote_counts()` trigger, so a vote is one upsert and no recount;
+`entries_count` likewise comes from `trg_contest_entries_count()`. Nothing in the read path
+aggregates votes.
+
+### Finalising
+
+`ContestFinalizer` takes a **pessimistic row lock** on the contest before it does anything, so two
+organizers tapping `POST /finish` — or one of them racing the event being marked finished — cannot
+both pay the podium. Ranking is votes desc →
+earliest `last_vote_at` first (a tie goes to whoever reached the number first) → car id, and only
+entries with **at least one vote** may take a podium place — an unvoted contest finishes with no
+winners rather than an arbitrary top 3. Awards go out through the existing SPIs, so neither
+`reputation` nor `badges` knows what a contest is:
+
+- `ReputationService.award` with `CONTEST_FIRST_PLACE` / `CONTEST_SECOND_PLACE` /
+  `CONTEST_THIRD_PLACE` and `ReputationSourceType.CONTEST` — idempotent by partial unique index, so
+  a replayed finalisation pays nothing twice.
+- `BadgeService.awardForTrigger` with `contest_won` (rank 1) and `contest_podium` (any of 1–3).
+
+### Realtime
+
+Live standings ride Supabase Realtime **Broadcast** on the private topic `event:<eventId>:contests`,
+published by the backend with the service key. `ContestBoardPublisher` marks a contest dirty on
+every vote and flushes on a 1.5s debounce, so a burst of votes is one message, not one per vote.
+Clients are read-only: the `realtime.messages` SELECT policy lets any signed-in user read a topic
+belonging to an approved event and lets nobody publish. The app also polls every 30s, so a channel
+that will not join degrades to a slower board rather than a stuck one.
+
+### Car history
+
+`GET /map-events/cars/{carId}/history` returns the events a car attended with the podium places it
+took, newest first, capped at 50. It is the permanent record behind the "attended events" section
+of a car's page and survives the event finishing.
+
+### Cascades
+
+Contest state is kept consistent with event state from `MapEventsServiceImpl`: cancelling or
+finishing an event finalises every open contest (a cancelled meet pays **nothing**), rejecting a
+previously accepted car deletes its contest entries, and an approved withdrawal deletes the
+owner's entries before the participant rows go.
 
 ## Cross-module dependencies
 
@@ -240,6 +344,8 @@ event logistics (delays, cancellations) and has no producer yet.
 (`findCarsByIds`, `findCarOwnerIds` — car ownership lives on the car's *garage*, not the car),
 `business` (`findBusinessRefsByIds`, added for this module), `storage` (cover keys → public URLs),
 and `shared.geo.GeoSupport` for lat/lng ↔ JTS `Point` (PostGIS order is lng, lat).
+Contests add `reputation` and `badges` (podium awards, through their existing SPIs) and
+`shared.realtime.SupabaseBroadcastClient` (live boards).
 
 ## Radius search
 
@@ -267,12 +373,26 @@ migration (all tables were empty at the time):
 - `car_event_participants.rejection_reason` (nullable text) added by
   `add_rejection_reason_to_car_event_participants`, mirroring `car_events.rejection_reason`.
 
+The four contest tables were added by the `car_event_contests` migration
+(`20260908120000_car_event_contests.sql`):
+
+- `car_event_contest_categories` — six seeded rows plus `custom`; label and icon come from here so
+  the app never hardcodes the list.
+- `car_event_contests` — one per category per event, with `opens_at` / `closes_at`, `status`, and
+  trigger-owned `votes_count` / `entries_count`.
+- `car_event_contest_entries` — `(contest_id, car_id)`, `pending`/`accepted`/`rejected`/`withdrawn`,
+  plus the frozen `final_rank` once the contest is finished.
+- `car_event_contest_votes` — `(contest_id, voter_id)` primary key, which is what makes a vote a
+  change rather than an addition.
+- `car_event_participants_car_id_idx` added for the car-history read.
+- The `badges` CHECK was extended to `('account_created','contest_won','contest_podium')` and the
+  two badge rows seeded.
+
 `car_events` has **RLS enabled with no policies**, and the other `car_event*` tables have no table
 grants, so the whole feature is backend-gated — the same posture as `business`.
 
 ## Not built yet
 
-- **Contests** — a planned event sub-feature; nothing exists for it yet.
 - **Automatic status transitions** — deferred; see above.
 - **Subcategories beyond `car_meet`** — the shape is in place (`car_event_categories` +
   a detail table + a detail DTO per category).

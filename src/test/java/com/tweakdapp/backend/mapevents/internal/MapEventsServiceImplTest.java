@@ -26,6 +26,7 @@ import com.tweakdapp.backend.mapevents.internal.entities.MapEventParticipantEnti
 import com.tweakdapp.backend.mapevents.internal.entities.MapEventParticipantId;
 import com.tweakdapp.backend.mapevents.internal.entities.MapEventRuleEntity;
 import com.tweakdapp.backend.mapevents.internal.repositories.CarMeetRepository;
+import com.tweakdapp.backend.mapevents.internal.repositories.ContestEntryRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventAttendeeRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventCategoryRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventOrganizerRepository;
@@ -97,6 +98,8 @@ class MapEventsServiceImplTest {
     @Mock private StorageService storageService;
     @Mock private ApplicationEventPublisher events;
     @Mock private MapboxGeocodingClient mapboxGeocodingClient;
+    @Mock private ContestFinalizer contestFinalizer;
+    @Mock private ContestEntryRepository contestEntryRepository;
 
     private MapEventsServiceImpl service;
 
@@ -105,9 +108,13 @@ class MapEventsServiceImplTest {
         service = new MapEventsServiceImpl(
                 eventRepository, categoryRepository, carMeetRepository, organizerRepository,
                 attendeeRepository, participantRepository, ruleRepository, profileService, garageService,
-                businessService, storageService, events, mapboxGeocodingClient);
+                businessService, storageService, events, mapboxGeocodingClient, contestFinalizer,
+                contestEntryRepository);
         // @PersistenceContext is field-injected, so a pure unit test has to supply it by hand.
         ReflectionTestUtils.setField(service, "entityManager", mock(EntityManager.class));
+
+        // createEvent reassigns `event` from the merge result, so hand the same entity back.
+        when(eventRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
 
         // Only the creator and the co-organizer organize this event.
         when(organizerRepository.existsByEventIdAndIndividualOrganizerId(any(), any())).thenReturn(false);

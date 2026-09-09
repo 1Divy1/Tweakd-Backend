@@ -48,8 +48,9 @@ com.tweakdapp.backend/
 │   └── internal/     ← private: controller, service impl (four-stream merge), cursor
 ├── business/         ← public API: BusinessService, DTOs (map pin / profile / hours / type). Read-only
 │   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, open-now derivation
-├── mapevents/        ← public API: MapEventsService, DTOs, domain events (approval / car / organizer)
-│   └── internal/     ← private: controller, service impl, entities, repositories, PostGIS radius search, keyset cursor
+├── mapevents/        ← public API: MapEventsService, MapEventContestsService, DTOs, domain events (approval / car / organizer / contest)
+│   └── internal/     ← private: controllers, service impls, entities, repositories, PostGIS radius search, keyset cursor,
+│                        contest finalizer (podium + awards, organizer-driven), realtime board publisher
 ├── feedbackfeed/     ← public API: FeedbackFeedService, DTOs. The in-app community feedback board
 │   └── internal/     ← private: controller, service impl, entities, repositories, dual-shape keyset cursor
 ├── notification/     ← public API: NotificationService, DTOs. In-app notifications + FCM push
@@ -57,10 +58,10 @@ com.tweakdapp.backend/
 │       └── push/     ← private: device registry (endpoints + entity), Firebase config, FCM sender, dispatcher
 ├── reputation/       ← public API: ReputationService (award SPI + reads), DTOs, reason-code constants
 │   └── internal/     ← private: controller, service impl, entities (reason catalogue / history), repositories, keyset cursor
-├── badges/           ← public API: BadgeService (award SPI + reads + admin ops), DTOs, badge-code constants
+├── badges/           ← public API: BadgeService (trigger + by-name award SPI, reads, admin ops), DTOs, BadgeTrigger, badge-code constants
 │   └── internal/     ← private: read-only controller, service impl, entities (catalogue / unlocks), repositories
 │                       depends on NOTHING but storage+shared, so `profile` can embed badges in its response
-└── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws), exception hierarchy, global handler, moderation + staff SPIs
+└── shared/           ← OPEN module: security config, realtime (STOMP WebSocket at /ws + Supabase Broadcast client), exception hierarchy, global handler, moderation + staff SPIs
     └── geo/          ← app-wide geo reference data: cities + countries entities/repos/DTOs, GeoSupport (lat/lng ↔ JTS Point)
 ```
 
@@ -179,6 +180,15 @@ what fixes the dependency direction: `profile` → `badges`, and therefore `badg
 `profiles` — no username-keyed endpoint, no existence check on award. The badges a user has *not*
 earned are their own separate read (`/api/v1/badges/me/locked`), for the locked section of their own
 profile only.
+
+Badges are unlocked **by event, not by name**. A module reports that something happened —
+`badgeService.awardForTrigger(userId, BadgeTrigger.ACCOUNT_CREATED, profile.getCreatedAt())` from
+`completeOnboarding` — and the `badges` table says which badges that event is currently worth, via
+`award_trigger` plus an `[earnable_from, earnable_until)` offer window. So a limited-time badge
+retires itself on its date (`pioneer` is offered for the launch year), and adding a badge for an
+event already being reported is a dashboard row rather than a deploy. The window is judged against
+**when the achievement happened**, not now, which is why the account's `created_at` is what gets
+passed. Staff hand-grants ignore the window but still respect retirement.
 
 
 ## Car sharing

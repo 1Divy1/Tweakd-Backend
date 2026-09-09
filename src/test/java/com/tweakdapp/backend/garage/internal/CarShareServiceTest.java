@@ -555,6 +555,7 @@ class CarShareServiceTest {
     private PublicProfileDto publicProfile() {
         BadgeDto pioneer = new BadgeDto("pioneer", "Pioneer", "One of the first.",
                 "https://assets.tweakd.app/pioneer.svg", null, true,
+                "account_created", null, null,
                 Instant.parse("2026-01-01T00:00:00Z"));
         return new PublicProfileDto(
                 OWNER, "Dave", "dave", "https://avatars.tweakdapp.com/dave.jpg",
