@@ -156,12 +156,14 @@ qualified and hit a bug — and that path is the one that records who did it.
 | `BadgeTrigger` | Code | Fired by | On |
 |---|---|---|---|
 | `ACCOUNT_CREATED` | `account_created` | `profile` | onboarding completes (`occurredAt` = `profiles.created_at`) |
-| `CONTEST_WON` | `contest_won` | `mapevents` | a car finishes **1st** in an event contest |
-| `CONTEST_PODIUM` | `contest_podium` | `mapevents` | a car finishes **1st–3rd** in an event contest |
+| `CONTEST_FIRST_PLACE` | `contest_first_place` | `mapevents` | a car finishes **1st** in an event contest |
+| `CONTEST_SECOND_PLACE` | `contest_second_place` | `mapevents` | a car finishes **2nd** in an event contest |
+| `CONTEST_THIRD_PLACE` | `contest_third_place` | `mapevents` | a car finishes **3rd** in an event contest |
 
-A first place fires both, so a "won a contest" badge and a "made a podium" badge can exist side by
-side without `mapevents` knowing either exists. Both are idempotent at this module's boundary, which
-is what lets a contest finalisation be replayed safely.
+A placement fires exactly one of the three. The split is deliberate: `awardForTrigger` unlocks every
+badge bound to the trigger it is given, so a single "podium" trigger could only ever back one badge —
+the gold, silver and bronze medals need a trigger each to stay distinct. All are idempotent at this
+module's boundary, which is what lets a contest finalisation be replayed safely.
 
 A trigger says *an event happened*, not that a condition is met. The reporting module decides
 whether its own rule fired (that this really was the user's first car); this module decides what

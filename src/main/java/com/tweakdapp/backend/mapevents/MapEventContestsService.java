@@ -1,5 +1,12 @@
 package com.tweakdapp.backend.mapevents;
 
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardKey;
+
+import java.util.Collection;
+import java.util.Map;
+import java.util.Optional;
+
 import com.tweakdapp.backend.mapevents.dto.CarEventHistoryItemDto;
 import com.tweakdapp.backend.mapevents.dto.ContestCategoryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestDto;
@@ -131,4 +138,27 @@ public interface MapEventContestsService {
      * "Attended events" section of the car page. Capped at 50.
      */
     List<CarEventHistoryItemDto> getCarHistory(UUID currentUserId, UUID carId);
+
+    // ── Participant cards ────────────────────────────────────────────────
+
+    /**
+     * The caller's participant cards for an event — one per car they had accepted into it. Empty
+     * for spectators, for a cancelled event, and until an organizer marks the event finished: only
+     * then does a card exist.
+     */
+    List<ParticipantCardDto> listMyParticipantCards(UUID currentUserId, UUID eventId);
+
+    /**
+     * Resolves many cards at once — how a feed page draws the cards its posts share, in a fixed
+     * number of queries. A key that is not (or is no longer) a card is simply absent from the
+     * result, so its post degrades to a plain one. Not viewer-scoped: a card reads the same for
+     * everyone.
+     */
+    Map<ParticipantCardKey, ParticipantCardDto> findParticipantCards(Collection<ParticipantCardKey> keys);
+
+    /**
+     * The card for {@code (eventId, carId)}, provided it exists and {@code ownerId} owns that car's
+     * entry — the check behind sharing a card to the feed.
+     */
+    Optional<ParticipantCardDto> findOwnedParticipantCard(UUID ownerId, UUID eventId, UUID carId);
 }

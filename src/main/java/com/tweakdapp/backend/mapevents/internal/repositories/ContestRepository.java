@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.mapevents.internal.repositories;
 
+import java.util.Collection;
+
 import com.tweakdapp.backend.mapevents.internal.entities.ContestEntity;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -48,4 +50,15 @@ public interface ContestRepository extends JpaRepository<ContestEntity, UUID> {
 
     @Query("select c from ContestEntity c join fetch c.category where c.id in :ids")
     List<ContestEntity> findAllWithCategoryByIdIn(@Param("ids") List<UUID> ids);
+
+    /** Contests of several events in one status, category fetched — how cards read every finished contest at once. */
+    @Query("""
+            select c
+              from ContestEntity c
+              join fetch c.category
+             where c.eventId in :eventIds
+               and c.status = :status
+            """)
+    List<ContestEntity> findByEventIdInAndStatus(@Param("eventIds") Collection<UUID> eventIds,
+                                                 @Param("status") String status);
 }

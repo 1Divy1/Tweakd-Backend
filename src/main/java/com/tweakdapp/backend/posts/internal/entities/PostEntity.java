@@ -70,4 +70,14 @@ public class PostEntity {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /**
+     * The participant card this post shares, as its {@code (event, car)} pair — both set or both
+     * null (DB check). The card itself is derived on read by the mapevents module, never stored.
+     */
+    @Column(name = "participant_card_event_id")
+    private UUID participantCardEventId;
+
+    @Column(name = "participant_card_car_id")
+    private UUID participantCardCarId;
 }

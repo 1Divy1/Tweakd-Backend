@@ -11,6 +11,7 @@ import com.tweakdapp.backend.mapevents.MapEventOrganizerAddedEvent;
 import com.tweakdapp.backend.mapevents.MapEventRejectedEvent;
 import com.tweakdapp.backend.mapevents.MapEventWithdrawalDecidedEvent;
 import com.tweakdapp.backend.mapevents.MapEventWithdrawalRequestedEvent;
+import com.tweakdapp.backend.mapevents.ParticipantCardsReadyEvent;
 import com.tweakdapp.backend.notification.NotificationService;
 import com.tweakdapp.backend.profile.ProfileService;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
@@ -34,7 +35,8 @@ import java.util.UUID;
  * <h2>Which of these are preference-gated</h2>
  * <ul>
  *   <li><strong>Ungated</strong> — {@code map_event_approved}, {@code map_event_rejected},
- *       {@code map_event_car_decided} and {@code map_event_withdrawal_decided}. These are decisions
+ *       {@code map_event_car_decided}, {@code map_event_withdrawal_decided}, {@code contest_placed}
+ *       and {@code participant_card_ready}. These are decisions
  *       about the recipient's <em>own</em> submission, so they follow {@code feedback_status} and
  *       {@code moderation_warning}: you do not opt out of being told what happened to something you
  *       submitted.</li>
@@ -280,6 +282,20 @@ class MapEventsNotificationListener {
                 "Results are in: " + event.contestTitle(),
                 event.eventTitle(),
                 payload);
+    }
+
+    @Async
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener
+    void on(ParticipantCardsReadyEvent event) {
+        // Ungated, like contest_placed: it is about the recipient's own car and fires once per
+        // event, so there is nothing to opt out of that would not also hide the card itself.
+        notificationService.pushToAll(
+                event.ownerIds(),
+                "participant_card_ready",
+                "Your card from \"" + event.eventTitle() + "\" is ready",
+                "Share it to your feed",
+                payload(event.eventId()));
     }
 
     private Map<String, Object> contestPayload(UUID eventId, UUID contestId) {

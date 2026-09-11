@@ -211,6 +211,9 @@ Every write answers with the fresh `ContestDto`, so no write needs a follow-up r
 | `withdrawEntry(...)` | `DELETE /{eventId}/contests/{contestId}/entries/{carId}` | a pending request any time; an accepted entry only while `scheduled` |
 | `decideEntry(...)` | `PATCH /{eventId}/contests/{contestId}/entries/{carId}` | organizer verdict; `reason` required when rejecting; rejecting mid-vote clears that car's votes |
 | `vote(...)` | `PUT /{eventId}/contests/{contestId}/vote` | cast or change; 403 when neither RSVP'd `attending` nor holding an accepted car in the line-up, or for your own car, 409 while `scheduled` or once `finished` |
+| `listMyParticipantCards(...)` | `GET /{eventId}/cards` | the caller's participant cards, one per accepted car; empty until the event is marked finished (§ Participant cards) |
+| `findParticipantCards(keys)` | — | batch derivation for the `posts` feed; not viewer-scoped |
+| `findOwnedParticipantCard(...)` | — | the ownership check behind sharing a card to the feed |
 | `getCarHistory(carId)` | `GET /cars/{carId}/history` | the car's attended events and podium places, newest first |
 
 Base path `/api/v1/map-events`. All endpoints require authentication; none are under `/public/**`.
@@ -257,6 +260,7 @@ back on `notification` (no Modulith cycle), and a rolled-back approval never not
 | `contest_opened` | voting opened on a contest at an event you are attending | attendees | `organized_events_enabled` |
 | `contest_results` | a contest you could vote in has finished | attendees | `organized_events_enabled` |
 | `contest_placed` | your car finished on the podium | each podium owner | none |
+| `participant_card_ready` | an organizer marked the event finished, so your card exists | each owner of an accepted car, once per event (not per car; not on a repeat finish) | none |
 
 The first three are decisions about the recipient's **own** submission, so they are ungated, like
 `feedback_status` and `moderation_warning` — you do not opt out of being told what happened to
@@ -314,7 +318,9 @@ winners rather than an arbitrary top 3. Awards go out through the existing SPIs,
 - `ReputationService.award` with `CONTEST_FIRST_PLACE` / `CONTEST_SECOND_PLACE` /
   `CONTEST_THIRD_PLACE` and `ReputationSourceType.CONTEST` — idempotent by partial unique index, so
   a replayed finalisation pays nothing twice.
-- `BadgeService.awardForTrigger` with `contest_won` (rank 1) and `contest_podium` (any of 1–3).
+- `BadgeService.awardForTrigger` with one trigger per rank — `contest_first_place`,
+  `contest_second_place`, `contest_third_place` — which is what keeps the gold, silver and bronze
+  medals separate.
 
 ### Realtime
 
@@ -385,8 +391,8 @@ The four contest tables were added by the `car_event_contests` migration
 - `car_event_contest_votes` — `(contest_id, voter_id)` primary key, which is what makes a vote a
   change rather than an addition.
 - `car_event_participants_car_id_idx` added for the car-history read.
-- The `badges` CHECK was extended to `('account_created','contest_won','contest_podium')` and the
-  two badge rows seeded.
+- The `badges` CHECK is `('account_created','contest_first_place','contest_second_place',
+  'contest_third_place')`, with the three medal rows seeded.
 
 `car_events` has **RLS enabled with no policies**, and the other `car_event*` tables have no table
 grants, so the whole feature is backend-gated — the same posture as `business`.
@@ -397,3 +403,36 @@ grants, so the whole feature is backend-gated — the same posture as `business`
 - **Subcategories beyond `car_meet`** — the shape is in place (`car_event_categories` +
   a detail table + a detail DTO per category).
 - **Business organizer permissions** — blocked on business login existing at all.
+
+## Participant cards
+
+Every **participant** — a car with an `accepted` row in `car_event_participants` — gets a
+shareable card once an organizer marks the event finished. Spectators (RSVPs) get none. The
+card lists every finished contest that car entered, naming a place only inside the podium with at
+least one vote (the same rule `ContestFinalizer` pays out on), and carries the car's best such
+place for the app's placement pill.
+
+**Cards are derived, not stored.** A card *is* the pair `(event_id, car_id)` (`ParticipantCardKey`),
+computed on read by `deriveCards` from data that is frozen once contests finish — so nobody, the
+owner included, can create or edit one, and there is nothing to generate, backfill or keep in sync.
+`deriveCards` resolves any number of keys in a fixed number of queries (events, participant rows,
+finished contests, their entries, one car batch).
+
+A pair is a card only when **all** hold:
+
+- the event is admin-approved and its `status` is `previous` — an organizer marked it finished.
+  The clock alone does not count: an event past its `ends_at` but never marked finished has no
+  cards (owner's rule, 2026-09-11). A cancelled event has none;
+- the car's participant row is `accepted`;
+- the car still resolves through `garage` (otherwise the key is dropped rather than drawn broken).
+
+`markFinished` publishes `ParticipantCardsReadyEvent` (one recipient per owner, de-duplicated) on
+the **first** finish only; a repeat tap does not re-notify. The `notification` module turns it into
+the ungated `participant_card_ready` push, whose payload is `event_id` — the event page lists the
+recipient's cards.
+
+Sharing a card to the feed belongs to `posts` (`POST /api/v1/posts/participant-card`, with a repost
+cooldown); it only calls `findOwnedParticipantCard` here. Every contest read also embeds a
+`ContestEventSummaryDto` (title, cover, place, start, head-counts, contest count and the event
+`status`), so a contest opened from a deep link carries its event context and the app can tell
+whether cards exist yet.

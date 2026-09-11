@@ -115,6 +115,8 @@ a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE
 | `NotCommentOwnerException` | 403 | Caller tries to delete a comment they neither authored nor own the post of |
 | `InvalidReferenceException` | 400 | A tagged person or car id doesn't exist (post **or** comment tags) |
 | `CarOwnerNotTaggedException` | 400 | A tagged car's owner is neither the author nor a tagged person (post **or** comment tags) |
+| `ParticipantCardNotFoundException` | 404 | Sharing a participant card that does not exist or is not the caller's (event not marked finished, car not an accepted participant, someone else's) |
+| `ParticipantCardCooldownException` | 409 | The same card was shared within `PARTICIPANT_CARD_REPOST_COOLDOWN` (48 h). Body carries `error = participant_card_cooldown` and `details.next_post_allowed_at` (ISO-8601) |
 | `InvalidCursorException` | 400 | A pagination cursor can't be decoded |
 
 ## REST endpoints
@@ -138,6 +140,7 @@ Base path: `/api/v1/posts`
 | POST / DELETE | `/{postId}/likes` | Like / unlike a post (204; idempotent) |
 | POST / DELETE | `/{postId}/saves` | Save / unsave a post (204; idempotent) |
 | POST / DELETE | `/{postId}/shares` | Share / unshare a post (204; idempotent). POST body `{ "content": "…" }` optional → quote share |
+| POST | `/participant-card` | Share one of the caller's participant cards (201 → `PostDto`). Body `{ event_id, car_id, description? }`. 404 if it is not their card; 409 `participant_card_cooldown` inside the repost cooldown |
 | POST | `/{postId}/comments` | Add a comment / reply (201); body `{ "content": "…", "parent_comment_id": "…"?, "tagged_people": [uuid]?, "tagged_cars": [uuid]? }` |
 | DELETE | `/{postId}/comments/{commentId}` | Soft-delete the caller's comment (204; author only) |
 | POST / DELETE | `/{postId}/comments/{commentId}/likes` | Like / unlike a comment (204; idempotent) |
@@ -195,6 +198,7 @@ post receives both a `PostCommentedEvent` and a `PostCommentTaggedEvent`.
 - **`profile.ProfileService.findByIds`** — resolve the author and tagged people.
 - **`garage.GarageService.findCarsByIds`** — resolve tagged cars (no privacy gating; built for this).
 - **`garage.GarageService.findCarOwnerIds`** — resolve each tagged car's owner to enforce the tagging rule.
+- **`mapevents.MapEventContestsService.findParticipantCards` / `findOwnedParticipantCard`** — derive the participant cards posts share (one batch per feed page) and check ownership before sharing one. The only `posts → mapevents` edge; `mapevents` does not depend on `posts`.
 - **`storage.StorageService`** — `postImageUploadUrlRequest`, `publicUrl(POSTS, key)`, and
   `deleteByKeys(POSTS, …)`. The posts module owns key persistence; storage owns R2 I/O.
 
@@ -206,3 +210,23 @@ post receives both a `PostCommentedEvent` and a `PostCommentTaggedEvent`.
 delete semantics (post: hard delete + R2 cleanup after commit; comment: soft delete). The admin
 module snapshots content into `moderation_actions` **before** calling the hard delete, since
 report rows CASCADE away with the post. No auth here — the admin module gates these.
+
+## Participant cards on posts
+
+A post may share a **participant card** (see the `mapevents` README). The post stores only the
+card's pair — `posts.participant_card_event_id` / `participant_card_car_id`, both or neither, a
+composite FK onto `car_event_participants` with `ON DELETE SET NULL` — and `toPostDtos` re-derives
+every card on the page in **one** `findParticipantCards` call, so `PostDto.participant_card` always
+shows the real placements. A pair that no longer derives (car deleted, entry revoked) comes back
+`null` and the post renders as a plain one.
+
+`shareParticipantCard` creates an ordinary post through the same path as `createPost`: it tags the
+car (so the post also appears among the car's tagged posts) and sets the card reference. The request
+only *names* the card; ownership is checked through `mapevents`, and nothing on the card is taken
+from the client. Reposting is allowed, but not the same card within
+`PARTICIPANT_CARD_REPOST_COOLDOWN` (48 h, measured from that card's most recent surviving post).
+A transaction-scoped advisory lock on the pair (`lockParticipantCard`) serialises concurrent shares,
+so a double tap cannot slip two posts past the check.
+
+`ErrorResponse` now carries optional `error` (a stable code) and `details` (structured data) fields,
+filled from `ApiException.getErrorCode()` / `getDetails()`; both are `null` for every other error.

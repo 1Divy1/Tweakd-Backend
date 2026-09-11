@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.posts;
 
+import com.tweakdapp.backend.posts.dto.request.ShareParticipantCardRequest;
+
 import com.tweakdapp.backend.posts.dto.CommentPageDto;
 import com.tweakdapp.backend.posts.dto.LikerPageDto;
 import com.tweakdapp.backend.posts.dto.PostDto;
@@ -449,4 +451,17 @@ public interface PostsService {
      *         reported this comment
      */
     void reportComment(String currentUserId, UUID postId, UUID commentId, UUID reasonId);
+
+    /**
+     * Shares one of the caller's participant cards to the feed as an ordinary post that tags the car
+     * and carries the card reference. The card is re-derived on every read, so the post always shows
+     * the real placements.
+     *
+     * @throws com.tweakdapp.backend.posts.exception.ParticipantCardNotFoundException if it is not a
+     *         card of the caller's (event not marked finished, car not an accepted participant, or
+     *         someone else's)
+     * @throws com.tweakdapp.backend.posts.exception.ParticipantCardCooldownException if the same card
+     *         was shared within the repost cooldown
+     */
+    PostDto shareParticipantCard(String currentUserId, ShareParticipantCardRequest request);
 }

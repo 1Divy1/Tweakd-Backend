@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.mapevents.internal;
 
+import com.tweakdapp.backend.mapevents.ParticipantCardsReadyEvent;
+
 import com.tweakdapp.backend.business.BusinessService;
 import com.tweakdapp.backend.business.dto.BusinessRefDto;
 import com.tweakdapp.backend.garage.GarageService;
@@ -555,11 +557,31 @@ class MapEventsServiceImpl implements MapEventsService {
         if (MapEventEntity.STATUS_CANCELED.equals(event.getStatus())) {
             throw new EventNotEditableException("A cancelled event cannot be marked finished");
         }
+        boolean alreadyFinished = MapEventEntity.STATUS_PREVIOUS.equals(event.getStatus());
         event.setStatus(MapEventEntity.STATUS_PREVIOUS);
         eventRepository.save(event);
         // Finishing the meet finishes its contests, in the same transaction, with the podium paid.
         contestFinalizer.finalizeAllOpen(event, currentUserId, true);
+        // ...and brings its participant cards into existence. A repeat tap must not re-notify.
+        if (!alreadyFinished) {
+            announceCardsReady(event);
+        }
         return assemble(event, currentUserId, true);
+    }
+
+    /**
+     * Tells each owner of an accepted car that their card is ready — once per owner, however many
+     * cars they brought; the event page lists all of them.
+     */
+    private void announceCardsReady(MapEventEntity event) {
+        List<UUID> owners = participantRepository
+                .findByIdEventIdAndStatus(event.getId(), MapEventParticipantEntity.ACCEPTED).stream()
+                .map(MapEventParticipantEntity::getOwnerId)
+                .distinct()
+                .toList();
+        if (!owners.isEmpty()) {
+            events.publishEvent(new ParticipantCardsReadyEvent(event.getId(), event.getTitle(), owners));
+        }
     }
 
     @Override

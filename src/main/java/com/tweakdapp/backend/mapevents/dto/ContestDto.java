@@ -28,6 +28,8 @@ import java.util.UUID;
  * @param createdBy      the organizer who set it up ("Set by @handle"); {@code null} if their
  *                       profile no longer resolves
  * @param createdAt      when it was created
+ * @param event          the event it runs inside — title, cover, place, head-counts — so a contest
+ *                       read carries its own context (see {@link ContestEventSummaryDto})
  */
 public record ContestDto(
         UUID id,
@@ -46,5 +48,6 @@ public record ContestDto(
         ContestViewerStateDto viewer,
         List<ContestPendingEntryDto> pendingEntries,
         ProfileSearchResultDto createdBy,
-        Instant createdAt
+        Instant createdAt,
+        ContestEventSummaryDto event
 ) {}
