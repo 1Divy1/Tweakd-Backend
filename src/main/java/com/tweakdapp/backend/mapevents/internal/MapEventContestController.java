@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.mapevents.internal;
 
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+
 import com.tweakdapp.backend.mapevents.MapEventContestsService;
 import com.tweakdapp.backend.mapevents.dto.CarEventHistoryItemDto;
 import com.tweakdapp.backend.mapevents.dto.ContestCategoryDto;
@@ -45,6 +47,16 @@ class MapEventContestController {
     @GetMapping("/contest-categories")
     public List<ContestCategoryDto> listCategories() {
         return contestsService.listCategories();
+    }
+
+    /**
+     * The caller's participant cards for an event, one per car they had accepted into it. Empty
+     * until an organizer marks the event finished — only then does a card exist.
+     */
+    @GetMapping("/{eventId}/cards")
+    public List<ParticipantCardDto> listMyParticipantCards(@AuthenticationPrincipal Jwt jwt,
+                                                           @PathVariable UUID eventId) {
+        return contestsService.listMyParticipantCards(userId(jwt), eventId);
     }
 
     /** Every contest of an event with its ranked ballot — one read paints the contests tab. */

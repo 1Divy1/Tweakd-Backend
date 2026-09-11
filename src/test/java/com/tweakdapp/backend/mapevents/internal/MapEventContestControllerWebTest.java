@@ -1,5 +1,8 @@
 package com.tweakdapp.backend.mapevents.internal;
 
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardContestDto;
+
 import com.tweakdapp.backend.garage.dto.CarOwnerDto;
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.mapevents.MapEventContestsService;
@@ -9,6 +12,7 @@ import com.tweakdapp.backend.mapevents.dto.CarEventPlacementDto;
 import com.tweakdapp.backend.mapevents.dto.ContestCategoryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestDto;
 import com.tweakdapp.backend.mapevents.dto.ContestEntryDto;
+import com.tweakdapp.backend.mapevents.dto.ContestEventSummaryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestMyEntryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestViewerStateDto;
 import com.tweakdapp.backend.mapevents.exception.ContestClosedException;
@@ -72,7 +76,32 @@ class MapEventContestControllerWebTest {
                         List.of(new ContestMyEntryDto(CAR_ID, "accepted", null))),
                 List.of(),
                 new ProfileSearchResultDto(USER_ID, "Sasha", "torque_sasha", null),
-                Instant.parse("2026-08-11T17:00:00Z"));
+                Instant.parse("2026-08-11T17:00:00Z"),
+                new ContestEventSummaryDto(EVENT_ID, "Casino Square Cars & Coffee", null,
+                        "Place du Casino", Instant.parse("2026-08-11T17:00:00Z"), 247, 34, 5, "live"));
+    }
+
+    @Test
+    void cardsReturnTheSnakeCaseShapeTheAppParses() throws Exception {
+        CarSummaryDto car = new CarSummaryDto(CAR_ID, "BMW", "M4 Competition", 2023, 503, 650, null, null,
+                new CarOwnerDto(USER_ID, "torque_sasha"));
+        when(contestsService.listMyParticipantCards(USER_ID, EVENT_ID)).thenReturn(List.of(
+                new ParticipantCardDto(EVENT_ID, "Casino Square Cars & Coffee", 247, car, 1, List.of(
+                        new ParticipantCardContestDto(CONTEST_ID, "Best exhaust system",
+                                new ContestCategoryDto("exhaust", "Best exhaust system", "exhaust"), 1)))));
+
+        // The keys asserted here are exactly the ones ParticipantCardModel.tryParse reads in the app.
+        mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/cards").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].event_id").value(EVENT_ID.toString()))
+                .andExpect(jsonPath("$[0].event_title").value("Casino Square Cars & Coffee"))
+                .andExpect(jsonPath("$[0].event_attendees_count").value(247))
+                .andExpect(jsonPath("$[0].car.id").value(CAR_ID.toString()))
+                .andExpect(jsonPath("$[0].car.brand").value("BMW"))
+                .andExpect(jsonPath("$[0].best_rank").value(1))
+                .andExpect(jsonPath("$[0].contests[0].contest_id").value(CONTEST_ID.toString()))
+                .andExpect(jsonPath("$[0].contests[0].title").value("Best exhaust system"))
+                .andExpect(jsonPath("$[0].contests[0].final_rank").value(1));
     }
 
     @Test
@@ -88,6 +117,12 @@ class MapEventContestControllerWebTest {
         mockMvc.perform(get("/api/v1/map-events/" + EVENT_ID + "/contests").with(TestJwts.user(USER_ID)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(CONTEST_ID.toString()))
+                .andExpect(jsonPath("$[0].event.title").value("Casino Square Cars & Coffee"))
+                .andExpect(jsonPath("$[0].event.attendees_count").value(247))
+                .andExpect(jsonPath("$[0].event.attending_cars_count").value(34))
+                .andExpect(jsonPath("$[0].event.contests_count").value(5))
+                .andExpect(jsonPath("$[0].event.status").value("live"))
+                .andExpect(jsonPath("$[0].event.cover_image_url").doesNotExist())
                 .andExpect(jsonPath("$[0].event_id").value(EVENT_ID.toString()))
                 .andExpect(jsonPath("$[0].category.id").value("exhaust"))
                 .andExpect(jsonPath("$[0].category.icon").value("exhaust"))

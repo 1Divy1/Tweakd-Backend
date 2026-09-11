@@ -92,6 +92,7 @@ that is what the app routes on.
 | `contest_opened` | `event_id`, `contest_id` |
 | `contest_results` | `event_id`, `contest_id`, `winner_car_id` |
 | `contest_placed` | `event_id`, `contest_id`, `car_id`, `rank` (1–3) |
+| `participant_card_ready` | `event_id` — ungated, once per owner per event, fired when an organizer marks the event finished |
 
 Every contest type carries `event_id` **and** `contest_id`, so the app can deep-link straight to the
 contest without first resolving the event. `contest_placed` is sent once per podium owner — the
@@ -127,7 +128,7 @@ separate system, which is why `data.notification_id` is the `notifications.id` t
 
 | Types | Sender |
 |---|---|
-| the 20 types in the tables above | **this backend** (`internal/push`, `firebase-admin`) |
+| the 21 types in the tables above | **this backend** (`internal/push`, `firebase-admin`) |
 | `dm` | **a Supabase edge function**, never this backend |
 
 DMs bypass Spring entirely on the write path: the Flutter client calls the `dm_send_message`

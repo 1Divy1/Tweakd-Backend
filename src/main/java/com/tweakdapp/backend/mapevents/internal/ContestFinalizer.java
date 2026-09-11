@@ -207,16 +207,21 @@ public class ContestFinalizer {
                 case 2 -> ReputationReasons.CONTEST_SECOND_PLACE;
                 default -> ReputationReasons.CONTEST_THIRD_PLACE;
             };
+            // One trigger per rank, because awardForTrigger unlocks every badge bound to the
+            // trigger it is given: a shared "podium" trigger would hand the silver and the bronze
+            // to all three finishers.
+            BadgeTrigger trigger = switch (entry.getFinalRank()) {
+                case 1 -> BadgeTrigger.CONTEST_FIRST_PLACE;
+                case 2 -> BadgeTrigger.CONTEST_SECOND_PLACE;
+                default -> BadgeTrigger.CONTEST_THIRD_PLACE;
+            };
             try {
                 reputationService.award(owner, reason, source);
             } catch (RuntimeException e) {
                 // A retired reason must not stop the result from being published; log and go on.
                 log.warn("Reputation award {} for contest {} failed: {}", reason, contest.getId(), e.getMessage());
             }
-            badgeService.awardForTrigger(owner, BadgeTrigger.CONTEST_PODIUM, now);
-            if (entry.getFinalRank() == 1) {
-                badgeService.awardForTrigger(owner, BadgeTrigger.CONTEST_WON, now);
-            }
+            badgeService.awardForTrigger(owner, trigger, now);
         }
     }
 

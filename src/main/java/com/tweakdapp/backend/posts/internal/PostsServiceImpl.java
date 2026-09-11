@@ -1,5 +1,13 @@
 package com.tweakdapp.backend.posts.internal;
 
+import com.tweakdapp.backend.mapevents.MapEventContestsService;
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardKey;
+import com.tweakdapp.backend.posts.dto.request.ShareParticipantCardRequest;
+import com.tweakdapp.backend.posts.exception.ParticipantCardCooldownException;
+import com.tweakdapp.backend.posts.exception.ParticipantCardNotFoundException;
+import java.time.Duration;
+
 import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.posts.PostCommentTaggedEvent;
@@ -117,6 +125,7 @@ public class PostsServiceImpl implements PostsService {
     private final StorageService storageService;
     private final ReportService reportService;
     private final ApplicationEventPublisher eventPublisher;
+    private final MapEventContestsService mapEventContestsService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -136,7 +145,8 @@ public class PostsServiceImpl implements PostsService {
                             GarageService garageService,
                             StorageService storageService,
                             ReportService reportService,
-                            ApplicationEventPublisher eventPublisher) {
+                            ApplicationEventPublisher eventPublisher,
+                            MapEventContestsService mapEventContestsService) {
         this.postRepository = postRepository;
         this.postImageRepository = postImageRepository;
         this.taggedPersonRepository = taggedPersonRepository;
@@ -153,6 +163,7 @@ public class PostsServiceImpl implements PostsService {
         this.storageService = storageService;
         this.reportService = reportService;
         this.eventPublisher = eventPublisher;
+        this.mapEventContestsService = mapEventContestsService;
     }
 
     // -------------------------------------------------------------------
@@ -162,8 +173,45 @@ public class PostsServiceImpl implements PostsService {
     @Override
     @Transactional
     public PostDto createPost(String currentUserId, CreatePostRequest request) {
-        UUID userId = UUID.fromString(currentUserId);
+        return doCreatePost(UUID.fromString(currentUserId), request, null);
+    }
 
+    /**
+     * Minimum gap between two shares of the same participant card. Reposting is welcome — new content
+     * keeps the feed alive — but not the same card ten times in an hour.
+     */
+    static final Duration PARTICIPANT_CARD_REPOST_COOLDOWN = Duration.ofHours(48);
+
+    @Override
+    @Transactional
+    public PostDto shareParticipantCard(String currentUserId, ShareParticipantCardRequest request) {
+        UUID userId = UUID.fromString(currentUserId);
+        UUID eventId = request.eventId();
+        UUID carId = request.carId();
+        // The request only names the card. Whether it exists and is the caller's is decided here, and
+        // every rank and count on it is derived server-side.
+        mapEventContestsService.findOwnedParticipantCard(userId, eventId, carId)
+                .orElseThrow(() -> new ParticipantCardNotFoundException(eventId, carId));
+
+        // Held until commit, so a double tap cannot slip two posts past the check below.
+        postRepository.lockParticipantCard(eventId + ":" + carId);
+        Instant last = postRepository.findLastParticipantCardPostAt(eventId, carId);
+        if (last != null) {
+            Instant nextAllowed = last.plus(PARTICIPANT_CARD_REPOST_COOLDOWN);
+            if (Instant.now().isBefore(nextAllowed)) {
+                throw new ParticipantCardCooldownException(nextAllowed);
+            }
+        }
+
+        // An ordinary post that tags the car — so it also shows among the car's tagged posts — plus
+        // the card reference the feed draws the card from.
+        CreatePostRequest post = new CreatePostRequest(
+                request.description(), List.of(), List.of(carId), null, null, null, null);
+        return doCreatePost(userId, post, new ParticipantCardKey(eventId, carId));
+    }
+
+    /** Shared by both create paths; {@code card} is non-null only when sharing a participant card. */
+    private PostDto doCreatePost(UUID userId, CreatePostRequest request, ParticipantCardKey card) {
         List<UUID> personIds = distinctIds(request.taggedPeople());
         List<UUID> carIds = distinctIds(request.taggedCars());
 
@@ -187,6 +235,10 @@ public class PostsServiceImpl implements PostsService {
         post.setQuoteSharesCount(0L);
         post.setSavedCount(0L);
         post.setUpdatedAt(Instant.now());
+        if (card != null) {
+            post.setParticipantCardEventId(card.eventId());
+            post.setParticipantCardCarId(card.carId());
+        }
         postRepository.save(post);
 
         insertTaggedPeople(postId, personIds);
@@ -1051,6 +1103,15 @@ public class PostsServiceImpl implements PostsService {
         Set<UUID> likedByViewer = Set.copyOf(postLikeRepository.findLikedPostIds(viewerId, postIds));
         Set<UUID> savedByViewer = Set.copyOf(savedPostRepository.findSavedPostIds(viewerId, postIds));
 
+        // One batch for every participant card on the page. Not viewer-scoped — a card reads the same
+        // for everyone. A card that no longer derives (car gone, entry revoked) is simply absent and
+        // its post renders as a plain one.
+        Map<ParticipantCardKey, ParticipantCardDto> cards = mapEventContestsService.findParticipantCards(
+                posts.stream()
+                        .filter(p -> p.getParticipantCardEventId() != null)
+                        .map(p -> new ParticipantCardKey(p.getParticipantCardEventId(), p.getParticipantCardCarId()))
+                        .collect(Collectors.toSet()));
+
         return posts.stream()
                 .map(post -> {
                     UUID postId = post.getId();
@@ -1092,7 +1153,10 @@ public class PostsServiceImpl implements PostsService {
                             likedByViewer.contains(postId),
                             savedByViewer.contains(postId),
                             post.getCreatedAt(),
-                            post.getUpdatedAt());
+                            post.getUpdatedAt(),
+                            post.getParticipantCardEventId() == null ? null
+                                    : cards.get(new ParticipantCardKey(
+                                            post.getParticipantCardEventId(), post.getParticipantCardCarId())));
                 })
                 .toList();
     }

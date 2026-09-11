@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.posts.dto;
 
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 
@@ -39,6 +41,9 @@ import java.util.UUID;
  * @param viewerHasSaved whether the requesting user has saved this post
  * @param createdAt when the post was created
  * @param updatedAt when the post was last updated
+ * @param participantCard the participant card this post shares, drawn in place of images —
+ *        re-derived on every read, so it always shows the real placements; {@code null} on an
+ *        ordinary post, and on one whose card no longer derives (car gone, entry revoked)
  */
 public record PostDto(
         UUID id,
@@ -61,5 +66,6 @@ public record PostDto(
         boolean viewerHasSaved,
 
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        ParticipantCardDto participantCard
 ) {}

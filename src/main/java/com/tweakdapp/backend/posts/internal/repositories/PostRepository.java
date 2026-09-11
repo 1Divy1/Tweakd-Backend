@@ -62,4 +62,24 @@ public interface PostRepository extends JpaRepository<PostEntity, UUID> {
                                         @Param("cursorScore") Double cursorScore,
                                         @Param("cursorId") UUID cursorId,
                                         Pageable pageable);
+
+    /**
+     * When this participant card was last shared to the feed, or {@code null} if never (or every
+     * such post has since been deleted) — what the repost cooldown checks.
+     */
+    @Query("""
+            select max(p.createdAt)
+              from PostEntity p
+             where p.participantCardEventId = :eventId
+               and p.participantCardCarId = :carId
+            """)
+    Instant findLastParticipantCardPostAt(@Param("eventId") UUID eventId, @Param("carId") UUID carId);
+
+    /**
+     * Serialises concurrent shares of one card until the transaction ends, so a double tap cannot slip
+     * two posts past the cooldown check. A transaction-scoped advisory lock: released on commit or
+     * rollback, no row touched.
+     */
+    @Query(value = "select 1 from pg_advisory_xact_lock(hashtextextended(:key, 0))", nativeQuery = true)
+    Integer lockParticipantCard(@Param("key") String key);
 }

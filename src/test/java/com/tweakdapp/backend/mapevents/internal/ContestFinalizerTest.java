@@ -171,11 +171,12 @@ class ContestFinalizerTest {
         verify(reputationService).award(OWNER_C, ReputationReasons.CONTEST_THIRD_PLACE, source);
         verify(reputationService, never()).award(eq(OWNER_D), anyString(), any(ReputationSource.class));
 
-        verify(badgeService).awardForTrigger(OWNER_A, BadgeTrigger.CONTEST_WON, NOW);
-        verify(badgeService).awardForTrigger(OWNER_A, BadgeTrigger.CONTEST_PODIUM, NOW);
-        verify(badgeService).awardForTrigger(OWNER_B, BadgeTrigger.CONTEST_PODIUM, NOW);
-        verify(badgeService).awardForTrigger(OWNER_C, BadgeTrigger.CONTEST_PODIUM, NOW);
-        verify(badgeService, never()).awardForTrigger(eq(OWNER_B), eq(BadgeTrigger.CONTEST_WON), any());
+        verify(badgeService).awardForTrigger(OWNER_A, BadgeTrigger.CONTEST_FIRST_PLACE, NOW);
+        verify(badgeService).awardForTrigger(OWNER_B, BadgeTrigger.CONTEST_SECOND_PLACE, NOW);
+        verify(badgeService).awardForTrigger(OWNER_C, BadgeTrigger.CONTEST_THIRD_PLACE, NOW);
+        // Each rank gets exactly its own medal: no runner-up collects the winner's badge.
+        verify(badgeService, never()).awardForTrigger(eq(OWNER_B), eq(BadgeTrigger.CONTEST_FIRST_PLACE), any());
+        verify(badgeService, never()).awardForTrigger(eq(OWNER_C), eq(BadgeTrigger.CONTEST_FIRST_PLACE), any());
         verify(badgeService, never()).awardForTrigger(eq(OWNER_D), any(), any());
 
         ArgumentCaptor<Object> published = ArgumentCaptor.forClass(Object.class);
