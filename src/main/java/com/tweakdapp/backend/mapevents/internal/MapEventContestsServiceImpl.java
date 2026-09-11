@@ -1,5 +1,12 @@
 package com.tweakdapp.backend.mapevents.internal;
 
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardContestDto;
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+import com.tweakdapp.backend.mapevents.dto.ParticipantCardKey;
+import java.util.Collection;
+import java.util.Optional;
+import java.util.Set;
+
 import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.mapevents.ContestEntryDecidedEvent;
@@ -11,6 +18,7 @@ import com.tweakdapp.backend.mapevents.dto.CarEventPlacementDto;
 import com.tweakdapp.backend.mapevents.dto.ContestCategoryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestDto;
 import com.tweakdapp.backend.mapevents.dto.ContestEntryDto;
+import com.tweakdapp.backend.mapevents.dto.ContestEventSummaryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestMyEntryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestPendingEntryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestViewerStateDto;
@@ -597,6 +605,134 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
     }
 
     // ==================================================================
+    // Participant cards
+    // ==================================================================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ParticipantCardDto> listMyParticipantCards(UUID currentUserId, UUID eventId) {
+        List<ParticipantCardKey> keys = participantRepository
+                .findByIdEventIdAndOwnerIdAndStatus(eventId, currentUserId, MapEventParticipantEntity.ACCEPTED)
+                .stream()
+                .map(p -> new ParticipantCardKey(eventId, p.getId().getCarId()))
+                .toList();
+        Map<ParticipantCardKey, ParticipantCardDto> cards = deriveCards(keys);
+        return keys.stream().map(cards::get).filter(Objects::nonNull).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<ParticipantCardKey, ParticipantCardDto> findParticipantCards(Collection<ParticipantCardKey> keys) {
+        return deriveCards(keys);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<ParticipantCardDto> findOwnedParticipantCard(UUID ownerId, UUID eventId, UUID carId) {
+        boolean owns = participantRepository.findById(new MapEventParticipantId(eventId, carId))
+                .filter(p -> ownerId.equals(p.getOwnerId()))
+                .isPresent();
+        if (!owns) {
+            return Optional.empty();
+        }
+        ParticipantCardKey key = new ParticipantCardKey(eventId, carId);
+        return Optional.ofNullable(deriveCards(List.of(key)).get(key));
+    }
+
+    /**
+     * Derives the cards for many {@code (event, car)} pairs in a fixed number of queries — events,
+     * participant rows, the events' finished contests, their entries, one car batch — however many
+     * keys there are. A pair is a card only when its event is approved and an organizer has marked it
+     * finished ({@code previous}), and the car holds an {@code accepted} participant row; any other
+     * key is left out of the result.
+     */
+    private Map<ParticipantCardKey, ParticipantCardDto> deriveCards(Collection<ParticipantCardKey> keys) {
+        if (keys.isEmpty()) {
+            return Map.of();
+        }
+        Set<UUID> eventIds = keys.stream().map(ParticipantCardKey::eventId).collect(Collectors.toSet());
+        Map<UUID, MapEventEntity> finishedEvents = eventRepository.findAllById(eventIds).stream()
+                .filter(e -> MapEventEntity.APPROVAL_ACCEPTED.equals(e.getApprovalStatus())
+                        && MapEventEntity.STATUS_PREVIOUS.equals(e.getStatus()))
+                .collect(Collectors.toMap(MapEventEntity::getId, Function.identity()));
+        if (finishedEvents.isEmpty()) {
+            return Map.of();
+        }
+
+        List<MapEventParticipantId> participantIds = keys.stream()
+                .filter(k -> finishedEvents.containsKey(k.eventId()))
+                .map(k -> new MapEventParticipantId(k.eventId(), k.carId()))
+                .distinct()
+                .toList();
+        Set<ParticipantCardKey> eligible = participantRepository.findAllById(participantIds).stream()
+                .filter(p -> MapEventParticipantEntity.ACCEPTED.equals(p.getStatus()))
+                .map(p -> new ParticipantCardKey(p.getId().getEventId(), p.getId().getCarId()))
+                .collect(Collectors.toSet());
+        if (eligible.isEmpty()) {
+            return Map.of();
+        }
+        Set<UUID> eligibleCarIds = eligible.stream().map(ParticipantCardKey::carId).collect(Collectors.toSet());
+
+        Map<UUID, ContestEntity> contests = contestRepository
+                .findByEventIdInAndStatus(finishedEvents.keySet(), ContestEntity.STATUS_FINISHED).stream()
+                .collect(Collectors.toMap(ContestEntity::getId, Function.identity()));
+        Map<ParticipantCardKey, List<ContestEntryEntity>> entriesByCard = contests.isEmpty()
+                ? Map.of()
+                : entryRepository.findByIdContestIdIn(contests.keySet()).stream()
+                        .filter(ContestEntryEntity::isAccepted)
+                        .filter(e -> eligibleCarIds.contains(e.getId().getCarId()))
+                        .collect(Collectors.groupingBy(e -> new ParticipantCardKey(
+                                contests.get(e.getId().getContestId()).getEventId(), e.getId().getCarId())));
+
+        Map<UUID, CarSummaryDto> cars = resolveCars(List.copyOf(eligibleCarIds));
+
+        Map<ParticipantCardKey, ParticipantCardDto> out = new HashMap<>();
+        for (ParticipantCardKey key : eligible) {
+            CarSummaryDto car = cars.get(key.carId());
+            if (car == null) {
+                // The car no longer resolves: no card, rather than a card with a hole in it.
+                continue;
+            }
+            MapEventEntity event = finishedEvents.get(key.eventId());
+            List<ParticipantCardContestDto> entered = entriesByCard.getOrDefault(key, List.of()).stream()
+                    .map(e -> {
+                        ContestEntity contest = contests.get(e.getId().getContestId());
+                        return new ParticipantCardContestDto(contest.getId(), contest.getTitle(),
+                                toCategoryDto(contest.getCategory()), podiumRank(e));
+                    })
+                    .sorted(CARD_CONTEST_ORDER)
+                    .toList();
+            Integer bestRank = entered.stream()
+                    .map(ParticipantCardContestDto::finalRank)
+                    .filter(Objects::nonNull)
+                    .min(Integer::compare)
+                    .orElse(null);
+            out.put(key, new ParticipantCardDto(event.getId(), event.getTitle(), event.getAttendeesCount(),
+                    car, bestRank, entered));
+        }
+        return out;
+    }
+
+    /**
+     * Podium places first, best first; everything else by title — a stable order, so the card's
+     * one-line contest list never reshuffles between reads.
+     */
+    private static final Comparator<ParticipantCardContestDto> CARD_CONTEST_ORDER = Comparator
+            .comparing((ParticipantCardContestDto c) -> c.finalRank() == null ? Integer.MAX_VALUE : c.finalRank())
+            .thenComparing(ParticipantCardContestDto::title);
+
+    /**
+     * The place a card names: a frozen rank inside the podium with at least one vote — the same rule
+     * {@link ContestFinalizer} pays out on — or {@code null}.
+     */
+    private static Integer podiumRank(ContestEntryEntity entry) {
+        Short rank = entry.getFinalRank();
+        return rank != null && rank <= ContestFinalizer.PODIUM_SIZE && entry.getVotesCount() >= 1
+                ? Integer.valueOf(rank)
+                : null;
+    }
+
+    // ==================================================================
     // Assembly
     // ==================================================================
 
@@ -655,6 +791,9 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
 
         Map<UUID, ProfileSearchResultDto> creators = resolveProfiles(
                 contests.stream().map(ContestEntity::getCreatedBy).toList());
+
+        // One summary for the whole response: every contest here belongs to the same event.
+        ContestEventSummaryDto eventSummary = toEventSummary(event);
 
         List<ContestDto> out = new ArrayList<>(contests.size());
         for (ContestEntity contest : contests) {
@@ -726,7 +865,8 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
                     viewer,
                     pending,
                     creators.get(contest.getCreatedBy()),
-                    contest.getCreatedAt()));
+                    contest.getCreatedAt(),
+                    eventSummary));
         }
         return out;
     }
@@ -859,6 +999,24 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
         }
         return profileService.findByIds(distinct).stream()
                 .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity(), (a, b) -> a));
+    }
+
+    /**
+     * The event context embedded in each contest. The head-counts are trigger-owned columns on the
+     * already-loaded event row; the contest count is one indexed count, bounded by
+     * {@link #MAX_CONTESTS_PER_EVENT}.
+     */
+    private ContestEventSummaryDto toEventSummary(MapEventEntity event) {
+        return new ContestEventSummaryDto(
+                event.getId(),
+                event.getTitle(),
+                resolveCoverUrl(event.getCoverImageKey()),
+                event.getLocationName(),
+                event.getStartsAt(),
+                event.getAttendeesCount(),
+                event.getAttendingCarsCount(),
+                (int) contestRepository.countByEventIdAndStatusNot(event.getId(), ContestEntity.STATUS_CANCELED),
+                event.getStatus());
     }
 
     private String resolveCoverUrl(String storedKey) {

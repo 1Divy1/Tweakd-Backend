@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.posts.internal;
 
+import com.tweakdapp.backend.posts.dto.request.ShareParticipantCardRequest;
+
 import com.tweakdapp.backend.posts.PostsService;
 import com.tweakdapp.backend.posts.dto.CommentPageDto;
 import com.tweakdapp.backend.posts.dto.LikerPageDto;
@@ -34,6 +36,18 @@ public class PostController {
     public PostDto createPost(@AuthenticationPrincipal Jwt jwt,
                              @Valid @RequestBody CreatePostRequest request) {
         return postsService.createPost(jwt.getSubject(), request);
+    }
+
+    /**
+     * Shares one of the caller's participant cards to the feed. 404 if it is not a card of theirs;
+     * 409 {@code participant_card_cooldown} (with {@code details.next_post_allowed_at}) inside the
+     * repost cooldown.
+     */
+    @PostMapping("/participant-card")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PostDto shareParticipantCard(@AuthenticationPrincipal Jwt jwt,
+                                        @Valid @RequestBody ShareParticipantCardRequest request) {
+        return postsService.shareParticipantCard(jwt.getSubject(), request);
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.posts.internal;
 
+import com.tweakdapp.backend.mapevents.MapEventContestsService;
+
 import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.garage.dto.CarOwnerDto;
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
@@ -121,7 +123,8 @@ class PostsTaggingTest {
                 garageService,
                 mock(StorageService.class),
                 mock(ReportService.class),
-                eventPublisher);
+                eventPublisher,
+                mock(MapEventContestsService.class));
         ReflectionTestUtils.setField(service, "entityManager", mock(EntityManager.class));
 
         // The post / comment re-reads every write ends with (matched by any() because create
