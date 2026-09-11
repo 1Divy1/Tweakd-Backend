@@ -7,6 +7,8 @@ import com.tweakdapp.backend.notification.exception.NotificationNotFoundExceptio
 import com.tweakdapp.backend.notification.internal.entities.NotificationEntity;
 import com.tweakdapp.backend.notification.internal.push.NotificationsCreatedEvent;
 import com.tweakdapp.backend.notification.internal.repositories.NotificationRepository;
+import com.tweakdapp.backend.profile.ProfileService;
+import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -16,9 +18,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -28,11 +33,14 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ProfileService profileService;
 
     public NotificationServiceImpl(NotificationRepository notificationRepository,
-                                   ApplicationEventPublisher eventPublisher) {
+                                   ApplicationEventPublisher eventPublisher,
+                                   ProfileService profileService) {
         this.notificationRepository = notificationRepository;
         this.eventPublisher = eventPublisher;
+        this.profileService = profileService;
     }
 
     @Override
@@ -71,7 +79,8 @@ public class NotificationServiceImpl implements NotificationService {
         NotificationEntity last = page.isEmpty() ? null : page.getLast();
         String nextCursor = hasMore ? Cursor.encode(last.getCreatedAt(), last.getId()) : null;
 
-        return new NotificationPageDto(page.stream().map(this::toDto).toList(), nextCursor);
+        Map<UUID, String> avatars = actorAvatars(page);
+        return new NotificationPageDto(page.stream().map(n -> toDto(n, avatars)).toList(), nextCursor);
     }
 
     @Override
@@ -120,14 +129,70 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     private NotificationDto toDto(NotificationEntity entity) {
+        return toDto(entity, Map.of());
+    }
+
+    /**
+     * Builds the DTO, adding {@code actor_avatar_url} to the payload when the row's actor has a
+     * photo in {@code avatars}. The key is a read-time addition, never stored: avatar objects are
+     * deleted from R2 when replaced, so a URL snapshotted at write time would go dead as soon as its
+     * owner changed their photo. The stored payload map is copied, not mutated.
+     */
+    private NotificationDto toDto(NotificationEntity entity, Map<UUID, String> avatars) {
+        Map<String, Object> payload = entity.getPayload();
+        UUID actorId = actorIdOf(entity);
+        String avatarUrl = actorId == null ? null : avatars.get(actorId);
+        if (avatarUrl != null) {
+            payload = new LinkedHashMap<>(payload);
+            payload.put("actor_avatar_url", avatarUrl);
+        }
         return new NotificationDto(
                 entity.getId(),
                 entity.getType(),
                 entity.getTitle(),
                 entity.getBody(),
-                entity.getPayload(),
+                payload,
                 entity.isRead(),
                 entity.getCreatedAt());
+    }
+
+    /**
+     * Current avatar URL for every distinct actor on the page, in one batch lookup. Covers every
+     * producer that records an {@code actor_id} — Spring listeners and Postgres-written rows such as
+     * {@code dm} alike. Actors without a photo are simply absent, so the client falls back to their
+     * initial.
+     */
+    private Map<UUID, String> actorAvatars(List<NotificationEntity> page) {
+        Set<UUID> actorIds = new LinkedHashSet<>();
+        for (NotificationEntity n : page) {
+            UUID actorId = actorIdOf(n);
+            if (actorId != null) {
+                actorIds.add(actorId);
+            }
+        }
+        if (actorIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, String> avatars = new HashMap<>();
+        for (ProfileSearchResultDto profile : profileService.findByIds(actorIds)) {
+            if (profile.avatarUrl() != null && !profile.avatarUrl().isBlank()) {
+                avatars.put(profile.id(), profile.avatarUrl());
+            }
+        }
+        return avatars;
+    }
+
+    /** The payload's {@code actor_id}, or null when absent (system notifications) or malformed. */
+    private static UUID actorIdOf(NotificationEntity entity) {
+        Object raw = entity.getPayload() == null ? null : entity.getPayload().get("actor_id");
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return UUID.fromString(raw.toString());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**
