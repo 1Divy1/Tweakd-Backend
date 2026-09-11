@@ -3,6 +3,7 @@ package com.tweakdapp.backend.notification.internal.push;
 import com.tweakdapp.backend.notification.internal.NotificationServiceImpl;
 import com.tweakdapp.backend.notification.internal.entities.NotificationEntity;
 import com.tweakdapp.backend.notification.internal.repositories.NotificationRepository;
+import com.tweakdapp.backend.profile.ProfileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -43,7 +44,7 @@ class NotificationPushEventTest {
             Iterable<?> entities = i.getArgument(0);
             return java.util.stream.StreamSupport.stream(entities.spliterator(), false).toList();
         });
-        service = new NotificationServiceImpl(notificationRepository, eventPublisher);
+        service = new NotificationServiceImpl(notificationRepository, eventPublisher, mock(ProfileService.class));
     }
 
     private NotificationsCreatedEvent capturedEvent() {

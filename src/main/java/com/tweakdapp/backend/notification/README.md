@@ -11,6 +11,14 @@ type-specific ids. **Every payload key is snake_case and every id is a string**,
 producers — the global SNAKE_CASE wire strategy renames POJO fields, not JSON-map keys, so they are
 spelled out literally at each call site.
 
+**`actor_avatar_url` is added at read time, never stored.** `GET /notifications` batch-resolves the
+current avatar of every distinct `actor_id` on the page (one `ProfileService.findByIds` call) and
+adds it to that row's `payload` in the response. That covers every producer recording an
+`actor_id` — Spring listeners and Postgres-written rows like `dm` alike. It is deliberately not
+snapshotted into the stored payload: avatar objects are deleted from R2 when replaced, so a stored URL
+would go dead the moment its owner changed their photo. Actors without a photo get no key, and the
+client falls back to their initial. Pushes and the `markRead` response don't carry it.
+
 | `type` | Recipient | `payload` keys |
 |---|---|---|
 | `feedback_status` | author + subscribers | `feedback_id`, `status` |
