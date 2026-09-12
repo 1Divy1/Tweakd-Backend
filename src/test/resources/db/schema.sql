@@ -1498,6 +1498,9 @@ CREATE TABLE public.business_accounts (
     follower_count integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     timezone text DEFAULT 'Europe/Bucharest'::text NOT NULL,
+    rejection_reason text,
+    reviewed_by uuid,
+    reviewed_at timestamp with time zone,
     CONSTRAINT business_accounts_timezone_valid CHECK (((now() AT TIME ZONE timezone) IS NOT NULL))
 );
 
@@ -4145,6 +4148,13 @@ ALTER TABLE ONLY public.admin_team_members
 
 
 --
+-- Name: admin_team_members_single_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX admin_team_members_single_owner_idx ON public.admin_team_members USING btree (((true))) WHERE (role = 'owner'::text);
+
+
+--
 -- Name: app_language_options app_language_options_language_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5173,6 +5183,20 @@ ALTER TABLE ONLY public.vehicle_history_entries
 --
 
 CREATE INDEX business_accounts_location_idx ON public.business_accounts USING gist (location);
+
+
+--
+-- Name: business_accounts_pending_review_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX business_accounts_pending_review_idx ON public.business_accounts USING btree (created_at, id) WHERE (verification_status = 'pending'::text);
+
+
+--
+-- Name: feedback_feed_messages_new_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX feedback_feed_messages_new_idx ON public.feedback_feed_messages USING btree (created_at DESC, id DESC) WHERE ((status = 'sent'::text) AND (is_deleted = false));
 
 
 --

@@ -57,6 +57,17 @@ public interface StorageService {
     String publicUrl(StorageBucket bucket, String key);
 
     /**
+     * The bucket's public URL prefix, with no trailing slash — {@code publicUrl(bucket, key)} is
+     * this plus {@code "/" + key}.
+     *
+     * <p>Exists for the dashboard's badge form, where a staff member types an R2 object key by hand
+     * (badge artwork is uploaded out of band) and needs to see the resulting image before saving.
+     * Fetching the prefix once beats a round trip per keystroke. It is not a secret: it is the same
+     * host every badge image in the app is already served from.
+     */
+    String publicBaseUrl(StorageBucket bucket);
+
+    /**
      * Deletes objects from R2 by their bucket-relative keys. Null/blank keys are skipped.
      *
      * @param bucket the logical bucket the keys belong to

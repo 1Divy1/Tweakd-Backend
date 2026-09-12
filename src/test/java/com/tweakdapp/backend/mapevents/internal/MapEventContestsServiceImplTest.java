@@ -5,6 +5,7 @@ import com.tweakdapp.backend.garage.dto.CarOwnerDto;
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.mapevents.ContestEntryDecidedEvent;
 import com.tweakdapp.backend.mapevents.ContestEntryRequestedEvent;
+import com.tweakdapp.backend.mapevents.dto.AdminContestDto;
 import com.tweakdapp.backend.mapevents.dto.ContestDto;
 import com.tweakdapp.backend.mapevents.dto.request.CreateContestRequest;
 import com.tweakdapp.backend.mapevents.dto.request.UpdateContestRequest;
@@ -40,6 +41,7 @@ import com.tweakdapp.backend.mapevents.internal.repositories.MapEventOrganizerRe
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventParticipantRepository;
 import com.tweakdapp.backend.mapevents.internal.repositories.MapEventRepository;
 import com.tweakdapp.backend.profile.ProfileService;
+import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
 import com.tweakdapp.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,6 +53,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Limit;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
@@ -580,5 +583,83 @@ class MapEventContestsServiceImplTest {
         ContestDto forOwner = service.listContests(OWNER, EVENT_ID).get(0);
         assertThat(forOwner.viewer().myEntries()).singleElement()
                 .satisfies(e -> assertThat(e.status()).isEqualTo(ContestEntryEntity.PENDING));
+    }
+
+    // ==================================================================
+    // Admin oversight
+    // ==================================================================
+
+    @Test
+    void theOversightListDefaultsToOpenContestsAndFlagsTheOverdueOnes() {
+        contest.setClosesAt(NOW.minus(2, ChronoUnit.HOURS));   // planned end already passed
+        contest.setCreatedAt(NOW.minus(1, ChronoUnit.DAYS));
+        when(contestRepository.findByStatusForReview(eq(ContestEntity.STATUS_OPEN), any(Limit.class)))
+                .thenReturn(List.of(contest));
+        when(eventRepository.findAllById(any())).thenReturn(List.of(event));
+        when(profileService.findByIds(any()))
+                .thenReturn(List.of(new ProfileSearchResultDto(ORGANIZER, "Andrei", "andrei", null)));
+
+        List<AdminContestDto> rows = service.listContestsForReview(null, 50);
+
+        assertThat(rows).singleElement().satisfies(row -> {
+            assertThat(row.id()).isEqualTo(CONTEST_ID);
+            assertThat(row.status()).isEqualTo(ContestEntity.STATUS_OPEN);
+            assertThat(row.eventTitle()).isEqualTo("Casino Square Cars & Coffee");
+            assertThat(row.plannedEndPassed()).isTrue();
+            assertThat(row.createdBy().username()).isEqualTo("andrei");
+        });
+    }
+
+    @Test
+    void theOversightListRefusesAStatusNobodyReviews() {
+        assertThatExceptionOfType(InvalidContestException.class)
+                .isThrownBy(() -> service.listContestsForReview("canceled", 50));
+        assertThatExceptionOfType(InvalidContestException.class)
+                .isThrownBy(() -> service.listContestsForReview("nonsense", 50));
+    }
+
+    @Test
+    void theOversightListClampsItsLimit() {
+        when(contestRepository.findByStatusForReview(any(), any(Limit.class))).thenReturn(List.of());
+
+        service.listContestsForReview("open", 100_000);
+
+        ArgumentCaptor<Limit> limit = ArgumentCaptor.forClass(Limit.class);
+        verify(contestRepository).findByStatusForReview(any(), limit.capture());
+        assertThat(limit.getValue().max()).isEqualTo(200);
+    }
+
+    @Test
+    void staffCanForceFinishAnAbandonedContestAndThePodiumIsStillPaid() {
+        when(contestRepository.findById(CONTEST_ID)).thenReturn(Optional.of(contest));
+        when(profileService.findByIds(any())).thenReturn(List.of());
+        UUID staffId = UUID.fromString("00000000-0000-0000-0000-000000000099");
+
+        service.finishContestAsAdmin(CONTEST_ID, staffId);
+
+        // finished_by carries the staff id (the column has no FK precisely so it can), and awards
+        // are paid exactly as they would be if the organizer had tapped "finish now".
+        verify(finalizer).finalizeLocked(eq(contest), eq(event), eq(staffId), eq(true), any(Instant.class));
+    }
+
+    @Test
+    void forceFinishingPaysNobodyWhenTheEventWasCancelled() {
+        event.setStatus(MapEventEntity.STATUS_CANCELED);
+        when(contestRepository.findById(CONTEST_ID)).thenReturn(Optional.of(contest));
+        when(profileService.findByIds(any())).thenReturn(List.of());
+
+        service.finishContestAsAdmin(CONTEST_ID, ORGANIZER);
+
+        verify(finalizer).finalizeLocked(any(), any(), any(), eq(false), any(Instant.class));
+    }
+
+    @Test
+    void aContestThatNeverOpenedCannotBeForceFinished() {
+        contest.setStatus(ContestEntity.STATUS_SCHEDULED);
+
+        assertThatExceptionOfType(ContestNotOpenException.class)
+                .isThrownBy(() -> service.finishContestAsAdmin(CONTEST_ID, ORGANIZER));
+
+        verify(finalizer, never()).finalizeLocked(any(), any(), any(), anyBoolean(), any());
     }
 }

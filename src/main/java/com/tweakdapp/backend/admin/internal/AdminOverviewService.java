@@ -76,6 +76,8 @@ public class AdminOverviewService {
                         union all select 'comments', count(*) from comments where is_deleted = false
                         union all select 'forum_threads', count(*) from forum_threads where is_deleted = false
                         union all select 'forum_replies', count(*) from forum_thread_replies where is_deleted = false
+                        union all select 'map_events', count(*) from car_events
+                        union all select 'feedback_requests', count(*) from feedback_feed_messages where is_deleted = false
                         """)
                 .query((rs, i) -> new ContentMixDto(rs.getString("type"), rs.getLong("count")))
                 .list();
@@ -94,13 +96,29 @@ public class AdminOverviewService {
                 .list();
     }
 
+    /**
+     * The sidebar's six numbers in one round trip. Every branch is a plain equality count over an
+     * indexed status column, and the whole thing is one statement on purpose: the sidebar refetches
+     * this on every page, so six separate queries would be six times the latency for no benefit.
+     */
     private BadgeCountsDto badges() {
         return jdbc.sql("""
                         select (select count(*) from moderation_cases where status in ('open', 'escalated')) as cases,
                                (select count(*) from support_tickets where status = 'open') as tickets,
-                               (select count(*) from feedback where status = 'submitted') as feedback
+                               (select count(*) from feedback where status = 'submitted') as feedback,
+                               (select count(*) from car_events where approval_status = 'pending') as events,
+                               (select count(*) from feedback_feed_messages
+                                 where status = 'sent' and is_deleted = false) as roadmap,
+                               (select count(*) from business_accounts
+                                 where verification_status = 'pending') as businesses
                         """)
-                .query((rs, i) -> new BadgeCountsDto(rs.getLong("cases"), rs.getLong("tickets"), rs.getLong("feedback")))
+                .query((rs, i) -> new BadgeCountsDto(
+                        rs.getLong("cases"),
+                        rs.getLong("tickets"),
+                        rs.getLong("feedback"),
+                        rs.getLong("events"),
+                        rs.getLong("roadmap"),
+                        rs.getLong("businesses")))
                 .single();
     }
 }

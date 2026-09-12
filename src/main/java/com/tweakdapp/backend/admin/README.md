@@ -45,10 +45,13 @@ or staff) 409s — `StaffEmailInUseException`. Removing a member deletes the row
 
 The overview page is gated on team membership only, so every member has a landing page.
 
-`MANAGE_BADGES` (curating the badge catalogue, and granting or taking back a badge by hand) sits
-with `APPROVE_EVENTS` and `MANAGE_ROADMAP` as owner / senior-admin only. Handing someone a badge is
-recognition — the opposite end of the job from taking content down — and the hand-granted badges are
-exactly the ones no rule can judge.
+Five capabilities are owner / senior-admin only for the same reason, and none of them is
+moderation: `APPROVE_EVENTS` (publishing a user's event to the map), `MANAGE_ROADMAP` (telling the
+community something is in development or shipped), `MANAGE_BADGES` (handing someone recognition no
+rule can judge), `VERIFY_BUSINESSES` (putting a real company on the map — a commercial decision),
+and `MANAGE_CONTESTS` (force-finishing pays out reputation and badges that cannot be cleanly taken
+back). Each one publishes something or pays something out; taking content down is the opposite end
+of the job.
 
 ## Moderation model
 
@@ -102,9 +105,53 @@ exactly the ones no rule can judge.
 | GET | `/badges/holders/{userId}` (the only read that returns `granted_by`) | MANAGE_BADGES |
 | POST | `/badges/{badgeId}/holders/{userId}` (grant by hand) | MANAGE_BADGES |
 | DELETE | `/badges/{badgeId}/holders/{userId}` (take it back) | MANAGE_BADGES |
+| GET | `/badges/artwork-base-url` (public URL prefix, for previewing a typed R2 key) | MANAGE_BADGES |
+| POST | `/team/{userId}/transfer-ownership` (caller drops to `senior_admin`) | TRANSFER_OWNERSHIP |
+| GET | `/map-events?status=&cursor=&size=` (oldest first; default `pending`) | APPROVE_EVENTS |
+| GET | `/map-events/counts` | APPROVE_EVENTS |
+| GET | `/map-events/{id}` | APPROVE_EVENTS |
+| POST | `/map-events/{id}/approve` | APPROVE_EVENTS |
+| POST | `/map-events/{id}/reject` `{reason}` (creator can edit → resubmits) | APPROVE_EVENTS |
+| DELETE | `/map-events/{id}` (cascades; removes the R2 cover) | APPROVE_EVENTS |
+| GET | `/feedback-feed?type=&status=&include_removed=&cursor=` | MANAGE_ROADMAP |
+| GET | `/feedback-feed/top?limit=` | MANAGE_ROADMAP |
+| GET | `/feedback-feed/types`, `/feedback-feed/statuses` | member |
+| PATCH | `/feedback-feed/{id}/status` (→ notifies the author) | MANAGE_ROADMAP |
+| PUT | `/feedback-feed/{id}/response` (empty body clears; silent) | MANAGE_ROADMAP |
+| DELETE | `/feedback-feed/{id}` (soft-remove, row kept for audit) | MANAGE_ROADMAP |
+| GET | `/businesses?verification_status=&active_status=&cursor=` | VERIFY_BUSINESSES |
+| GET | `/businesses/counts`, `/businesses/{id}` | VERIFY_BUSINESSES |
+| POST | `/businesses/{id}/verify` | VERIFY_BUSINESSES |
+| POST | `/businesses/{id}/reject` `{reason}` | VERIFY_BUSINESSES |
+| PATCH | `/businesses/{id}/active-status` `{activeStatus}` (`active` / `suspended`) | VERIFY_BUSINESSES |
+| GET | `/contests?status=&limit=` (default `open`, longest-running first) | MANAGE_CONTESTS |
+| GET | `/contests/counts` | MANAGE_CONTESTS |
+| POST | `/contests/{id}/finish` (force-finish; pays the podium) | MANAGE_CONTESTS |
 
-Team/owner rules: `owner` is never assignable via add/re-role; the owner's row can be neither
-re-roled nor removed (ownership transfer is a TODO).
+Team/owner rules: `owner` is never assignable via add/re-role, and the owner's row can be neither
+re-roled nor removed. The single exception is `POST /team/{userId}/transfer-ownership`: inside one
+transaction the caller is demoted to `senior_admin` and the target promoted — in that order,
+because `admin_team_members_single_owner_idx` (partial unique index, added 2026-09-12) is checked
+per statement. Both rows are taken `FOR UPDATE` in uuid order, so two transfers racing serialise
+rather than leaving the dashboard ownerless.
+
+## Businesses and contests — two writes that are not moderation
+
+Neither the `business` nor the `mapevents` module had an outside way to make these decisions, so
+they were SQL statements typed by hand:
+
+- **Business verification.** `business_accounts` rows are only visible to the app when
+  `active_status = 'active'` **and** `verification_status = 'verified'`. The business module stays
+  read-only otherwise — nothing here creates, edits or deletes a business — and the three status
+  writes it now exposes are called only from `AdminBusinessesController`. `rejection_reason`,
+  `reviewed_by` and `reviewed_at` were added for this (2026-09-12 migration); `reviewed_by` holds a
+  **staff auth id**, so it has no FK and nothing joins it to `profiles`.
+- **Contest force-finish.** Since `ContestClock` was deleted (see `CONTESTS_MANUAL_LIFECYCLE.md`)
+  nothing closes a contest on a timer: an organizer taps, or the event's own finish cascades. An
+  organizer who walks away leaves a contest taking votes forever, and no organizer means nobody in
+  the app can end it. `POST /contests/{id}/finish` runs the same `ContestFinalizer.finalizeLocked`
+  the organizer's own button does, under the same row lock, with the same "a cancelled event pays
+  nobody" rule. The staff id lands in `contests.finished_by`, which has no FK for that reason.
 
 ## Overview analytics
 
@@ -112,3 +159,9 @@ re-roled nor removed (ownership transfer is a TODO).
 tables (posts today/week/month + 30-day series, content mix, new profiles per week ×8, badge
 counts) — the **documented exception** to strict table ownership: read-only, aggregate-only.
 DAU / MAU / session / churn are deferred until activity tracking exists.
+
+The sidebar's six badge numbers (pending cases, open tickets, new feedback, pending map events,
+un-triaged roadmap requests, businesses awaiting verification) come back in **one** statement:
+every branch is an equality count on an indexed status column, and the dashboard refetches this on
+every page, so six round trips would cost six times the latency for nothing. Two partial indexes
+were added for the newer branches in the 2026-09-12 migration.

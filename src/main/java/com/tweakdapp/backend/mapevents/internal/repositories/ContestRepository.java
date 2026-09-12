@@ -4,6 +4,7 @@ import java.util.Collection;
 
 import com.tweakdapp.backend.mapevents.internal.entities.ContestEntity;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -50,6 +51,22 @@ public interface ContestRepository extends JpaRepository<ContestEntity, UUID> {
 
     @Query("select c from ContestEntity c join fetch c.category where c.id in :ids")
     List<ContestEntity> findAllWithCategoryByIdIn(@Param("ids") List<UUID> ids);
+
+    /**
+     * The dashboard's oversight list: contests in one status across every event, category and event
+     * fetch-joined, oldest planned-open first so the longest-running come up before anything else.
+     * Bounded by {@code limit} — this is an operator's worklist, not a browsable archive.
+     */
+    @Query("""
+            select c
+              from ContestEntity c
+              join fetch c.category
+             where c.status = :status
+             order by c.opensAt asc, c.createdAt asc
+            """)
+    List<ContestEntity> findByStatusForReview(@Param("status") String status, Limit limit);
+
+    long countByStatus(String status);
 
     /** Contests of several events in one status, category fetched — how cards read every finished contest at once. */
     @Query("""
