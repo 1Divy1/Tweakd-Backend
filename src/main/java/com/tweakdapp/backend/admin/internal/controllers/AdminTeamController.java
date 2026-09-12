@@ -61,6 +61,20 @@ class AdminTeamController {
         return teamService.updateMember(memberId, request);
     }
 
+    /**
+     * Hands ownership to another team member; the caller steps down to {@code senior_admin}. Owner
+     * only, by way of {@code TRANSFER_OWNERSHIP} — the one capability {@code senior_admin} lacks.
+     *
+     * <p>Returns the new owner's row. The caller's own row has changed too, so the dashboard
+     * refetches the team afterwards rather than patching one row into its state.
+     */
+    @PostMapping("/{memberId}/transfer-ownership")
+    public TeamMemberDto transferOwnership(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID memberId) {
+        UUID callerId = UUID.fromString(jwt.getSubject());
+        access.require(callerId, Capability.TRANSFER_OWNERSHIP);
+        return teamService.transferOwnership(callerId, memberId);
+    }
+
     @DeleteMapping("/{memberId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID memberId) {

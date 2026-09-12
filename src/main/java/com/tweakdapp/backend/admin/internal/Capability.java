@@ -33,12 +33,24 @@ public enum Capability {
      * the same reasoning as {@link #APPROVE_EVENTS} and {@link #MANAGE_ROADMAP}.
      */
     MANAGE_BADGES,
+    /**
+     * Verify, reject and suspend business accounts. Deliberately separate from
+     * {@link #REVIEW_CONTENT}: putting a real company on the map is a publishing decision with
+     * commercial weight, not a moderation one — the same reasoning as {@link #APPROVE_EVENTS}.
+     */
+    VERIFY_BUSINESSES,
+    /**
+     * Force-finish a contest whose organizer abandoned it. Rides with {@link #APPROVE_EVENTS}'s
+     * owner / senior-admin audience because finishing a contest pays out the podium: reputation
+     * and badges that cannot be taken back cleanly.
+     */
+    MANAGE_CONTESTS,
     /** Process refunds (capability flag only — no billing integration yet). */
     REFUNDS,
     /** The overview / analytics pages. */
     VIEW_ANALYTICS,
     /** Add, re-role, and remove team members. */
     MANAGE_TEAM,
-    /** Hand the owner role to someone else (owner only; endpoint TODO). */
+    /** Hand the owner role to someone else (owner only). */
     TRANSFER_OWNERSHIP
 }

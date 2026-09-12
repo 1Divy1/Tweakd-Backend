@@ -233,6 +233,22 @@ handle reported content, but publishing to the map is a separate decision.
 | `rejectEvent(eventId, reason)` | `POST /{eventId}/reject` — reason required |
 | `deleteEventAsAdmin(eventId)` | `DELETE /{eventId}` → 204 |
 
+Contests have their own small admin surface, on `MapEventContestsService` and gated on
+**`MANAGE_CONTESTS`** (owner / senior admin — force-finishing pays out reputation and badges that
+cannot be cleanly taken back):
+
+| Method | REST (`/api/v1/admin/contests`) |
+|---|---|
+| `listContestsForReview(status, limit)` | `GET /?status=open&limit=50` — longest-running first; `scheduled` and `finished` are accepted for auditing |
+| `countOpenContests()` | `GET /counts` |
+| `finishContestAsAdmin(contestId, staffId)` | `POST /{contestId}/finish` — 409 if it never opened |
+
+It exists because nothing closes a contest on a timer any more (`CONTESTS_MANUAL_LIFECYCLE.md`): an
+abandoned contest takes votes forever and no organizer means nobody in the app can end it. The
+force-finish is the organizer's own path — `ContestFinalizer.finalizeLocked` under the same row
+lock, awards suppressed only when the event was cancelled — with the staff id written to
+`finished_by`, which has no FK precisely so a non-profile id can go there.
+
 ## Visibility
 
 An unapproved event is visible only to its organizers (and to admins via `getEventAsAdmin`).

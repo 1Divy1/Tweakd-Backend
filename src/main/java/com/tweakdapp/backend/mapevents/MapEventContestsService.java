@@ -7,6 +7,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 
+import com.tweakdapp.backend.mapevents.dto.AdminContestDto;
 import com.tweakdapp.backend.mapevents.dto.CarEventHistoryItemDto;
 import com.tweakdapp.backend.mapevents.dto.ContestCategoryDto;
 import com.tweakdapp.backend.mapevents.dto.ContestDto;
@@ -161,4 +162,38 @@ public interface MapEventContestsService {
      * entry — the check behind sharing a card to the feed.
      */
     Optional<ParticipantCardDto> findOwnedParticipantCard(UUID ownerId, UUID eventId, UUID carId);
+
+    // ===================== Admin (called by the admin module) =====================
+    //
+    // Nothing closes a contest on a timer (CONTESTS_MANUAL_LIFECYCLE.md). An organizer who
+    // abandons one leaves it taking votes forever, and no organizer means nobody with the app
+    // permission to end it. These two are the safety valve.
+
+    /**
+     * Contests in one status across every event, longest-running first, capped at {@code limit}.
+     *
+     * @param status {@code open} (the default worklist) or {@code scheduled}; {@code finished} is
+     *               accepted for auditing
+     * @param limit  1..200
+     * @throws com.tweakdapp.backend.mapevents.exception.InvalidContestException if the status is
+     *         not one a reviewer can list
+     */
+    List<AdminContestDto> listContestsForReview(String status, int limit);
+
+    /** How many contests are currently open — the dashboard badge. */
+    long countOpenContests();
+
+    /**
+     * Force-finishes an open contest: standings freeze and the podium is paid, exactly as an
+     * organizer's own "finish now" would. Idempotent on an already-finished contest.
+     *
+     * <p>Awards are paid unless the event was cancelled — the same rule the organizer path uses,
+     * because the reviewer is standing in for the organizer, not overriding the outcome. The staff
+     * id is recorded in {@code finished_by}, which has no FK precisely so a non-profile id can go
+     * there.
+     *
+     * @throws com.tweakdapp.backend.mapevents.exception.ContestNotOpenException if it never opened
+     *         — a scheduled contest is deleted by its organizer, not finished
+     */
+    AdminContestDto finishContestAsAdmin(UUID contestId, UUID staffId);
 }

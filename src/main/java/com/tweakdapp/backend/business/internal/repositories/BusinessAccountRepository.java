@@ -1,12 +1,14 @@
 package com.tweakdapp.backend.business.internal.repositories;
 
 import com.tweakdapp.backend.business.internal.entities.BusinessAccountEntity;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -101,6 +103,50 @@ public interface BusinessAccountRepository extends JpaRepository<BusinessAccount
              order by b.name asc
             """)
     List<BusinessAccountEntity> searchVisibleByNameStartingWith(@Param("prefix") String prefix, Pageable pageable);
+
+    // ------------------------------------------------------------------
+    // Admin review queue (no visibility filter — that is the whole point)
+    // ------------------------------------------------------------------
+
+    /**
+     * One keyset page of the review queue, oldest first, optionally narrowed by verification and/or
+     * active status. The type is fetch-joined because the list shows its label and
+     * {@code open-in-view} is off.
+     *
+     * <p>{@code cast(:x as text)} on every optional filter is what lets one query serve all four
+     * filter combinations: without it Hibernate cannot infer a null parameter's type. The keyset
+     * predicate is spelled out rather than using a row comparison so it stays index-friendly.
+     */
+    @Query("""
+            select b
+              from BusinessAccountEntity b
+              join fetch b.type
+             where (cast(:verificationStatus as string) is null
+                    or b.verificationStatus = cast(:verificationStatus as string))
+               and (cast(:activeStatus as string) is null
+                    or b.activeStatus = cast(:activeStatus as string))
+               and (cast(:afterCreatedAt as timestamp) is null
+                    or b.createdAt > cast(:afterCreatedAt as timestamp)
+                    or (b.createdAt = cast(:afterCreatedAt as timestamp) and b.id > :afterId))
+             order by b.createdAt asc, b.id asc
+            """)
+    List<BusinessAccountEntity> findForReview(@Param("verificationStatus") String verificationStatus,
+                                              @Param("activeStatus") String activeStatus,
+                                              @Param("afterCreatedAt") Instant afterCreatedAt,
+                                              @Param("afterId") UUID afterId,
+                                              Limit limit);
+
+    /** One business whatever its status, type fetch-joined — the reviewer's detail read. */
+    @Query("""
+            select b
+              from BusinessAccountEntity b
+              join fetch b.type
+             where b.id = :id
+            """)
+    Optional<BusinessAccountEntity> findForReviewById(@Param("id") UUID id);
+
+    /** Backs the dashboard's pending badge; served by {@code business_accounts_pending_review_idx}. */
+    long countByVerificationStatus(String verificationStatus);
 
     /** Row shape of {@link #findVisibleNearby}; assembled into a map pin by the service. */
     interface MapPinRow {

@@ -39,6 +39,18 @@ public class BusinessAccountEntity {
     /** {@code business_account_verification_status_options.id} for a moderator-approved business. */
     public static final String VERIFIED = "verified";
 
+    /** Awaiting a reviewer's decision. */
+    public static final String PENDING = "pending";
+
+    /** Turned down, with a reason. */
+    public static final String REJECTED = "rejected";
+
+    /** Taken off the map without deleting the row. */
+    public static final String SUSPENDED = "suspended";
+
+    /** Soft-deleted. Never returned by the app, and the dashboard does not offer it as an action. */
+    public static final String DELETED = "deleted";
+
     @Id
     private UUID id;
 
@@ -87,6 +99,21 @@ public class BusinessAccountEntity {
     /** Set when a moderator approves the business; {@code null} while pending or rejected. */
     @Column(name = "verified_at")
     private Instant verifiedAt;
+
+    /** Why the last rejection happened; kept as history after a later approval. */
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
+
+    /**
+     * Staff auth user id of whoever last decided this business's verification or active status.
+     * A staff account has no {@code profiles} row, so this is a plain id with no FK and nothing
+     * joins it — it exists so a decision can be traced. See the 2026-09-12 migration.
+     */
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
 
     @Column(name = "logo_url")
     private String logoUrl;
