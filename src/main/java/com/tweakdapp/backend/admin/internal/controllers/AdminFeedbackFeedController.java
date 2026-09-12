@@ -3,6 +3,7 @@ package com.tweakdapp.backend.admin.internal.controllers;
 import com.tweakdapp.backend.admin.internal.AdminAccessService;
 import com.tweakdapp.backend.admin.internal.Capability;
 import com.tweakdapp.backend.feedbackfeed.FeedbackFeedService;
+import com.tweakdapp.backend.feedbackfeed.dto.FeedbackCategoryDto;
 import com.tweakdapp.backend.feedbackfeed.dto.FeedbackFeedPageDto;
 import com.tweakdapp.backend.feedbackfeed.dto.FeedbackFeedStatusDto;
 import com.tweakdapp.backend.feedbackfeed.dto.FeedbackMessageDto;
@@ -76,6 +77,13 @@ class AdminFeedbackFeedController {
                                              @RequestParam(defaultValue = "3") int limit) {
         access.require(UUID.fromString(jwt.getSubject()), Capability.MANAGE_ROADMAP);
         return feedbackFeedService.listTopVoted(limit);
+    }
+
+    /** The feedback categories, for the dashboard's type filter. */
+    @GetMapping("/types")
+    public List<FeedbackCategoryDto> types(@AuthenticationPrincipal Jwt jwt) {
+        access.requireMember(UUID.fromString(jwt.getSubject()));
+        return feedbackFeedService.listTypes();
     }
 
     /** The roadmap stages, for the dashboard's status picker. */

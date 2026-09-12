@@ -11,14 +11,29 @@ and managed from a separate business dashboard, mirroring how staff accounts are
 accounts.
 
 There is, as yet, **no link between `business_accounts` and `auth.users`** — business login has not
-been designed. Until it is, this module is **read-only**: it serves the map and the business profile
-screen. Adding login later means adding that link (either `business_accounts.id = auth.users.id` or
-a separate `auth_user_id` column) and only then write endpoints and owner-scoped RLS.
+been designed. Until it is, this module is **read-only for the app**: it serves the map and the
+business profile screen. Adding login later means adding that link (either
+`business_accounts.id = auth.users.id` or a separate `auth_user_id` column) and only then write
+endpoints and owner-scoped RLS.
+
+The one exception is the **admin review section** at the bottom of `BusinessService`
+(`listForReview`, `getForReview`, `countPendingVerification`, `verify`, `reject`,
+`setActiveStatus`), called by the `admin` module behind `VERIFY_BUSINESSES`. It exists because a
+business is invisible until someone verifies it and that decision had no home outside the Supabase
+SQL editor. It does not make the module writable in general: nothing creates, edits or deletes a
+business, and every app-facing read still refuses anything that is not active and verified.
+
+`reject` insists on a reason (a refusal nobody can act on is worse than none) and keeps
+`verified_at` — an approval once happened, and a later rejection does not un-happen it. `verify`
+clears any earlier `rejection_reason`, because a stale objection next to a verified business reads
+as a live one. `setActiveStatus` accepts only `active` / `suspended`: `deleted` is not offered,
+precisely because nothing in the app can undo it. Every decision stamps `reviewed_by` (a **staff
+auth id** — no `profiles` row, hence no FK) and `reviewed_at`.
 
 ## Visibility
 
 Only businesses that are both `active_status = 'active'` **and** `verification_status = 'verified'`
-are ever exposed. Pending submissions, rejected applications, and suspended or deleted businesses
+are ever exposed to the app (the admin review reads above see everything, by design). Pending submissions, rejected applications, and suspended or deleted businesses
 are invisible to the app. This is enforced twice:
 
 - in every query in this module (`findVisibleById`, `findVisibleNearby`), and

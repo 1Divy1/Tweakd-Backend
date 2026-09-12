@@ -12,6 +12,7 @@ import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.mapevents.ContestEntryDecidedEvent;
 import com.tweakdapp.backend.mapevents.ContestEntryRequestedEvent;
 import com.tweakdapp.backend.mapevents.MapEventContestsService;
+import com.tweakdapp.backend.mapevents.dto.AdminContestDto;
 import com.tweakdapp.backend.mapevents.dto.CarEventHistoryEventDto;
 import com.tweakdapp.backend.mapevents.dto.CarEventHistoryItemDto;
 import com.tweakdapp.backend.mapevents.dto.CarEventPlacementDto;
@@ -62,6 +63,7 @@ import com.tweakdapp.backend.storage.StorageBucket;
 import com.tweakdapp.backend.storage.StorageService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.data.domain.Limit;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,6 +74,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -83,6 +86,13 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
 
     /** Contests an event may run. A meet with more than this is not a meet, it is a spreadsheet. */
     static final int MAX_CONTESTS_PER_EVENT = 20;
+
+    /** Ceiling on one oversight page. The worklist is short by nature; this stops a crafted limit. */
+    private static final int MAX_REVIEW_CONTESTS = 200;
+
+    /** What a reviewer may list. {@code canceled} is reserved and never written. */
+    private static final Set<String> REVIEWABLE_CONTEST_STATUSES = Set.of(
+            ContestEntity.STATUS_OPEN, ContestEntity.STATUS_SCHEDULED, ContestEntity.STATUS_FINISHED);
 
     /** Accepted entries a ballot may hold — what keeps the DTO bounded and the vote sheet usable. */
     static final int MAX_ENTRIES_PER_CONTEST = 40;
@@ -730,6 +740,95 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
         return rank != null && rank <= ContestFinalizer.PODIUM_SIZE && entry.getVotesCount() >= 1
                 ? Integer.valueOf(rank)
                 : null;
+    }
+
+    // ==================================================================
+    // Admin oversight
+    // ==================================================================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AdminContestDto> listContestsForReview(String status, int limit) {
+        String normalised = status == null || status.isBlank()
+                ? ContestEntity.STATUS_OPEN
+                : status.strip().toLowerCase(Locale.ROOT);
+        if (!REVIEWABLE_CONTEST_STATUSES.contains(normalised)) {
+            throw new InvalidContestException(
+                    "status must be one of " + REVIEWABLE_CONTEST_STATUSES + " (got: " + status + ")");
+        }
+        int capped = Math.clamp(limit, 1, MAX_REVIEW_CONTESTS);
+
+        List<ContestEntity> contests = contestRepository.findByStatusForReview(normalised, Limit.of(capped));
+        if (contests.isEmpty()) {
+            return List.of();
+        }
+
+        // Two batched lookups for the whole page — one per referenced table — rather than a query
+        // per row: the list is bounded but this is an operator page that gets refreshed a lot.
+        Map<UUID, MapEventEntity> events = eventRepository
+                .findAllById(contests.stream().map(ContestEntity::getEventId).distinct().toList())
+                .stream()
+                .collect(Collectors.toMap(MapEventEntity::getId, Function.identity(), (a, b) -> a));
+        Map<UUID, ProfileSearchResultDto> creators =
+                resolveProfiles(contests.stream().map(ContestEntity::getCreatedBy).toList());
+
+        Instant now = Instant.now();
+        return contests.stream()
+                .map(contest -> toAdminDto(contest, events.get(contest.getEventId()), creators, now))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countOpenContests() {
+        return contestRepository.countByStatus(ContestEntity.STATUS_OPEN);
+    }
+
+    @Override
+    @Transactional
+    public AdminContestDto finishContestAsAdmin(UUID contestId, UUID staffId) {
+        ContestEntity contest = contestRepository.lockById(contestId)
+                .orElseThrow(() -> new ContestNotFoundException(contestId));
+        if (contest.isScheduled()) {
+            throw new ContestNotOpenException("Voting never opened — the organizer deletes this contest, "
+                    + "finishing it would publish an empty podium");
+        }
+
+        MapEventEntity event = eventRepository.findById(contest.getEventId()).orElse(null);
+        // Same rule as the organizer's own finish: a cancelled event pays nobody.
+        boolean awards = event == null || !MapEventEntity.STATUS_CANCELED.equals(event.getStatus());
+        finalizer.finalizeLocked(contest, event, staffId, awards, Instant.now());
+
+        entityManager.flush();
+        entityManager.clear();
+        ContestEntity fresh = contestRepository.findById(contestId)
+                .orElseThrow(() -> new ContestNotFoundException(contestId));
+        MapEventEntity freshEvent = eventRepository.findById(fresh.getEventId()).orElse(null);
+        return toAdminDto(fresh, freshEvent,
+                resolveProfiles(List.of(fresh.getCreatedBy())), Instant.now());
+    }
+
+    private AdminContestDto toAdminDto(ContestEntity contest,
+                                       MapEventEntity event,
+                                       Map<UUID, ProfileSearchResultDto> creators,
+                                       Instant now) {
+        return new AdminContestDto(
+                contest.getId(),
+                contest.getEventId(),
+                event == null ? null : event.getTitle(),
+                event == null ? null : event.getStatus(),
+                event == null ? null : event.getEndsAt(),
+                contest.getTitle(),
+                contest.getCategory().getId(),
+                contest.getCategory().getLabel(),
+                contest.getStatus(),
+                contest.getOpensAt(),
+                contest.getClosesAt(),
+                contest.getClosesAt() != null && contest.getClosesAt().isBefore(now),
+                contest.getEntriesCount(),
+                contest.getVotesCount(),
+                creators.get(contest.getCreatedBy()),
+                contest.getCreatedAt());
     }
 
     // ==================================================================

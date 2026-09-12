@@ -36,10 +36,19 @@ public record OverviewDto(
     }
 
     /**
-     * @param pendingCases open + escalated moderation cases
-     * @param openTickets  support tickets waiting on staff
-     * @param newFeedback  feedback still in {@code submitted}
+     * @param pendingCases       open + escalated moderation cases
+     * @param openTickets        support tickets waiting on staff
+     * @param newFeedback        feedback still in {@code submitted}
+     * @param pendingEvents      map-event submissions waiting for review
+     * @param newRoadmapRequests feedback-feed messages still in {@code sent} (not removed)
+     * @param pendingBusinesses  business accounts waiting for verification
      */
-    public record BadgeCountsDto(long pendingCases, long openTickets, long newFeedback) {
+    public record BadgeCountsDto(
+            long pendingCases,
+            long openTickets,
+            long newFeedback,
+            long pendingEvents,
+            long newRoadmapRequests,
+            long pendingBusinesses) {
     }
 }

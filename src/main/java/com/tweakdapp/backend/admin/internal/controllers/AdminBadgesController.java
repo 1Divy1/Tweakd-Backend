@@ -8,6 +8,8 @@ import com.tweakdapp.backend.badges.dto.BadgeDto;
 import com.tweakdapp.backend.badges.dto.BadgeGrantDto;
 import com.tweakdapp.backend.badges.dto.BadgeUpsertRequest;
 import com.tweakdapp.backend.badges.dto.UserBadgeDto;
+import com.tweakdapp.backend.storage.StorageBucket;
+import com.tweakdapp.backend.storage.StorageService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -45,10 +47,26 @@ class AdminBadgesController {
 
     private final AdminAccessService access;
     private final BadgeService badgeService;
+    private final StorageService storageService;
 
-    AdminBadgesController(AdminAccessService access, BadgeService badgeService) {
+    AdminBadgesController(AdminAccessService access, BadgeService badgeService, StorageService storageService) {
         this.access = access;
         this.badgeService = badgeService;
+        this.storageService = storageService;
+    }
+
+    /**
+     * The public URL prefix badge artwork is served from, with no trailing slash.
+     *
+     * <p>Badge SVGs are uploaded to R2 out of band — nothing presigns into the shared assets
+     * bucket — so the create/edit form takes an object <em>key</em>, and this is what lets it show
+     * the image the key resolves to before the badge is saved. One call per page load; the
+     * dashboard concatenates {@code baseUrl + "/" + key} itself.
+     */
+    @GetMapping("/artwork-base-url")
+    public Map<String, String> artworkBaseUrl(@AuthenticationPrincipal Jwt jwt) {
+        access.require(UUID.fromString(jwt.getSubject()), Capability.MANAGE_BADGES);
+        return Map.of("baseUrl", storageService.publicBaseUrl(StorageBucket.ASSETS));
     }
 
     // ---- the catalogue ------------------------------------------------------

@@ -86,10 +86,13 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
   at the STOMP CONNECT frame (`shared/realtime/JwtChannelInterceptor`, same JWT validation
   as REST).
 - `/api/v1/admin/**` requires `ROLE_ADMIN` (Supabase `app_metadata.role = 'admin'`); the `admin`
-  module then applies fine-grained team-role capability checks (`admin_team_members`). Approving
-  user-submitted map events is gated on `APPROVE_EVENTS`, and managing the community feedback feed
-  (roadmap status, official response, removal) on `MANAGE_ROADMAP` — both held by `owner` and
-  `senior_admin` only.
+  module then applies fine-grained team-role capability checks (`admin_team_members`). Five
+  capabilities are `owner` / `senior_admin` only, because each publishes something or pays
+  something out rather than moderating it: `APPROVE_EVENTS` (user-submitted map events),
+  `MANAGE_ROADMAP` (community feedback feed — status, official response, removal), `MANAGE_BADGES`,
+  `VERIFY_BUSINESSES` (a business is invisible to the app until verified) and `MANAGE_CONTESTS`
+  (force-finishing an abandoned contest). `TRANSFER_OWNERSHIP` is the only one `senior_admin` lacks;
+  a partial unique index (`admin_team_members_single_owner_idx`) makes two owners unrepresentable.
 - **Staff accounts are separate from app accounts**: dashboard staff are profile-less Supabase auth
   users (the `handle_new_user` trigger skips them), invited by email through the admin module's
   `SupabaseAuthAdminClient` (service-role key). Their identity lives on `admin_team_members`

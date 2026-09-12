@@ -124,6 +124,11 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
+    public String publicBaseUrl(StorageBucket bucket) {
+        return config.target(bucket).getPublicUrl();
+    }
+
+    @Override
     public void deleteByKeys(StorageBucket bucket, List<String> keys) {
         if (keys == null || keys.isEmpty()) return;
 
