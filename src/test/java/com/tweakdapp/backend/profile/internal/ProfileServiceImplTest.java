@@ -53,6 +53,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
 
 /**
  * Business rules of {@link ProfileServiceImpl} with mocked repositories/collaborators: own-profile
@@ -78,6 +79,7 @@ class ProfileServiceImplTest {
     private StorageService storageService;
     private BadgeService badgeService;
     private BanCache banCache;
+    private BlockDirectory blockDirectory;
 
     private ProfileServiceImpl service;
 
@@ -91,6 +93,7 @@ class ProfileServiceImplTest {
         reportService = mock(ReportService.class);
         storageService = mock(StorageService.class);
         banCache = mock(BanCache.class);
+        blockDirectory = mock(BlockDirectory.class);
         // Every profile DTO carries its owner's badges; these fixtures have none.
         badgeService = mock(BadgeService.class);
         when(badgeService.listUserBadges(any())).thenReturn(List.of());
@@ -99,7 +102,7 @@ class ProfileServiceImplTest {
         ProfileDtoMapper mapper = new ProfileDtoMapper(storageService);
         service = new ProfileServiceImpl(profileRepository, countryRepository, cityRepository,
                 notificationPreferencesRepository, languageOptionRepository,
-                reportService, storageService, mapper, badgeService, banCache);
+                reportService, storageService, mapper, badgeService, banCache, blockDirectory);
     }
 
     // ---- fixture helpers ----------------------------------------------------
@@ -292,7 +295,7 @@ class ProfileServiceImplTest {
         p.setUsername("carsguy");
         when(profileRepository.findByUsername("carsguy")).thenReturn(Optional.of(p));
 
-        PublicProfileDto dto = service.getPublicProfileByUsername("carsguy");
+        PublicProfileDto dto = service.getPublicProfileByUsername(PEER, "carsguy");
 
         assertThat(dto.username()).isEqualTo("carsguy");
         assertThat(dto.id()).isEqualTo(USER);
@@ -303,26 +306,27 @@ class ProfileServiceImplTest {
         when(profileRepository.findByUsername("ghost")).thenReturn(Optional.empty());
 
         assertThatExceptionOfType(ProfileNotFoundException.class)
-                .isThrownBy(() -> service.getPublicProfileByUsername("ghost"));
+                .isThrownBy(() -> service.getPublicProfileByUsername(PEER, "ghost"));
     }
 
     // ---- searchByUsername ---------------------------------------------------
 
     @Test
     void searchByUsernameReturnsEmptyForBlankPrefixWithoutQuerying() {
-        assertThat(service.searchByUsername("   ")).isEmpty();
-        assertThat(service.searchByUsername(null)).isEmpty();
-        verify(profileRepository, never()).findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc(any());
+        assertThat(service.searchByUsername(PEER, "   ")).isEmpty();
+        assertThat(service.searchByUsername(PEER, null)).isEmpty();
+        verify(profileRepository, never()).findTop20ByUsernameStartingWithIgnoreCaseAndIdNotInOrderByUsernameAsc(any(), any());
     }
 
     @Test
     void searchByUsernameMapsResultsToSearchDtos() {
         ProfileEntity p = profileWithCity();
         p.setUsername("carla");
-        when(profileRepository.findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc("car"))
+        when(profileRepository.findTop20ByUsernameStartingWithIgnoreCaseAndIdNotInOrderByUsernameAsc(
+                "car", List.of(BlockDirectory.NOBODY)))
                 .thenReturn(List.of(p));
 
-        List<ProfileSearchResultDto> results = service.searchByUsername("car");
+        List<ProfileSearchResultDto> results = service.searchByUsername(PEER, "car");
 
         assertThat(results).singleElement()
                 .satisfies(r -> assertThat(r.username()).isEqualTo("carla"));

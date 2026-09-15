@@ -94,6 +94,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
 
 @Service
 public class ForumsServiceImpl implements ForumsService {
@@ -241,6 +242,7 @@ public class ForumsServiceImpl implements ForumsService {
         int limit = clampSize(size);
         ForumSort sort = ForumSort.from(sortRaw);
         Pageable pageable = PageRequest.of(0, limit + 1);
+        Collection<UUID> hiddenIds = hiddenIdsFor(viewerId);
 
         List<ForumThreadEntity> rows = switch (sort) {
             case HOT -> {
@@ -249,6 +251,7 @@ public class ForumsServiceImpl implements ForumsService {
                         from == null,
                         from == null ? null : from.rankingScore(),
                         from == null ? null : from.id(),
+                        hiddenIds,
                         pageable);
             }
             case NEW -> {
@@ -257,6 +260,7 @@ public class ForumsServiceImpl implements ForumsService {
                         from == null,
                         from == null ? null : from.timestamp(),
                         from == null ? null : from.id(),
+                        hiddenIds,
                         pageable);
             }
             case ACTIVE -> {
@@ -265,6 +269,7 @@ public class ForumsServiceImpl implements ForumsService {
                         from == null,
                         from == null ? null : from.timestamp(),
                         from == null ? null : from.id(),
+                        hiddenIds,
                         pageable);
             }
         };
@@ -285,7 +290,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public ThreadDetailDto getThread(String currentUserId, UUID threadId) {
         UUID viewerId = UUID.fromString(currentUserId);
-        ForumThreadEntity thread = loadThread(threadId);
+        ForumThreadEntity thread = loadVisibleThread(threadId, viewerId);
 
         // Opening a thread marks it "seen" for this viewer (drives shortcut unread badges).
         threadReadRepository.insertIgnoringConflict(viewerId, threadId);
@@ -306,10 +311,11 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional(readOnly = true)
     public CursorPage<ReplyDto> getReplies(String currentUserId, UUID threadId, String sortRaw, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
-        ForumThreadEntity thread = loadThread(threadId); // 404 if the thread is missing
+        ForumThreadEntity thread = loadVisibleThread(threadId, viewerId); // 404 if missing or hidden by a block
         UUID threadAuthorId = thread.getUserId();
 
         ReplySort sort = ReplySort.from(sortRaw);
+        Collection<UUID> hiddenIds = hiddenIdsFor(viewerId);
         int limit = clampSize(size);
         TimeCursor from = TimeCursor.decode(cursor);
         Pageable pageable = PageRequest.of(0, limit + 1);
@@ -318,9 +324,9 @@ public class ForumsServiceImpl implements ForumsService {
         // on demand via getPostReplies.
         List<ForumThreadReplyEntity> roots = switch (sort) {
             case OLD -> postRepository.findRootReplyPage(threadId, from == null,
-                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), hiddenIds, pageable);
             case NEW -> postRepository.findRootReplyPageDesc(threadId, from == null,
-                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), hiddenIds, pageable);
         };
 
         return toReplyPage(roots, limit, viewerId, threadAuthorId);
@@ -331,19 +337,21 @@ public class ForumsServiceImpl implements ForumsService {
     public CursorPage<ReplyDto> getPostReplies(String currentUserId, UUID postId, String sortRaw, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
         ForumThreadReplyEntity parent = postRepository.findById(postId)
+                .filter(reply -> !profileService.isHiddenFrom(viewerId, reply.getUserId()))
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
-        UUID threadAuthorId = loadThread(parent.getThreadId()).getUserId();
+        UUID threadAuthorId = loadVisibleThread(parent.getThreadId(), viewerId).getUserId();
 
         ReplySort sort = ReplySort.from(sortRaw);
+        Collection<UUID> hiddenIds = hiddenIdsFor(viewerId);
         int limit = clampSize(size);
         TimeCursor from = TimeCursor.decode(cursor);
         Pageable pageable = PageRequest.of(0, limit + 1);
 
         List<ForumThreadReplyEntity> children = switch (sort) {
             case OLD -> postRepository.findChildReplyPage(postId, from == null,
-                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), hiddenIds, pageable);
             case NEW -> postRepository.findChildReplyPageDesc(postId, from == null,
-                    from == null ? null : from.timestamp(), from == null ? null : from.id(), pageable);
+                    from == null ? null : from.timestamp(), from == null ? null : from.id(), hiddenIds, pageable);
         };
 
         return toReplyPage(children, limit, viewerId, threadAuthorId);
@@ -393,9 +401,11 @@ public class ForumsServiceImpl implements ForumsService {
         }
         Map<UUID, ForumThreadEntity> byId = threadRepository.findAllById(threadIds).stream()
                 .collect(Collectors.toMap(ForumThreadEntity::getId, Function.identity()));
+        Set<UUID> hidden = profileService.findHiddenProfileIds(viewerId);
         List<ForumThreadEntity> ordered = threadIds.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
+                .filter(t -> !hidden.contains(t.getUserId()))
                 .toList();
         return toThreadCards(ordered, viewerId);
     }
@@ -408,9 +418,11 @@ public class ForumsServiceImpl implements ForumsService {
         }
         Map<UUID, ForumThreadReplyEntity> byId = postRepository.findAllById(replyIds).stream()
                 .collect(Collectors.toMap(ForumThreadReplyEntity::getId, Function.identity()));
+        Set<UUID> hidden = profileService.findHiddenProfileIds(viewerId);
         List<ForumThreadReplyEntity> ordered = replyIds.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
+                .filter(r -> !hidden.contains(r.getUserId()))
                 .toList();
         if (ordered.isEmpty()) {
             return List.of();
@@ -487,7 +499,7 @@ public class ForumsServiceImpl implements ForumsService {
 
         List<UUID> personIds = distinctIds(request.taggedPeople());
         List<UUID> carIds = distinctIds(request.taggedCars());
-        validateTaggedPeopleExist(personIds);
+        validateTaggedPeopleExist(userId, personIds);
         Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
 
         UUID threadId = UUID.randomUUID();
@@ -556,7 +568,7 @@ public class ForumsServiceImpl implements ForumsService {
         List<UUID> personIds = request.taggedPeople() != null ? distinctIds(request.taggedPeople()) : currentPersonIds;
         List<UUID> carIds = request.taggedCars() != null ? distinctIds(request.taggedCars()) : currentCarIds;
         if (request.taggedPeople() != null) {
-            validateTaggedPeopleExist(personIds);
+            validateTaggedPeopleExist(userId, personIds);
         }
         Map<UUID, UUID> ownerByCar = validateTaggedCars(thread.getUserId(), personIds, carIds);
 
@@ -594,7 +606,7 @@ public class ForumsServiceImpl implements ForumsService {
     public ReplyDto addReply(String currentUserId, UUID threadId, CreateReplyRequest request) {
         UUID userId = UUID.fromString(currentUserId);
 
-        ForumThreadEntity thread = loadThread(threadId);
+        ForumThreadEntity thread = loadVisibleThread(threadId, userId);
         if (thread.isLocked()) {
             throw new ThreadLockedException();
         }
@@ -604,7 +616,7 @@ public class ForumsServiceImpl implements ForumsService {
         if (parentId != null) {
             ForumThreadReplyEntity parent = postRepository.findById(parentId)
                     .orElseThrow(() -> new ForumPostNotFoundException(parentId));
-            if (!parent.getThreadId().equals(threadId)) {
+            if (!parent.getThreadId().equals(threadId) || profileService.isHiddenFrom(userId, parent.getUserId())) {
                 throw new ForumPostNotFoundException(parentId);
             }
             if (parent.isDeleted()) {
@@ -615,7 +627,7 @@ public class ForumsServiceImpl implements ForumsService {
 
         List<UUID> personIds = distinctIds(request.taggedPeople());
         List<UUID> carIds = distinctIds(request.taggedCars());
-        validateTaggedPeopleExist(personIds);
+        validateTaggedPeopleExist(userId, personIds);
         Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
 
         UUID postId = UUID.randomUUID();
@@ -687,7 +699,7 @@ public class ForumsServiceImpl implements ForumsService {
         List<UUID> personIds = request.taggedPeople() != null ? distinctIds(request.taggedPeople()) : currentPersonIds;
         List<UUID> carIds = request.taggedCars() != null ? distinctIds(request.taggedCars()) : currentCarIds;
         if (request.taggedPeople() != null) {
-            validateTaggedPeopleExist(personIds);
+            validateTaggedPeopleExist(userId, personIds);
         }
         Map<UUID, UUID> ownerByCar = validateTaggedCars(post.getUserId(), personIds, carIds);
 
@@ -722,11 +734,12 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public void likeThread(String currentUserId, UUID threadId) {
         UUID userId = UUID.fromString(currentUserId);
-        ForumThreadEntity thread = loadThread(threadId);
+        ForumThreadEntity thread = loadVisibleThread(threadId, userId);
         // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
         int inserted = threadLikeRepository.insertIgnoringConflict(threadId, userId);
-        if (inserted == 1) {
-            // Only a real (first) like notifies; skipped if the thread is anonymized.
+        // Notify once per (thread, liker), ever: the ledger outlives an unlike, so like → unlike → like
+        // stays silent. Skipped if the thread is anonymized.
+        if (inserted == 1 && threadLikeRepository.markLikeNotified(threadId, userId) == 1) {
             UUID recipient = thread.isDeleted() ? null : thread.getUserId();
             publishSocialEvent(recipient, userId, new ForumThreadLikedEvent(threadId, recipient, userId));
         }
@@ -744,14 +757,16 @@ public class ForumsServiceImpl implements ForumsService {
     public void likePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
         ForumThreadReplyEntity post = postRepository.findById(postId)
+                .filter(reply -> !profileService.isHiddenFrom(userId, reply.getUserId()))
                 .orElseThrow(() -> new ForumPostNotFoundException(postId));
         if (post.isDeleted()) {
             throw new ForumPostDeletedException(postId);
         }
         // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
         int inserted = postLikeRepository.insertIgnoringConflict(postId, userId);
-        if (inserted == 1) {
-            // Only a real (first) like notifies. A likeable reply is never deleted (checked above).
+        // Notify once per (reply, liker), ever: the ledger outlives an unlike, so like → unlike → like
+        // stays silent. A likeable reply is never deleted (checked above).
+        if (inserted == 1 && postLikeRepository.markLikeNotified(postId, userId) == 1) {
             publishSocialEvent(post.getUserId(), userId,
                     new ForumReplyLikedEvent(postId, post.getThreadId(), post.getUserId(), userId));
         }
@@ -772,7 +787,7 @@ public class ForumsServiceImpl implements ForumsService {
     @Transactional
     public void saveThread(String currentUserId, UUID threadId) {
         UUID userId = UUID.fromString(currentUserId);
-        loadThread(threadId); // 404 if the thread is missing
+        loadVisibleThread(threadId, userId); // 404 if missing or hidden by a block
         // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
         threadSaveRepository.insertIgnoringConflict(threadId, userId);
     }
@@ -796,6 +811,7 @@ public class ForumsServiceImpl implements ForumsService {
                 from == null,
                 from == null ? null : from.timestamp(),
                 from == null ? null : from.id(),
+                hiddenIdsFor(viewerId),
                 PageRequest.of(0, limit + 1));
 
         boolean hasMore = saves.size() > limit;
@@ -1321,6 +1337,23 @@ public class ForumsServiceImpl implements ForumsService {
                 .orElseThrow(() -> new ThreadNotFoundException(threadId));
     }
 
+    /**
+     * {@link #loadThread} for a viewer: a thread whose author a block separates from the viewer, in
+     * either direction, 404s like a missing one.
+     */
+    private ForumThreadEntity loadVisibleThread(UUID threadId, UUID viewerId) {
+        ForumThreadEntity thread = loadThread(threadId);
+        if (profileService.isHiddenFrom(viewerId, thread.getUserId())) {
+            throw new ThreadNotFoundException(threadId);
+        }
+        return thread;
+    }
+
+    /** The viewer's block-hidden account ids, shaped for a {@code not in :hiddenIds} query. */
+    private Collection<UUID> hiddenIdsFor(UUID viewerId) {
+        return BlockDirectory.asQueryParam(profileService.findHiddenProfileIds(viewerId));
+    }
+
     private void validateTopicsActive(List<String> topicIds) {
         if (topicIds.isEmpty()) {
             return;
@@ -1397,11 +1430,14 @@ public class ForumsServiceImpl implements ForumsService {
                 .toList();
     }
 
-    private void validateTaggedPeopleExist(List<UUID> personIds) {
+    private void validateTaggedPeopleExist(UUID authorId, List<UUID> personIds) {
         if (personIds.isEmpty()) {
             return;
         }
-        if (profileService.findByIds(personIds).size() != personIds.size()) {
+        // Someone a block separates from the author reads as a missing profile: they cannot be tagged.
+        Set<UUID> hidden = profileService.findHiddenProfileIds(authorId);
+        if (profileService.findByIds(personIds).size() != personIds.size()
+                || personIds.stream().anyMatch(hidden::contains)) {
             throw new InvalidReferenceException("One or more tagged people do not exist");
         }
     }

@@ -46,6 +46,9 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public void push(UUID userId, String type, String title, String body, Map<String, Object> payload) {
+        if (isFromBlockedActor(userId, payload)) {
+            return;
+        }
         NotificationEntity saved = notificationRepository.save(buildNotification(userId, type, title, body, payload));
         publishForPush(List.of(saved.getId()));
     }
@@ -54,6 +57,7 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public void pushToAll(Collection<UUID> userIds, String type, String title, String body, Map<String, Object> payload) {
         List<NotificationEntity> notifications = new LinkedHashSet<>(userIds).stream()
+                .filter(userId -> !isFromBlockedActor(userId, payload))
                 .map(userId -> buildNotification(userId, type, title, body, payload))
                 .toList();
         List<NotificationEntity> saved = notificationRepository.saveAll(notifications);
@@ -112,6 +116,23 @@ public class NotificationServiceImpl implements NotificationService {
     private void publishForPush(List<UUID> notificationIds) {
         if (!notificationIds.isEmpty()) {
             eventPublisher.publishEvent(new NotificationsCreatedEvent(notificationIds));
+        }
+    }
+
+    /**
+     * Whether the notification's actor ({@code actor_id} in the payload) is separated from the
+     * recipient by a block. Those are dropped, whichever module produced them; rows without an actor
+     * (moderation, feedback, support) are never affected.
+     */
+    private boolean isFromBlockedActor(UUID recipientId, Map<String, Object> payload) {
+        Object actor = payload == null ? null : payload.get("actor_id");
+        if (actor == null) {
+            return false;
+        }
+        try {
+            return profileService.isHiddenFrom(recipientId, UUID.fromString(actor.toString()));
+        } catch (IllegalArgumentException malformed) {
+            return false;
         }
     }
 

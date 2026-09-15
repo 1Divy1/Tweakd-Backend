@@ -18,6 +18,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -102,9 +103,24 @@ class DmsRepositoryIT extends AbstractPostgresIT {
         insertState(conv3, U, 0, T1); // hidden
         insertState(conv4, U, 0, null);
 
-        List<DmConversationEntity> page = conversationRepository.findFirstPage(U, PageRequest.of(0, 10));
+        List<DmConversationEntity> page = conversationRepository.findFirstPage(
+                U, List.of(BlockDirectory.NOBODY), PageRequest.of(0, 10));
 
         assertThat(page).extracting(DmConversationEntity::getId).containsExactly(conv1, conv2);
+    }
+
+    @Test
+    void findFirstPageLeavesOutConversationsWithAPeerHiddenByABlock() {
+        UUID conv1 = UUID.fromString("00000000-0000-0000-0000-0000000000c1");
+        UUID conv2 = UUID.fromString("00000000-0000-0000-0000-0000000000c2");
+        insertConversation(conv1, U, P1, T3);
+        insertConversation(conv2, U, P2, T2);
+        insertState(conv1, U, 0, null);
+        insertState(conv2, U, 0, null);
+
+        List<DmConversationEntity> page = conversationRepository.findFirstPage(U, List.of(P1), PageRequest.of(0, 10));
+
+        assertThat(page).extracting(DmConversationEntity::getId).containsExactly(conv2);
     }
 
     @Test
@@ -116,7 +132,7 @@ class DmsRepositoryIT extends AbstractPostgresIT {
         insertState(conv1, U, 0, null);
         insertState(conv2, U, 0, null);
 
-        List<DmConversationEntity> page = conversationRepository.findPageAfter(U, T3, conv1, PageRequest.of(0, 10));
+        List<DmConversationEntity> page = conversationRepository.findPageAfter(U, T3, conv1, List.of(BlockDirectory.NOBODY), PageRequest.of(0, 10));
 
         assertThat(page).extracting(DmConversationEntity::getId).containsExactly(conv2);
     }

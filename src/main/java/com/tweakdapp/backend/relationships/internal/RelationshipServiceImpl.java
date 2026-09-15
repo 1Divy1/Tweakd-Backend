@@ -33,10 +33,17 @@ class RelationshipServiceImpl implements RelationshipService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findFollowingIds(UUID userId) {
+        return relationshipRepository.findAcceptedFollowingIds(userId);
+    }
+
+    @Override
     @Transactional
     public FollowStatusDto follow(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = getUserIdByUsername(targetUsername);
+        // A block in either direction reads as an unknown account — no hint that it exists.
+        UUID followingId = getVisibleUserIdByUsername(followerId, targetUsername);
 
         if (followerId.equals(followingId)) {
             throw new CannotFollowSelfException();
@@ -74,7 +81,7 @@ class RelationshipServiceImpl implements RelationshipService {
     @Transactional(readOnly = true)
     public FollowStatusDto getFollowStatus(String currentUserId, String targetUsername) {
         UUID followerId = UUID.fromString(currentUserId);
-        UUID followingId = getUserIdByUsername(targetUsername);
+        UUID followingId = getVisibleUserIdByUsername(followerId, targetUsername);
 
         RelationshipId id = new RelationshipId(followerId, followingId);
         return relationshipRepository
@@ -87,7 +94,7 @@ class RelationshipServiceImpl implements RelationshipService {
     @Transactional(readOnly = true)
     public List<FollowProfileSearchResult> getFollowers(String currentUserId, String targetUsername) {
         UUID viewerUserId = UUID.fromString(currentUserId);
-        UUID targetUserId = getUserIdByUsername(targetUsername);
+        UUID targetUserId = getVisibleUserIdByUsername(viewerUserId, targetUsername);
 
         List<UUID> followerIds = relationshipRepository.findAcceptedFollowerIds(targetUserId);
         return convertToFollowProfileSearchResult(viewerUserId, followerIds);
@@ -97,7 +104,7 @@ class RelationshipServiceImpl implements RelationshipService {
     @Transactional(readOnly = true)
     public List<FollowProfileSearchResult> getFollowing(String currentUserId, String targetUsername) {
         UUID viewerUserId = UUID.fromString(currentUserId);
-        UUID targetUserId = getUserIdByUsername(targetUsername);
+        UUID targetUserId = getVisibleUserIdByUsername(viewerUserId, targetUsername);
 
         List<UUID> followingIds = relationshipRepository.findAcceptedFollowingIds(targetUserId);
         return convertToFollowProfileSearchResult(viewerUserId, followingIds);
@@ -117,6 +124,12 @@ class RelationshipServiceImpl implements RelationshipService {
     // Helpers
     // ---------------------------------------------------------------------
 
+    private UUID getVisibleUserIdByUsername(UUID viewerId, String username) {
+        return profileService
+                .findVisibleIdByUsername(viewerId, username)
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
+    }
+
     private UUID getUserIdByUsername(String username) {
         return profileService
                 .findIdByUsername(username)
@@ -124,6 +137,11 @@ class RelationshipServiceImpl implements RelationshipService {
     }
 
     private List<FollowProfileSearchResult> convertToFollowProfileSearchResult(UUID viewerId, List<UUID> ids) {
+        // Accounts a block separates from the viewer are left out of anyone's lists.
+        Set<UUID> hidden = profileService.findHiddenProfileIds(viewerId);
+        if (!hidden.isEmpty()) {
+            ids = ids.stream().filter(id -> !hidden.contains(id)).toList();
+        }
         if (ids.isEmpty()) {
             return List.of();
         }

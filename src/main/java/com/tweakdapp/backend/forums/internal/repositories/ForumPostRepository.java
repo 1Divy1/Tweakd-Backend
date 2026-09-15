@@ -28,6 +28,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
               from ForumThreadReplyEntity p
              where p.threadId = :threadId
                and p.parentPostId is null
+               and p.userId not in :hiddenIds
                and (:firstPage = true
                     or p.createdAt > :cursorTs
                     or (p.createdAt = :cursorTs and p.id > :cursorId))
@@ -37,6 +38,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
                                                    @Param("firstPage") boolean firstPage,
                                                    @Param("cursorTs") Instant cursorTs,
                                                    @Param("cursorId") UUID cursorId,
+                                                   @Param("hiddenIds") Collection<UUID> hiddenIds,
                                                    Pageable pageable);
 
     /**
@@ -49,6 +51,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
               from ForumThreadReplyEntity p
              where p.threadId = :threadId
                and p.parentPostId is null
+               and p.userId not in :hiddenIds
                and (:firstPage = true
                     or p.createdAt < :cursorTs
                     or (p.createdAt = :cursorTs and p.id < :cursorId))
@@ -58,6 +61,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
                                                        @Param("firstPage") boolean firstPage,
                                                        @Param("cursorTs") Instant cursorTs,
                                                        @Param("cursorId") UUID cursorId,
+                                                       @Param("hiddenIds") Collection<UUID> hiddenIds,
                                                        Pageable pageable);
 
     /**
@@ -69,6 +73,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
             select p
               from ForumThreadReplyEntity p
              where p.parentPostId = :parentId
+               and p.userId not in :hiddenIds
                and (:firstPage = true
                     or p.createdAt > :cursorTs
                     or (p.createdAt = :cursorTs and p.id > :cursorId))
@@ -78,6 +83,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
                                                     @Param("firstPage") boolean firstPage,
                                                     @Param("cursorTs") Instant cursorTs,
                                                     @Param("cursorId") UUID cursorId,
+                                                    @Param("hiddenIds") Collection<UUID> hiddenIds,
                                                     Pageable pageable);
 
     /**
@@ -87,6 +93,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
             select p
               from ForumThreadReplyEntity p
              where p.parentPostId = :parentId
+               and p.userId not in :hiddenIds
                and (:firstPage = true
                     or p.createdAt < :cursorTs
                     or (p.createdAt = :cursorTs and p.id < :cursorId))
@@ -96,6 +103,7 @@ public interface ForumPostRepository extends JpaRepository<ForumThreadReplyEntit
                                                         @Param("firstPage") boolean firstPage,
                                                         @Param("cursorTs") Instant cursorTs,
                                                         @Param("cursorId") UUID cursorId,
+                                                        @Param("hiddenIds") Collection<UUID> hiddenIds,
                                                         Pageable pageable);
 
     /** Whether the given reply still has any direct child — used to collapse deleted leaf chains. */

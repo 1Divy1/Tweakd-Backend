@@ -16,6 +16,7 @@ All accounts are public, so a follow takes effect immediately — there is no re
 | `getFollowStatus(currentUserId, targetUsername)` | Current relationship from caller toward target |
 | `getFollowers(currentUserId, targetUsername)` | Followers of target |
 | `getFollowing(currentUserId, targetUsername)` | Users that target follows |
+| `findFollowingIds(userId)` | Ids the user follows, most recent follow first — for the feed's reposts, so no other module reads `follows` |
 | `removeFollower(currentUserId, followerUsername)` | Remove someone from the caller's followers |
 
 ### DTOs / records
@@ -72,3 +73,34 @@ The composite key is modelled as `@EmbeddedId RelationshipId`.
   hydration (`findByIds`).
 - **`profile.ProfileSearchResultDto`** — used in followers / following list responses.
 - **`profile.exception.ProfileNotFoundException`** — thrown when a target username cannot be resolved.
+
+## Blocking
+
+A block is **two-way in effect**: once either account blocks the other, neither sees the other's
+profile, content, or search result, and they cannot message each other. The blocked account is
+never notified. Owns `blocked_accounts (blocker_id, blocked_id, created_at)`.
+
+### REST endpoints — base path `/api/v1/blocks`
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Accounts the caller blocked, newest first (`BlockedAccountDto`: id, name, username, avatar_url, blocked_at) |
+| POST | `/{username}` | Block (204). Idempotent. 400 `CannotBlockSelfException`, 404 unknown username |
+| DELETE | `/{username}` | Unblock (204). Idempotent |
+
+`BlockService.block` also deletes follows between the pair **in both directions** (not restored on
+unblock) and publishes `shared.blocking.UserBlockedEvent`, on which `notification` deletes the
+pair's notifications and `dms` zeroes their conversation's unread counts.
+
+### Enforcement
+
+`BlockDirectoryImpl` implements `shared.blocking.BlockDirectory` (two-way hidden-id lookups). Content
+modules read it through `ProfileService.findVisibleIdByUsername` / `findHiddenProfileIds` /
+`isHiddenFrom`, so a block reads exactly like a missing account (404) and hidden authors are
+filtered inside the paged queries (`not in :hiddenIds`, never-empty via `BlockDirectory.asQueryParam`).
+Covered: profile + badges + search, follow status/lists, garage + car detail, tags, reputation,
+posts (feed, post, comments, likers, saved, reposts, engagement, tagging), forums, DM list/open/typing/
+presence, event attendees and line-up, organizer search, notifications. Contest entries and
+leaderboards are deliberately **not** filtered (owner decision: rankings stay the same for everyone).
+DM sending and Realtime topic auth are enforced in Supabase (`dm_send_message`, `dm_topic_is_peer`).
+

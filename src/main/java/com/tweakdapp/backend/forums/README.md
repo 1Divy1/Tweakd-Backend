@@ -105,7 +105,10 @@ The backend connects with a `BYPASSRLS` service role, so **all** authorization l
   liking a **soft-deleted reply** → rejected (`ForumPostDeletedException`, 409).
 - **Likes** are idempotent *and race-safe*: inserts go through a native
   `INSERT … ON CONFLICT DO NOTHING`, so concurrent double-taps can't blow up on the composite PK;
-  re-unlike is a no-op delete.
+  re-unlike is a no-op delete. The author is notified **once per (content, liker), ever**: unlike
+  deletes the like row, so the `forum_thread_like_notifications` / `forum_post_like_notifications`
+  ledgers (`markLikeNotified`, which outlive the like) decide — like → unlike → like stays silent.
+  Migration `20260915140000_like_notify_once.sql`, tested by `ForumLikeNotificationLedgerIT`.
 - **Shortcuts** are always constrained to `user_id = current user`; create enforces the
   "at least one of brand/model/topic" CHECK before insert; update rejects a blank name.
 

@@ -17,7 +17,7 @@ the Supabase trigger `compute_post_ranking_score`. The formula is a time-decayed
 
 ```
 ranking_score = log10(max(weighted_engagement, 1)) + epoch(created_at) / 45000
-weighted_engagement = 1·likes + 4·comments + 6·plain_shares + 10·quote_shares + 3·saves
+weighted_engagement = 1·likes + 4·comments + 6·reposts + 3·saves
 ```
 
 The time term means a brand-new post starts above older zero-engagement posts, and engagement then
@@ -31,6 +31,14 @@ across pages — a post may occasionally repeat or be skipped as scores shift be
 accepted trade-off for a ranked feed.
 
 There is no privacy gate: every account in the app is public.
+
+### Reposts reach followers through this feed
+
+There is no separate "following" feed. Instead the feed asks `RelationshipService.findFollowingIds` who
+the caller follows and hands those ids to `PostsService.getRankedPosts`: a post any of them reposted
+ranks as if it had been published at the most recent such repost (keeping its engagement), and carries
+`reposted_by` — up to two of those followees plus a total — so the app can say why it is there. Reposts by
+people the caller doesn't follow only count as engagement. Details: the posts README's *Reposts* section.
 
 ## Badge celebrations ride the first page
 
@@ -51,7 +59,8 @@ The response record `GlobalFeedDto` keeps `items` and `next_cursor` byte-for-byt
 
 | Method | REST | Notes |
 |--------|------|-------|
-| `getGlobalFeed(currentUserId, cursor, size)` | `GET /api/v1/feed/global?cursor=&size=` | Keyset page (`GlobalFeedDto`: `items` + `next_cursor`, as `PostPageDto` had them), most viral first. `cursor` omitted = first page and includes `pending_badge_celebrations`; echo `next_cursor` back to page on. |
+| `getGlobalFeed(currentUserId, cursor, size)` | `GET /api/v1/feed/global?cursor=&size=` | Keyset page (`GlobalFeedDto`: `items` + `next_cursor`, as `PostPageDto` had them), most viral first, followee reposts boosted. `cursor` omitted = first page and includes `pending_badge_celebrations`; echo `next_cursor` back to page on. |
 
-Depends on the `posts` module (ranked post data + `PostDto` assembly) and the `badges` module
-(pending unlock celebrations for the first page).
+Depends on the `posts` module (ranked post data + `PostDto` assembly), the `badges` module
+(pending unlock celebrations for the first page) and the `relationships` module (who the caller follows,
+for reposts).

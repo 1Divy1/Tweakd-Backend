@@ -58,13 +58,13 @@ like→unlike→re-like makes a second row — accepted).
 
 | `type` | Fired when | Recipient | Pref gate | `body` | `payload` keys (all snake_case, ids as strings) |
 |---|---|---|---|---|---|
-| `post_like` | someone likes your post | post author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `post_id` |
+| `post_like` | someone likes your post — once per liker, ever (unlike + like again stays silent) | post author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `post_id` |
 | `post_comment` | someone comments/replies on your post (any nesting) | post author | `comments_enabled` | comment excerpt (≤80 chars) or `null` | `actor_id`, `actor_username`, `post_id`, `comment_id` |
-| `post_share` | someone shares (plain or quote) your post | post author | `shares_enabled` | `null` | `actor_id`, `actor_username`, `post_id` |
+| `post_share` | someone reposts your post — once per reposter, ever (undo + repost again stays silent) | post author | `shares_enabled` | `null` | `actor_id`, `actor_username`, `post_id` |
 | `forum_thread_reply` | someone replies at the root of your thread | thread author | `comments_enabled` | reply excerpt (≤80 chars) or `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id` |
 | `forum_reply_reply` | someone replies to your reply | parent reply author only | `comments_enabled` | reply excerpt (≤80 chars) or `null` | `actor_id`, `actor_username`, `thread_id`, `parent_reply_id`, `reply_id` |
-| `forum_thread_like` | someone likes your thread | thread author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id` |
-| `forum_reply_like` | someone likes your reply | reply author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id` |
+| `forum_thread_like` | someone likes your thread — once per liker, ever | thread author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id` |
+| `forum_reply_like` | someone likes your reply — once per liker, ever | reply author | `likes_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id` |
 | `forum_thread_tag` | you (or your car) get newly tagged in a thread | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `car_tagged` (boolean) |
 | `forum_reply_tag` | you (or your car) get newly tagged in a thread reply | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `thread_id`, `reply_id`, `car_tagged` (boolean) |
 | `post_tag` | you (or your car) get newly tagged in a post | the tagged user | `tags_enabled` | `null` | `actor_id`, `actor_username`, `post_id`, `car_tagged` (boolean) |

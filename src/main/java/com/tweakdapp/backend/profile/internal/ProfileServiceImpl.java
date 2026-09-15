@@ -42,6 +42,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
+import java.util.Set;
 
 @Service
 class ProfileServiceImpl implements ProfileService {
@@ -56,6 +58,7 @@ class ProfileServiceImpl implements ProfileService {
     private final ProfileDtoMapper mapper;
     private final BadgeService badgeService;
     private final BanCache banCache;
+    private final BlockDirectory blockDirectory;
 
     ProfileServiceImpl(ProfileRepository profileRepository,
                        CountryRepository countryRepository,
@@ -66,7 +69,8 @@ class ProfileServiceImpl implements ProfileService {
                        StorageService storageService,
                        ProfileDtoMapper mapper,
                        BadgeService badgeService,
-                       BanCache banCache) {
+                       BanCache banCache,
+                       BlockDirectory blockDirectory) {
         this.profileRepository = profileRepository;
         this.countryRepository = countryRepository;
         this.cityRepository = cityRepository;
@@ -77,6 +81,7 @@ class ProfileServiceImpl implements ProfileService {
         this.mapper = mapper;
         this.banCache = banCache;
         this.badgeService = badgeService;
+        this.blockDirectory = blockDirectory;
     }
 
     /**
@@ -193,9 +198,10 @@ class ProfileServiceImpl implements ProfileService {
 
     @Override
     @Transactional(readOnly = true)
-    public PublicProfileDto getPublicProfileByUsername(String username) {
+    public PublicProfileDto getPublicProfileByUsername(UUID viewerId, String username) {
         ProfileEntity profile = profileRepository
                 .findByUsername(username)
+                .filter(p -> !blockDirectory.isHidden(viewerId, p.getId()))
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
         return mapper.toPublicDto(profile, badgesOf(profile.getId()));
     }
@@ -218,21 +224,23 @@ class ProfileServiceImpl implements ProfileService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(String username) {
+    public List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(UUID viewerId, String username) {
         return badgesOf(profileRepository
                 .findByUsername(username)
+                .filter(p -> !blockDirectory.isHidden(viewerId, p.getId()))
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username))
                 .getId());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<ProfileSearchResultDto> searchByUsername(String prefix) {
+    public List<ProfileSearchResultDto> searchByUsername(UUID viewerId, String prefix) {
         if (prefix == null || prefix.isBlank()) {
             return List.of();
         }
         return profileRepository
-                .findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc(prefix)
+                .findTop20ByUsernameStartingWithIgnoreCaseAndIdNotInOrderByUsernameAsc(
+                        prefix, BlockDirectory.asQueryParam(blockDirectory.hiddenFrom(viewerId)))
                 .stream()
                 .map(mapper::toSearchResultDto)
                 .toList();
@@ -242,6 +250,24 @@ class ProfileServiceImpl implements ProfileService {
     @Transactional(readOnly = true)
     public Optional<UUID> findIdByUsername(String username) {
         return profileRepository.findByUsername(username).map(ProfileEntity::getId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<UUID> findVisibleIdByUsername(UUID viewerId, String username) {
+        return findIdByUsername(username).filter(id -> !blockDirectory.isHidden(viewerId, id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findHiddenProfileIds(UUID viewerId) {
+        return blockDirectory.hiddenFrom(viewerId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isHiddenFrom(UUID viewerId, UUID otherUserId) {
+        return blockDirectory.isHidden(viewerId, otherUserId);
     }
 
     @Override

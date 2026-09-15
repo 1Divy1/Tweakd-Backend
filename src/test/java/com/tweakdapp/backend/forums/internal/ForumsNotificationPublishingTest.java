@@ -120,6 +120,7 @@ class ForumsNotificationPublishingTest {
     void likeThreadPublishesOnlyWhenInsertAffectedARow() {
         when(threadRepository.findById(THREAD)).thenReturn(Optional.of(thread(THREAD_AUTHOR, false)));
         when(threadLikeRepository.insertIgnoringConflict(THREAD, ACTOR)).thenReturn(1);
+        when(threadLikeRepository.markLikeNotified(THREAD, ACTOR)).thenReturn(1);
 
         service.likeThread(ACTOR.toString(), THREAD);
 
@@ -144,6 +145,7 @@ class ForumsNotificationPublishingTest {
     void likeThreadSkipsAnonymizedThread() {
         when(threadRepository.findById(THREAD)).thenReturn(Optional.of(thread(THREAD_AUTHOR, true)));
         when(threadLikeRepository.insertIgnoringConflict(THREAD, ACTOR)).thenReturn(1);
+        when(threadLikeRepository.markLikeNotified(THREAD, ACTOR)).thenReturn(1);
 
         service.likeThread(ACTOR.toString(), THREAD);
 
@@ -154,8 +156,32 @@ class ForumsNotificationPublishingTest {
     void likeThreadDoesNotSelfNotify() {
         when(threadRepository.findById(THREAD)).thenReturn(Optional.of(thread(THREAD_AUTHOR, false)));
         when(threadLikeRepository.insertIgnoringConflict(THREAD, THREAD_AUTHOR)).thenReturn(1);
+        when(threadLikeRepository.markLikeNotified(THREAD, THREAD_AUTHOR)).thenReturn(1);
 
         service.likeThread(THREAD_AUTHOR.toString(), THREAD);
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    /** Unlike deletes the like row, so the re-like inserts again — but the author was already told. */
+    @Test
+    void likeThreadDoesNotRenotifyAfterUnlikeAndLike() {
+        when(threadRepository.findById(THREAD)).thenReturn(Optional.of(thread(THREAD_AUTHOR, false)));
+        when(threadLikeRepository.insertIgnoringConflict(THREAD, ACTOR)).thenReturn(1);
+        when(threadLikeRepository.markLikeNotified(THREAD, ACTOR)).thenReturn(0);
+
+        service.likeThread(ACTOR.toString(), THREAD);
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void likeReplyDoesNotRenotifyAfterUnlikeAndLike() {
+        when(postRepository.findById(REPLY)).thenReturn(Optional.of(reply(REPLY, PARENT_AUTHOR, null)));
+        when(postLikeRepository.insertIgnoringConflict(REPLY, ACTOR)).thenReturn(1);
+        when(postLikeRepository.markLikeNotified(REPLY, ACTOR)).thenReturn(0);
+
+        service.likePost(ACTOR.toString(), REPLY);
 
         verify(eventPublisher, never()).publishEvent(any());
     }
@@ -164,6 +190,7 @@ class ForumsNotificationPublishingTest {
     void likeReplyPublishesOnlyWhenInsertAffectedARow() {
         when(postRepository.findById(REPLY)).thenReturn(Optional.of(reply(REPLY, PARENT_AUTHOR, null)));
         when(postLikeRepository.insertIgnoringConflict(REPLY, ACTOR)).thenReturn(1);
+        when(postLikeRepository.markLikeNotified(REPLY, ACTOR)).thenReturn(1);
 
         service.likePost(ACTOR.toString(), REPLY);
 

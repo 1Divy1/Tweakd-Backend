@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 
 public interface CommentRepository extends JpaRepository<CommentEntity, UUID> {
 
@@ -30,6 +31,7 @@ public interface CommentRepository extends JpaRepository<CommentEntity, UUID> {
               from CommentEntity c
              where c.postId = :postId
                and c.parentCommentId is null
+               and c.userId not in :hiddenIds
                and (:firstPage = true
                     or c.createdAt < :cursorTs
                     or (c.createdAt = :cursorTs and c.id < :cursorId))
@@ -39,6 +41,7 @@ public interface CommentRepository extends JpaRepository<CommentEntity, UUID> {
                                             @Param("firstPage") boolean firstPage,
                                             @Param("cursorTs") Instant cursorTs,
                                             @Param("cursorId") UUID cursorId,
+                                            @Param("hiddenIds") Collection<UUID> hiddenIds,
                                             Pageable pageable);
 
     /**
@@ -51,6 +54,7 @@ public interface CommentRepository extends JpaRepository<CommentEntity, UUID> {
             select c
               from CommentEntity c
              where c.parentCommentId = :parentCommentId
+               and c.userId not in :hiddenIds
                and (:firstPage = true
                     or c.createdAt < :cursorTs
                     or (c.createdAt = :cursorTs and c.id < :cursorId))
@@ -60,5 +64,6 @@ public interface CommentRepository extends JpaRepository<CommentEntity, UUID> {
                                       @Param("firstPage") boolean firstPage,
                                       @Param("cursorTs") Instant cursorTs,
                                       @Param("cursorId") UUID cursorId,
+                                      @Param("hiddenIds") Collection<UUID> hiddenIds,
                                       Pageable pageable);
 }

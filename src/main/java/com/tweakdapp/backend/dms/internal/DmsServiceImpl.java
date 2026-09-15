@@ -48,6 +48,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
+import java.util.Collection;
 
 @Service
 public class DmsServiceImpl implements DmsService {
@@ -92,12 +94,15 @@ public class DmsServiceImpl implements DmsService {
         int pageSize = Math.clamp(size, 1, MAX_PAGE_SIZE);
         PageRequest limit = PageRequest.of(0, pageSize + 1);
 
+        // A conversation with someone a block separates from the caller stays out of the list, and
+        // comes back untouched on unblock.
+        Collection<UUID> hiddenIds = BlockDirectory.asQueryParam(profileService.findHiddenProfileIds(userId));
         List<DmConversationEntity> rows;
         if (cursor == null) {
-            rows = conversationRepository.findFirstPage(userId, limit);
+            rows = conversationRepository.findFirstPage(userId, hiddenIds, limit);
         } else {
             Cursor decoded = Cursor.decode(cursor);
-            rows = conversationRepository.findPageAfter(userId, decoded.timestamp(), decoded.id(), limit);
+            rows = conversationRepository.findPageAfter(userId, decoded.timestamp(), decoded.id(), hiddenIds, limit);
         }
 
         boolean hasMore = rows.size() > pageSize;
@@ -300,6 +305,7 @@ public class DmsServiceImpl implements DmsService {
         // misbehaving socket client must not learn which conversation ids exist.
         conversationRepository.findById(conversationId)
                 .filter(c -> c.getUserA().equals(userId) || c.getUserB().equals(userId))
+                .filter(c -> !profileService.isHiddenFrom(userId, c.peerOf(userId)))
                 .ifPresent(c -> eventPusher.pushTyping(conversationId, userId, c.peerOf(userId), typing));
     }
 
@@ -332,6 +338,7 @@ public class DmsServiceImpl implements DmsService {
     private DmConversationEntity requireParticipant(UUID conversationId, UUID userId) {
         return conversationRepository.findById(conversationId)
                 .filter(c -> c.getUserA().equals(userId) || c.getUserB().equals(userId))
+                .filter(c -> !profileService.isHiddenFrom(userId, c.peerOf(userId)))
                 .orElseThrow(() -> new DmConversationNotFoundException(conversationId));
     }
 

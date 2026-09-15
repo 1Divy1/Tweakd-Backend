@@ -208,8 +208,9 @@ class MapEventController {
      * and business hits come back merged in one list, tagged by {@code type}.
      */
     @GetMapping("/organizers/search")
-    public List<OrganizerCandidateDto> searchOrganizerCandidates(@RequestParam("q") String query) {
-        return mapEventsService.searchOrganizerCandidates(query);
+    public List<OrganizerCandidateDto> searchOrganizerCandidates(@AuthenticationPrincipal Jwt jwt,
+                                                                 @RequestParam("q") String query) {
+        return mapEventsService.searchOrganizerCandidates(userId(jwt), query);
     }
 
     /** Credits a co-organizer — an app user or a business account. Creator only. */

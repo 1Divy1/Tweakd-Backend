@@ -29,4 +29,18 @@ public interface ForumPostLikeRepository extends JpaRepository<ForumPostLikeEnti
     int insertIgnoringConflict(@Param("postId") UUID postId, @Param("userId") UUID userId);
 
     void deleteByIdPostIdAndIdUserId(UUID postId, UUID userId);
+
+    /**
+     * Records that the reply's author has been notified about this liker. The ledger row outlives the
+     * like (an unlike keeps it), so this answers "notify?" once per (reply, liker), ever.
+     *
+     * @return {@code 1} the first time — notify; {@code 0} on every later like, including after an unlike
+     */
+    @Modifying
+    @Query(value = """
+            insert into forum_post_like_notifications (post_id, user_id)
+            values (:postId, :userId)
+            on conflict do nothing
+            """, nativeQuery = true)
+    int markLikeNotified(@Param("postId") UUID postId, @Param("userId") UUID userId);
 }

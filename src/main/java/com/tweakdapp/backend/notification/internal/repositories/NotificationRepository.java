@@ -50,4 +50,16 @@ public interface NotificationRepository extends JpaRepository<NotificationEntity
     @Modifying
     @Query("update NotificationEntity n set n.read = true where n.userId = :userId and n.read = false")
     int markAllRead(@Param("userId") UUID userId);
+
+    /**
+     * Deletes the notifications either user received about the other — every row whose recorded
+     * {@code actor_id} is the other side. Run when one of them blocks the other.
+     */
+    @Modifying
+    @Query(value = """
+            delete from notifications
+             where (user_id = :first and payload ->> 'actor_id' = cast(:second as text))
+                or (user_id = :second and payload ->> 'actor_id' = cast(:first as text))
+            """, nativeQuery = true)
+    int deleteBetween(@Param("first") UUID first, @Param("second") UUID second);
 }

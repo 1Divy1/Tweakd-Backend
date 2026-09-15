@@ -46,14 +46,6 @@ public class PostEntity {
     @Column(name = "shares_count", nullable = false)
     private Long sharesCount;
 
-    /**
-     * Number of "quote" shares — a re-share with the user's own description attached (Facebook-style).
-     * Maintained by the share action / Supabase counters; the total share count shown in a post is
-     * {@code sharesCount + quoteSharesCount}.
-     */
-    @Column(name = "quote_shares_count", nullable = false)
-    private Long quoteSharesCount;
-
     @Column(name = "saved_count", nullable = false)
     private Long savedCount;
 

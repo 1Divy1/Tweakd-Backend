@@ -359,7 +359,7 @@ class ProfileControllerWebTest {
 
     @Test
     void getByUsernameReturnsPublicProfileWithoutOnboardingFlag() throws Exception {
-        when(profileService.getPublicProfileByUsername("racer"))
+        when(profileService.getPublicProfileByUsername(TestJwts.USER_ID, "racer"))
                 .thenReturn(new PublicProfileDto(ID, "Racer", "racer", "http://a/x.png", "vroom",
                         "http://link", 12, 7, true, false, 340, List.of(pioneerBadge())));
 
@@ -380,7 +380,7 @@ class ProfileControllerWebTest {
     /** The refetch path: the same list, on its own, for refreshing the row after an unlock. */
     @Test
     void badgesCanBeRefetchedWithoutTheWholeProfile() throws Exception {
-        when(profileService.getBadgesByUsername("racer")).thenReturn(List.of(pioneerBadge()));
+        when(profileService.getBadgesByUsername(TestJwts.USER_ID, "racer")).thenReturn(List.of(pioneerBadge()));
 
         mockMvc.perform(get("/api/v1/profile/by-username/{u}/badges", "racer").with(TestJwts.user()))
                 .andExpect(status().isOk())
@@ -390,7 +390,7 @@ class ProfileControllerWebTest {
 
     @Test
     void getByUsernameSurfacesNotFoundAs404() throws Exception {
-        when(profileService.getPublicProfileByUsername("ghost"))
+        when(profileService.getPublicProfileByUsername(TestJwts.USER_ID, "ghost"))
                 .thenThrow(ProfileNotFoundException.byUsername("ghost"));
 
         mockMvc.perform(get("/api/v1/profile/by-username/{u}", "ghost").with(TestJwts.user()))
@@ -412,7 +412,7 @@ class ProfileControllerWebTest {
 
     @Test
     void searchDelegatesTheQueryAndReturnsSnakeCaseResults() throws Exception {
-        when(profileService.searchByUsername("rac"))
+        when(profileService.searchByUsername(TestJwts.USER_ID, "rac"))
                 .thenReturn(List.of(new ProfileSearchResultDto(ID, "Race Car Rick", "racer", "http://a/x.png")));
 
         mockMvc.perform(get("/api/v1/profile/search").param("q", "rac").with(TestJwts.user()))
@@ -421,7 +421,7 @@ class ProfileControllerWebTest {
                 .andExpect(jsonPath("$[0].username").value("racer"))
                 .andExpect(jsonPath("$[0].avatar_url").value("http://a/x.png"));
 
-        verify(profileService).searchByUsername("rac");
+        verify(profileService).searchByUsername(TestJwts.USER_ID, "rac");
     }
 
     @Test
@@ -429,7 +429,7 @@ class ProfileControllerWebTest {
         mockMvc.perform(get("/api/v1/profile/search").with(TestJwts.user()))
                 .andExpect(status().isBadRequest());
 
-        verify(profileService, never()).searchByUsername(any());
+        verify(profileService, never()).searchByUsername(any(), any());
     }
 
     // ---- PATCH /me/location -------------------------------------------------

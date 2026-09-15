@@ -62,8 +62,8 @@ class ReputationController {
 
     /** Any user's reputation block, for their public profile screen. */
     @GetMapping("/users/{username}")
-    public ReputationSummaryDto getSummary(@PathVariable String username) {
-        return reputationService.getSummaryByUsername(username);
+    public ReputationSummaryDto getSummary(@AuthenticationPrincipal Jwt jwt, @PathVariable String username) {
+        return reputationService.getSummaryByUsername(UUID.fromString(jwt.getSubject()), username);
     }
 
     /**
@@ -71,10 +71,11 @@ class ReputationController {
      * absent, not flagged: what strangers see is what still stands.
      */
     @GetMapping("/users/{username}/history")
-    public ReputationHistoryPageDto getHistory(@PathVariable String username,
+    public ReputationHistoryPageDto getHistory(@AuthenticationPrincipal Jwt jwt,
+                                               @PathVariable String username,
                                                @RequestParam(required = false) String cursor,
                                                @RequestParam(defaultValue = "20") int size) {
-        return reputationService.getHistoryByUsername(username, cursor, size);
+        return reputationService.getHistoryByUsername(UUID.fromString(jwt.getSubject()), username, cursor, size);
     }
 
     /** The active catalogue: every way to earn (or lose) reputation, grouped by category. */
