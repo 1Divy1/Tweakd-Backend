@@ -120,6 +120,7 @@ Flow (identical to posts and the garage "add car" wizard, which is why the colum
 
 1. `POST /api/v1/map-events` — create the event; the response carries its new `id`.
 2. `GET /api/storage/events/{eventId}/cover` — a presigned PUT slot, `{key, uploadUrl}`.
+   Organizers only (`MapEventUploadAccessPolicy`).
 3. Flutter `PUT`s the image straight to R2.
 4. `PATCH /api/v1/map-events/{eventId}/cover` — send the `key`.
 

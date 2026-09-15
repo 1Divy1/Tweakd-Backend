@@ -22,10 +22,12 @@ import com.tweakdapp.backend.posts.dto.LikerPageDto;
 import com.tweakdapp.backend.posts.dto.PostDto;
 import com.tweakdapp.backend.posts.dto.PostImageDto;
 import com.tweakdapp.backend.posts.dto.PostPageDto;
+import com.tweakdapp.backend.posts.dto.RepostedByDto;
 import com.tweakdapp.backend.posts.dto.request.CreateCommentRequest;
 import com.tweakdapp.backend.posts.dto.request.CreatePostRequest;
 import com.tweakdapp.backend.posts.dto.request.UpdatePostRequest;
 import com.tweakdapp.backend.posts.exception.CannotReportOwnContentException;
+import com.tweakdapp.backend.posts.exception.CannotRepostOwnPostException;
 import com.tweakdapp.backend.posts.exception.CarOwnerNotTaggedException;
 import com.tweakdapp.backend.posts.exception.CommentNotFoundException;
 import com.tweakdapp.backend.posts.exception.InvalidReferenceException;
@@ -42,9 +44,7 @@ import com.tweakdapp.backend.posts.internal.entities.CommentTaggedPersonId;
 import com.tweakdapp.backend.posts.internal.entities.PostEntity;
 import com.tweakdapp.backend.posts.internal.entities.PostImageEntity;
 import com.tweakdapp.backend.posts.internal.entities.PostLikeEntity;
-import com.tweakdapp.backend.posts.internal.entities.PostLikeId;
 import com.tweakdapp.backend.posts.internal.entities.PostShareEntity;
-import com.tweakdapp.backend.posts.internal.entities.PostShareId;
 import com.tweakdapp.backend.posts.internal.entities.SavedPostEntity;
 import com.tweakdapp.backend.posts.internal.entities.SavedPostId;
 import com.tweakdapp.backend.posts.internal.entities.TaggedCarEntity;
@@ -59,6 +59,8 @@ import com.tweakdapp.backend.posts.internal.repositories.PostImageRepository;
 import com.tweakdapp.backend.posts.internal.repositories.PostLikeRepository;
 import com.tweakdapp.backend.posts.internal.repositories.PostRepository;
 import com.tweakdapp.backend.posts.internal.repositories.PostShareRepository;
+import com.tweakdapp.backend.posts.internal.repositories.RankedPostRow;
+import com.tweakdapp.backend.posts.internal.repositories.RepostRow;
 import com.tweakdapp.backend.posts.internal.repositories.SavedPostRepository;
 import com.tweakdapp.backend.posts.internal.repositories.TagRefRow;
 import com.tweakdapp.backend.posts.internal.repositories.TaggedCarRepository;
@@ -96,6 +98,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
 
 @Service
 public class PostsServiceImpl implements PostsService {
@@ -216,7 +219,7 @@ public class PostsServiceImpl implements PostsService {
         List<UUID> carIds = distinctIds(request.taggedCars());
 
         // Validate cross-module references up front so a bad tag fails the whole create.
-        validateTaggedPeopleExist(personIds);
+        validateTaggedPeopleExist(userId, personIds);
         Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
 
         UUID postId = UUID.randomUUID();
@@ -232,7 +235,6 @@ public class PostsServiceImpl implements PostsService {
         post.setLikesCount(0L);
         post.setCommentsCount(0L);
         post.setSharesCount(0L);
-        post.setQuoteSharesCount(0L);
         post.setSavedCount(0L);
         post.setUpdatedAt(Instant.now());
         if (card != null) {
@@ -282,7 +284,7 @@ public class PostsServiceImpl implements PostsService {
                 : currentCarIds;
 
         if (request.taggedPeople() != null) {
-            validateTaggedPeopleExist(finalPersonIds);
+            validateTaggedPeopleExist(userId, finalPersonIds);
         }
         Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, finalPersonIds, finalCarIds);
 
@@ -362,10 +364,21 @@ public class PostsServiceImpl implements PostsService {
         // Checks if the current user is the owner of that post
         ensureOwnership(post, userId);
 
+        List<String> storedKeys = postImageRepository.findAllByPostIdOrderByDisplayOrderAsc(postId).stream()
+                .map(PostImageEntity::getImageKey)
+                .toList();
+        // Upload URLs mint keys under posts/{postId}/. Anything else was minted for another post, and
+        // accepting it would let this post claim that image and delete it from R2 on the next edit.
+        String ownPrefix = "posts/" + postId + "/";
+        for (String key : imageKeys) {
+            if (key == null || (!storedKeys.contains(key) && !key.startsWith(ownPrefix))) {
+                throw new InvalidReferenceException("Image key does not belong to this post: " + key);
+            }
+        }
+
         // Diff: keys currently stored but absent from the incoming list are removed from R2.
         Set<String> incoming = new HashSet<>(imageKeys);
-        List<String> removedKeys = postImageRepository.findAllByPostIdOrderByDisplayOrderAsc(postId).stream()
-                .map(PostImageEntity::getImageKey)
+        List<String> removedKeys = storedKeys.stream()
                 .filter(key -> !incoming.contains(key))
                 .toList();
 
@@ -399,8 +412,7 @@ public class PostsServiceImpl implements PostsService {
     public PostDto getPost(String currentUserId, UUID postId) {
         UUID viewerId = UUID.fromString(currentUserId);
 
-        PostEntity post = postRepository.findById(postId)
-                .orElseThrow(() -> new PostNotFoundException(postId));
+        PostEntity post = loadVisiblePost(postId, viewerId);
 
         return toPostDto(post, viewerId);
     }
@@ -417,7 +429,7 @@ public class PostsServiceImpl implements PostsService {
     public PostPageDto getUserPosts(String currentUserId, String username, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
 
-        UUID authorId = profileService.findIdByUsername(username)
+        UUID authorId = profileService.findVisibleIdByUsername(viewerId, username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
 
         return getPostsPage(viewerId, authorId, cursor, size);
@@ -448,22 +460,38 @@ public class PostsServiceImpl implements PostsService {
 
     @Override
     @Transactional(readOnly = true)
-    public PostPageDto getRankedPosts(String currentUserId, String cursor, int size) {
+    public PostPageDto getRankedPosts(String currentUserId, List<UUID> followeeIds, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
         int limit = clampSize(size);
         RankCursor from = RankCursor.decode(cursor);
+        String followees = uuidArrayLiteral(followeeIds);
 
-        List<PostEntity> rows = postRepository.findRankedPostPage(
-                from == null,
-                from == null ? null : from.rankingScore(),
-                from == null ? null : from.id(),
-                PageRequest.of(0, limit + 1));
+        // The first page resumes "after" +Infinity, so every real score qualifies; the id is then
+        // never compared.
+        List<RankedPostRow> rows = postRepository.findRankedPostPage(
+                followees,
+                uuidArrayLiteral(profileService.findHiddenProfileIds(viewerId)),
+                from == null ? Double.POSITIVE_INFINITY : from.rankingScore(),
+                from == null ? FIRST_PAGE_ID : from.id(),
+                limit + 1);
 
         boolean hasMore = rows.size() > limit;
-        List<PostEntity> page = hasMore ? rows.subList(0, limit) : rows;
+        List<RankedPostRow> page = hasMore ? rows.subList(0, limit) : rows;
+        List<UUID> postIds = page.stream().map(RankedPostRow::getId).toList();
 
-        List<PostDto> items = toPostDtos(page, viewerId);
-        String nextCursor = hasMore ? lastRankCursor(page) : null;
+        // Who the viewer follows reposted what on this page, most recent repost first per post.
+        Map<UUID, List<UUID>> repostersByPost = followeeIds.isEmpty() || postIds.isEmpty()
+                ? Map.of()
+                : postShareRepository.findFollowedReposts(postIds, followees).stream()
+                        .collect(Collectors.groupingBy(RepostRow::getPostId,
+                                Collectors.mapping(RepostRow::getUserId, Collectors.toList())));
+
+        List<PostDto> items = toPostDtosByIds(postIds, viewerId, repostersByPost);
+        String nextCursor = null;
+        if (hasMore) {
+            RankedPostRow last = page.getLast();
+            nextCursor = new RankCursor(last.getScore(), last.getId()).encode();
+        }
         return new PostPageDto(items, nextCursor);
     }
 
@@ -479,6 +507,7 @@ public class PostsServiceImpl implements PostsService {
                 from == null,
                 from == null ? null : from.createdAt(),
                 from == null ? null : from.id(),
+                hiddenIdsFor(viewerId),
                 PageRequest.of(0, limit + 1));
 
         boolean hasMore = rows.size() > limit;
@@ -494,14 +523,29 @@ public class PostsServiceImpl implements PostsService {
     @Transactional(readOnly = true)
     public PostPageDto getSharedPosts(String currentUserId, String cursor, int size) {
         UUID viewerId = UUID.fromString(currentUserId);
+        return getRepostsPage(viewerId, viewerId, cursor, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PostPageDto getUserReposts(String currentUserId, String username, String cursor, int size) {
+        UUID viewerId = UUID.fromString(currentUserId);
+        UUID reposterId = profileService.findVisibleIdByUsername(viewerId, username)
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
+        return getRepostsPage(viewerId, reposterId, cursor, size);
+    }
+
+    /** Keyset paging + batch assembly of one user's reposts, newest repost first. */
+    private PostPageDto getRepostsPage(UUID viewerId, UUID reposterId, String cursor, int size) {
         int limit = clampSize(size);
         PageCursor from = PageCursor.decode(cursor);
 
         List<PostShareEntity> rows = postShareRepository.findSharedPage(
-                viewerId,
+                reposterId,
                 from == null,
                 from == null ? null : from.createdAt(),
                 from == null ? null : from.id(),
+                hiddenIdsFor(viewerId),
                 PageRequest.of(0, limit + 1));
 
         boolean hasMore = rows.size() > limit;
@@ -523,12 +567,15 @@ public class PostsServiceImpl implements PostsService {
         int limit = clampSize(size);
         PageCursor from = PageCursor.decode(cursor);
 
+        ensureNotHiddenPost(postId, viewerId);
+
         // Fetch one extra row to detect whether a further page exists.
         List<CommentEntity> rows = commentRepository.findRootCommentPage(
                 postId,
                 from == null,
                 from == null ? null : from.createdAt(),
                 from == null ? null : from.id(),
+                hiddenIdsFor(viewerId),
                 PageRequest.of(0, limit + 1));
 
         return toCommentPage(viewerId, rows, limit);
@@ -537,8 +584,13 @@ public class PostsServiceImpl implements PostsService {
     @Override
     @Transactional(readOnly = true)
     public CommentPageDto getReplies(UUID viewerId, UUID postId, UUID commentId, String cursor, int size) {
-        // Validate the parent comment exists and belongs to the post addressed in the URL.
-        loadCommentOfPost(postId, commentId);
+        // Validate the parent comment exists and belongs to the post addressed in the URL — and that a
+        // block does not hide it, or its post, from the viewer.
+        CommentEntity parent = loadCommentOfPost(postId, commentId);
+        if (profileService.isHiddenFrom(viewerId, parent.getUserId())) {
+            throw new CommentNotFoundException(commentId);
+        }
+        ensureNotHiddenPost(postId, viewerId);
 
         int limit = clampSize(size);
         PageCursor from = PageCursor.decode(cursor);
@@ -548,6 +600,7 @@ public class PostsServiceImpl implements PostsService {
                 from == null,
                 from == null ? null : from.createdAt(),
                 from == null ? null : from.id(),
+                hiddenIdsFor(viewerId),
                 PageRequest.of(0, limit + 1));
 
         return toCommentPage(viewerId, rows, limit);
@@ -625,7 +678,8 @@ public class PostsServiceImpl implements PostsService {
 
     @Override
     @Transactional(readOnly = true)
-    public LikerPageDto getPostLikers(UUID postId, String cursor, int size) {
+    public LikerPageDto getPostLikers(UUID viewerId, UUID postId, String cursor, int size) {
+        ensureNotHiddenPost(postId, viewerId);
         int limit = clampSize(size);
         PageCursor from = PageCursor.decode(cursor);
 
@@ -634,6 +688,7 @@ public class PostsServiceImpl implements PostsService {
                 from == null,
                 from == null ? null : from.createdAt(),
                 from == null ? null : from.id(),
+                hiddenIdsFor(viewerId),
                 PageRequest.of(0, limit + 1));
 
         boolean hasMore = rows.size() > limit;
@@ -693,7 +748,14 @@ public class PostsServiceImpl implements PostsService {
     @Override
     @Transactional(readOnly = true)
     public List<PostDto> getPostsByIds(UUID viewerId, List<UUID> postIds) {
-        return toPostDtosByIds(postIds, viewerId);
+        List<PostDto> posts = toPostDtosByIds(postIds, viewerId);
+        Set<UUID> hidden = profileService.findHiddenProfileIds(viewerId);
+        if (hidden.isEmpty()) {
+            return posts;
+        }
+        return posts.stream()
+                .filter(p -> p.author() == null || !hidden.contains(p.author().id()))
+                .toList();
     }
 
     @Override
@@ -704,9 +766,11 @@ public class PostsServiceImpl implements PostsService {
         }
         Map<UUID, CommentEntity> byId = commentRepository.findAllById(commentIds).stream()
                 .collect(Collectors.toMap(CommentEntity::getId, Function.identity()));
+        Set<UUID> hidden = profileService.findHiddenProfileIds(viewerId);
         List<CommentEntity> ordered = commentIds.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
+                .filter(c -> !hidden.contains(c.getUserId()))
                 .toList();
         return toCommentDtos(viewerId, ordered);
     }
@@ -768,16 +832,16 @@ public class PostsServiceImpl implements PostsService {
     @Transactional
     public void likePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
-        PostEntity post = postRepository.findById(postId)
-                .orElseThrow(() -> new PostNotFoundException(postId));
-        if (postLikeRepository.existsByIdPostIdAndIdUserId(postId, userId)) {
+        PostEntity post = loadVisiblePost(postId, userId);
+        // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
+        if (postLikeRepository.insertIgnoringConflict(postId, userId) == 0) {
             return;
         }
-        PostLikeEntity like = new PostLikeEntity();
-        like.setId(new PostLikeId(postId, userId));
-        postLikeRepository.save(like);
-        // Only a real (first) like notifies; the early return above swallows re-likes.
-        publishSocialEvent(post.getUserId(), userId, new PostLikedEvent(postId, post.getUserId(), userId));
+        // Notify the author once per (post, liker), ever. The like row is deleted on unlike, so it can't
+        // tell a first like from like → unlike → like; the notification ledger outlives it.
+        if (postLikeRepository.markLikeNotified(postId, userId) == 1) {
+            publishSocialEvent(post.getUserId(), userId, new PostLikedEvent(postId, post.getUserId(), userId));
+        }
     }
 
     @Override
@@ -791,7 +855,7 @@ public class PostsServiceImpl implements PostsService {
     @Transactional
     public void savePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
-        ensurePostExists(postId);
+        loadVisiblePost(postId, userId);
         if (savedPostRepository.existsByIdPostIdAndIdUserId(postId, userId)) {
             return;
         }
@@ -809,21 +873,21 @@ public class PostsServiceImpl implements PostsService {
 
     @Override
     @Transactional
-    public void sharePost(String currentUserId, UUID postId, String content) {
+    public void sharePost(String currentUserId, UUID postId) {
         UUID userId = UUID.fromString(currentUserId);
-        PostEntity post = postRepository.findById(postId)
-                .orElseThrow(() -> new PostNotFoundException(postId));
-        if (postShareRepository.existsByIdPostIdAndIdUserId(postId, userId)) {
+        PostEntity post = loadVisiblePost(postId, userId);
+        if (post.getUserId().equals(userId)) {
+            throw new CannotRepostOwnPostException();
+        }
+        // ON CONFLICT DO NOTHING: idempotent and race-safe against concurrent double-taps.
+        if (postShareRepository.insertIgnoringConflict(postId, userId) == 0) {
             return;
         }
-        PostShareEntity share = new PostShareEntity();
-        share.setId(new PostShareId(postId, userId));
-        // Blank caption -> null so it counts as a plain share (the trigger keys quote_shares_count
-        // off a non-blank content).
-        share.setContent(blankToNull(content));
-        postShareRepository.save(share);
-        // Only a real (first) share notifies; the early return above swallows re-shares.
-        publishSocialEvent(post.getUserId(), userId, new PostSharedEvent(postId, post.getUserId(), userId));
+        // Notify the author once per (post, reposter), ever. The repost row is deleted on undo, so it
+        // can't tell a first repost from a repost → undo → repost; the notification ledger outlives it.
+        if (postShareRepository.markRepostNotified(postId, userId) == 1) {
+            publishSocialEvent(post.getUserId(), userId, new PostSharedEvent(postId, post.getUserId(), userId));
+        }
     }
 
     @Override
@@ -837,15 +901,14 @@ public class PostsServiceImpl implements PostsService {
     @Transactional
     public CommentDto addComment(String currentUserId, UUID postId, CreateCommentRequest request) {
         UUID userId = UUID.fromString(currentUserId);
-        PostEntity post = postRepository.findById(postId)
-                .orElseThrow(() -> new PostNotFoundException(postId));
+        PostEntity post = loadVisiblePost(postId, userId);
 
         UUID parentId = request.parentCommentId();
         if (parentId != null) {
             // A reply must thread under an existing comment on the same post.
             CommentEntity parent = commentRepository.findById(parentId)
                     .orElseThrow(() -> new CommentNotFoundException(parentId));
-            if (!parent.getPostId().equals(postId)) {
+            if (!parent.getPostId().equals(postId) || profileService.isHiddenFrom(userId, parent.getUserId())) {
                 throw new CommentNotFoundException(parentId);
             }
         }
@@ -853,7 +916,7 @@ public class PostsServiceImpl implements PostsService {
         // Same tagging rules as posts and forum threads/replies, validated before anything is written.
         List<UUID> personIds = distinctIds(request.taggedPeople());
         List<UUID> carIds = distinctIds(request.taggedCars());
-        validateTaggedPeopleExist(personIds);
+        validateTaggedPeopleExist(userId, personIds);
         Map<UUID, UUID> ownerByCar = validateTaggedCars(userId, personIds, carIds);
 
         UUID commentId = UUID.randomUUID();
@@ -938,7 +1001,11 @@ public class PostsServiceImpl implements PostsService {
     @Transactional
     public void likeComment(String currentUserId, UUID postId, UUID commentId) {
         UUID userId = UUID.fromString(currentUserId);
-        loadCommentOfPost(postId, commentId);
+        CommentEntity comment = loadCommentOfPost(postId, commentId);
+        if (profileService.isHiddenFrom(userId, comment.getUserId())) {
+            throw new CommentNotFoundException(commentId);
+        }
+        ensureNotHiddenPost(postId, userId);
         if (commentLikeRepository.existsByIdCommentIdAndIdUserId(commentId, userId)) {
             return;
         }
@@ -1051,6 +1118,11 @@ public class PostsServiceImpl implements PostsService {
      * order, so we re-index and re-order before delegating to {@link #toPostDtos}.
      */
     private List<PostDto> toPostDtosByIds(List<UUID> postIds, UUID viewerId) {
+        return toPostDtosByIds(postIds, viewerId, Map.of());
+    }
+
+    private List<PostDto> toPostDtosByIds(List<UUID> postIds, UUID viewerId,
+                                          Map<UUID, List<UUID>> repostersByPost) {
         if (postIds.isEmpty()) {
             return List.of();
         }
@@ -1060,17 +1132,27 @@ public class PostsServiceImpl implements PostsService {
                 .map(byId::get)
                 .filter(Objects::nonNull)
                 .toList();
-        return toPostDtos(ordered, viewerId);
+        return toPostDtos(ordered, viewerId, repostersByPost);
     }
 
     /**
      * Assembles a whole page of posts with a fixed, small number of queries regardless of page
      * size (no N+1): one batch each for tagged people, tagged cars, and images; one
      * {@code profileService.findByIds} covering all authors + tagged people combined; one
-     * {@code garageService.findCarsByIds}; and one viewer like / save lookup. Output preserves
-     * the input order.
+     * {@code garageService.findCarsByIds}; and one viewer like / save / repost lookup. Output
+     * preserves the input order.
      */
     private List<PostDto> toPostDtos(List<PostEntity> posts, UUID viewerId) {
+        return toPostDtos(posts, viewerId, Map.of());
+    }
+
+    /**
+     * As {@link #toPostDtos(List, UUID)}, plus a {@code reposted_by} line on each post found in
+     * {@code repostersByPost} (followed reposter ids per post, most recent first). Only the global
+     * feed passes one; the reposters it names join the single profile lookup.
+     */
+    private List<PostDto> toPostDtos(List<PostEntity> posts, UUID viewerId,
+                                     Map<UUID, List<UUID>> repostersByPost) {
         if (posts.isEmpty()) {
             return List.of();
         }
@@ -1091,6 +1173,7 @@ public class PostsServiceImpl implements PostsService {
         Set<UUID> profileIds = new HashSet<>();
         posts.forEach(p -> profileIds.add(p.getUserId()));
         personIdsByPost.values().forEach(profileIds::addAll);
+        repostersByPost.values().forEach(ids -> profileIds.addAll(firstReposters(ids)));
         Map<UUID, ProfileSearchResultDto> profiles = profileService.findByIds(profileIds).stream()
                 .collect(Collectors.toMap(ProfileSearchResultDto::id, Function.identity()));
 
@@ -1102,6 +1185,7 @@ public class PostsServiceImpl implements PostsService {
 
         Set<UUID> likedByViewer = Set.copyOf(postLikeRepository.findLikedPostIds(viewerId, postIds));
         Set<UUID> savedByViewer = Set.copyOf(savedPostRepository.findSavedPostIds(viewerId, postIds));
+        Set<UUID> repostedByViewer = Set.copyOf(postShareRepository.findRepostedPostIds(viewerId, postIds));
 
         // One batch for every participant card on the page. Not viewer-scoped — a card reads the same
         // for everyone. A card that no longer derives (car gone, entry revoked) is simply absent and
@@ -1131,9 +1215,13 @@ public class PostsServiceImpl implements PostsService {
                                     img.getDisplayOrder()))
                             .toList();
 
-                    // Plain shares and quote shares (re-shares with a custom caption) are tracked
-                    // separately but shown as one total in the post card.
-                    long totalShares = post.getSharesCount() + post.getQuoteSharesCount();
+                    List<UUID> reposterIds = repostersByPost.getOrDefault(postId, List.of());
+                    RepostedByDto repostedBy = reposterIds.isEmpty() ? null : new RepostedByDto(
+                            firstReposters(reposterIds).stream()
+                                    .map(profiles::get)
+                                    .filter(Objects::nonNull)
+                                    .toList(),
+                            reposterIds.size());
 
                     return new PostDto(
                             post.getId(),
@@ -1144,7 +1232,7 @@ public class PostsServiceImpl implements PostsService {
                             taggedCars,
                             post.getLikesCount(),
                             post.getCommentsCount(),
-                            totalShares,
+                            post.getSharesCount(),
                             post.getSavedCount(),
                             post.isLikesCountEnabled(),
                             post.isCommentsCountEnabled(),
@@ -1156,7 +1244,9 @@ public class PostsServiceImpl implements PostsService {
                             post.getUpdatedAt(),
                             post.getParticipantCardEventId() == null ? null
                                     : cards.get(new ParticipantCardKey(
-                                            post.getParticipantCardEventId(), post.getParticipantCardCarId())));
+                                            post.getParticipantCardEventId(), post.getParticipantCardCarId())),
+                            repostedByViewer.contains(postId),
+                            repostedBy);
                 })
                 .toList();
     }
@@ -1166,6 +1256,33 @@ public class PostsServiceImpl implements PostsService {
         if (!post.getUserId().equals(userId)) {
             throw new NotPostOwnerException();
         }
+    }
+
+    /**
+     * Loads a post for {@code viewerId}. A post whose author a block separates from the viewer (in
+     * either direction) is indistinguishable from one that does not exist.
+     */
+    private PostEntity loadVisiblePost(UUID postId, UUID viewerId) {
+        return postRepository.findById(postId)
+                .filter(post -> !profileService.isHiddenFrom(viewerId, post.getUserId()))
+                .orElseThrow(() -> new PostNotFoundException(postId));
+    }
+
+    /**
+     * 404s when the post exists but a block hides its author from the viewer. A missing post is left
+     * to the caller, so reads that answered an empty page for one still do.
+     */
+    private void ensureNotHiddenPost(UUID postId, UUID viewerId) {
+        postRepository.findById(postId)
+                .filter(post -> profileService.isHiddenFrom(viewerId, post.getUserId()))
+                .ifPresent(post -> {
+                    throw new PostNotFoundException(postId);
+                });
+    }
+
+    /** The viewer's block-hidden account ids, shaped for a {@code not in :hiddenIds} query. */
+    private Collection<UUID> hiddenIdsFor(UUID viewerId) {
+        return BlockDirectory.asQueryParam(profileService.findHiddenProfileIds(viewerId));
     }
 
     /** Cheap existence check for the engagement writes, which don't need to load the post row. */
@@ -1188,8 +1305,19 @@ public class PostsServiceImpl implements PostsService {
         return comment;
     }
 
-    private static String blankToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value.strip();
+    /** How many followed reposters a feed card names; the rest are counted, not listed. */
+    private static final int REPOSTED_BY_NAMED = 2;
+
+    /** Keyset id paired with a {@code +Infinity} score on the first feed page; never compared. */
+    private static final UUID FIRST_PAGE_ID = new UUID(0L, 0L);
+
+    private static List<UUID> firstReposters(List<UUID> reposterIds) {
+        return reposterIds.subList(0, Math.min(REPOSTED_BY_NAMED, reposterIds.size()));
+    }
+
+    /** A Postgres array literal ({@code {a,b}}) — binds any number of ids as one parameter. */
+    private static String uuidArrayLiteral(Collection<UUID> ids) {
+        return ids.stream().map(UUID::toString).collect(Collectors.joining(",", "{", "}"));
     }
 
     /**
@@ -1244,12 +1372,14 @@ public class PostsServiceImpl implements PostsService {
         }
     }
 
-    private void validateTaggedPeopleExist(List<UUID> personIds) {
+    private void validateTaggedPeopleExist(UUID authorId, List<UUID> personIds) {
         if (personIds.isEmpty()) {
             return;
         }
+        // Someone a block separates from the author reads as a missing profile: they cannot be tagged.
+        Set<UUID> hidden = profileService.findHiddenProfileIds(authorId);
         long found = profileService.findByIds(personIds).size();
-        if (found != personIds.size()) {
+        if (found != personIds.size() || personIds.stream().anyMatch(hidden::contains)) {
             throw new InvalidReferenceException("One or more tagged people do not exist");
         }
     }
@@ -1377,11 +1507,6 @@ public class PostsServiceImpl implements PostsService {
     private String lastPostCursor(List<PostEntity> page) {
         PostEntity last = page.getLast();
         return new PageCursor(last.getCreatedAt(), last.getId()).encode();
-    }
-
-    private String lastRankCursor(List<PostEntity> page) {
-        PostEntity last = page.getLast();
-        return new RankCursor(last.getRankingScore(), last.getId()).encode();
     }
 
     private String lastCommentCursor(List<CommentEntity> page) {

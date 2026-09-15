@@ -47,6 +47,8 @@ public interface ForumThreadSaveRepository extends JpaRepository<ForumThreadSave
             select s
               from ForumThreadSaveEntity s
              where s.id.userId = :userId
+               and not exists (select 1 from ForumThreadEntity t
+                                where t.id = s.id.threadId and t.userId in :hiddenIds)
                and (:firstPage = true
                     or s.createdAt < :cursorTs
                     or (s.createdAt = :cursorTs and s.id.threadId < :cursorId))
@@ -56,5 +58,6 @@ public interface ForumThreadSaveRepository extends JpaRepository<ForumThreadSave
                                               @Param("firstPage") boolean firstPage,
                                               @Param("cursorTs") Instant cursorTs,
                                               @Param("cursorId") UUID cursorId,
+                                              @Param("hiddenIds") Collection<UUID> hiddenIds,
                                               Pageable pageable);
 }

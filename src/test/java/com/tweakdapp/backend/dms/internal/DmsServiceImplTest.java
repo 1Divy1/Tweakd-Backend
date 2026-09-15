@@ -649,7 +649,7 @@ class DmsServiceImplTest {
         conv.setLastMessagePreview("yo");
         conv.setLastMessageSenderId(PEER);
         conv.setLastMessageAt(Instant.parse("2026-07-16T10:00:00Z"));
-        when(conversationRepository.findFirstPage(eq(SELF), any(Pageable.class))).thenReturn(List.of(conv));
+        when(conversationRepository.findFirstPage(eq(SELF), any(), any(Pageable.class))).thenReturn(List.of(conv));
 
         DmParticipantStateEntity st = state(CONV, SELF);
         st.setUnreadCount(5);
@@ -680,7 +680,7 @@ class DmsServiceImplTest {
         DmConversationEntity second = conversation(conv2Id, SELF, peer2);
         second.setLastMessageAt(Instant.parse("2026-07-16T09:00:00Z"));
         // Repo returns size+1 rows (2) for a requested size of 1 → hasMore.
-        when(conversationRepository.findFirstPage(eq(SELF), any(Pageable.class)))
+        when(conversationRepository.findFirstPage(eq(SELF), any(), any(Pageable.class)))
                 .thenReturn(List.of(first, second));
         when(stateRepository.findByConversationIdInAndUserId(List.of(CONV), SELF)).thenReturn(List.of());
         when(profileService.findByIds(List.of(PEER)))
@@ -698,12 +698,12 @@ class DmsServiceImplTest {
 
     @Test
     void listConversationsClampsAnOversizedPageRequest() {
-        when(conversationRepository.findFirstPage(eq(SELF), any(Pageable.class))).thenReturn(List.of());
+        when(conversationRepository.findFirstPage(eq(SELF), any(), any(Pageable.class))).thenReturn(List.of());
 
         service.listConversations(SELF, null, 1000);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(conversationRepository).findFirstPage(eq(SELF), pageable.capture());
+        verify(conversationRepository).findFirstPage(eq(SELF), any(), pageable.capture());
         // clamp(1000, 1, 50) = 50, plus the +1 look-ahead row.
         assertThat(pageable.getValue().getPageSize()).isEqualTo(51);
     }
@@ -735,6 +735,8 @@ class DmsServiceImplTest {
         assertThat(page.items()).extracting(DmMessageDto::id).containsExactly(m1);
         assertThat(page.peerLastReadMessageId()).isEqualTo(peerWatermark);
         assertThat(page.nextCursor()).isNull();
+        // The only profile lookup is the block check on the peer.
+        verify(profileService).isHiddenFrom(SELF, PEER);
         verifyNoMoreInteractions(profileService);
     }
 }

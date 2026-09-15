@@ -29,4 +29,18 @@ public interface ForumThreadLikeRepository extends JpaRepository<ForumThreadLike
     int insertIgnoringConflict(@Param("threadId") UUID threadId, @Param("userId") UUID userId);
 
     void deleteByIdThreadIdAndIdUserId(UUID threadId, UUID userId);
+
+    /**
+     * Records that the thread's author has been notified about this liker. The ledger row outlives the
+     * like (an unlike keeps it), so this answers "notify?" once per (thread, liker), ever.
+     *
+     * @return {@code 1} the first time — notify; {@code 0} on every later like, including after an unlike
+     */
+    @Modifying
+    @Query(value = """
+            insert into forum_thread_like_notifications (thread_id, user_id)
+            values (:threadId, :userId)
+            on conflict do nothing
+            """, nativeQuery = true)
+    int markLikeNotified(@Param("threadId") UUID threadId, @Param("userId") UUID userId);
 }

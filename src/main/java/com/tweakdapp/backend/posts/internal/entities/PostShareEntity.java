@@ -10,7 +10,8 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * A share of a post by a user, optionally with the sharer's own thoughts ({@code content}).
+ * A repost: a user putting someone else's post in front of their followers. Nothing of the
+ * reposter's own is attached — the row is the whole fact.
  */
 @Entity
 @Table(name = "post_shares")
@@ -21,11 +22,7 @@ public class PostShareEntity {
     @EmbeddedId
     private PostShareId id;
 
-    /** Optional text the sharer adds when re-sharing the post. */
-    @Column(name = "content")
-    private String content;
-
-    /** DB-managed: DEFAULT now() in Supabase. */
+    /** DB-managed: DEFAULT now() in Supabase. What the feed ranks a repost by. */
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 }

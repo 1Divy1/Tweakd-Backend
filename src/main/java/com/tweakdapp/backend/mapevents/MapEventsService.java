@@ -219,7 +219,7 @@ public interface MapEventsService {
      *
      * @param query search text; blank or {@code null} returns an empty list
      */
-    List<OrganizerCandidateDto> searchOrganizerCandidates(String query);
+    List<OrganizerCandidateDto> searchOrganizerCandidates(UUID currentUserId, String query);
 
     // ===================== Attending (spectators) =====================
 

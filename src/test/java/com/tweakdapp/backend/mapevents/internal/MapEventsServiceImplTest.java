@@ -685,18 +685,18 @@ class MapEventsServiceImplTest {
     @Test
     void theDefaultParticipantListIncludesWithdrawnCarsAlongsideAccepted() {
         existing(approvedUpcoming());
-        when(participantRepository.findLineupPage(eq(EVENT_ID), any(), any(), any())).thenReturn(List.of());
+        when(participantRepository.findLineupPage(eq(EVENT_ID), any(), any(), any(), any())).thenReturn(List.of());
 
         service.listParticipants(STRANGER, EVENT_ID, null, null, 20);
 
-        verify(participantRepository).findLineupPage(eq(EVENT_ID), any(), any(), any());
-        verify(participantRepository, never()).findPage(any(), any(), any(), any(), any());
+        verify(participantRepository).findLineupPage(eq(EVENT_ID), any(), any(), any(), any());
+        verify(participantRepository, never()).findPage(any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void aNonOrganizerMayFilterTheListToWithdrawnOnly() {
         existing(approvedUpcoming());
-        when(participantRepository.findPage(eq(EVENT_ID), eq(MapEventParticipantEntity.WITHDRAWN), any(), any(), any()))
+        when(participantRepository.findPage(eq(EVENT_ID), eq(MapEventParticipantEntity.WITHDRAWN), any(), any(), any(), any()))
                 .thenReturn(List.of());
 
         service.listParticipants(STRANGER, EVENT_ID, "withdrawn", null, 20);

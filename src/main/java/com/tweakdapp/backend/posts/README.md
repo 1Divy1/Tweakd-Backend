@@ -1,7 +1,7 @@
 # posts module
 
 Owns everything in the feed: `posts` and their child tables `post_images`,
-`tagged_people`, `tagged_cars`, plus engagement tables `post_likes`, `post_shares`,
+`tagged_people`, `tagged_cars`, plus engagement tables `post_likes`, `post_shares` (reposts),
 `saved_posts`, `comments`, `comment_likes`, and the comment tag tables
 `comment_tagged_people` / `comment_tagged_cars`.
 
@@ -56,6 +56,10 @@ backend.
 Image keys are namespaced `posts/{postId}/{uuid}.webp` in the `POSTS` R2 bucket. Only the
 key is persisted; the public URL is built on read via `StorageService.publicUrl`.
 
+Step 2 is author-only (`PostUploadAccessPolicy`), and step 4 rejects any key that is neither already
+on the post nor under `posts/{postId}/` — otherwise a post could claim another post's image and
+delete it on its next edit.
+
 ## Public API — `PostsService`
 
 | Method | Description |
@@ -70,11 +74,13 @@ key is persisted; the public URL is built on read via `StorageService.publicUrl`
 | `getComments(viewerId, postId, cursor, size)` | One keyset page of root comments, newest first |
 | `getReplies(viewerId, postId, commentId, cursor, size)` | One keyset page of a comment's replies, newest first |
 | `getSavedPosts(currentUserId, cursor, size)` | Keyset page of the caller's saved posts, newest save first |
-| `getSharedPosts(currentUserId, cursor, size)` | Keyset page of the caller's shared posts, newest share first |
+| `getSharedPosts(currentUserId, cursor, size)` | Keyset page of the caller's reposts, newest repost first |
+| `getUserReposts(currentUserId, username, cursor, size)` | Keyset page of a user's reposts, newest repost first (profile Reposts tab) |
+| `getRankedPosts(currentUserId, followeeIds, cursor, size)` | Global feed page; followee reposts rank as fresh as the repost and carry `reposted_by` — see [Reposts](#reposts) |
 | `getPostLikers(postId, cursor, size)` | One keyset page of likers, most recent first |
-| `likePost / unlikePost(currentUserId, postId)` | Like / unlike a post (idempotent) |
+| `likePost / unlikePost(currentUserId, postId)` | Like / unlike a post (idempotent, `ON CONFLICT DO NOTHING`). The author is notified once per (post, liker), ever — the `post_like_notifications` ledger outlives an unlike (migration `20260915140000_like_notify_once.sql`) |
 | `savePost / unsavePost(currentUserId, postId)` | Save / unsave (bookmark) a post (idempotent) |
-| `sharePost(currentUserId, postId, content)` / `unsharePost(currentUserId, postId)` | Share / unshare a post; non-blank `content` = quote share (idempotent) |
+| `sharePost(currentUserId, postId)` / `unsharePost(currentUserId, postId)` | Repost / undo (idempotent); reposting your own post → `CannotRepostOwnPostException` |
 | `addComment(currentUserId, postId, CreateCommentRequest)` | Add a comment or threaded reply (+ its tagged people/cars); returns the `CommentDto` |
 | `deleteComment(currentUserId, postId, commentId)` | Soft-delete a comment (idempotent); comment author or post owner |
 | `likeComment / unlikeComment(currentUserId, postId, commentId)` | Like / unlike a comment (idempotent) |
@@ -83,21 +89,20 @@ key is persisted; the public URL is built on read via `StorageService.publicUrl`
 | `removeSelfTagsFromPost / removeSelfTagsFromComment(userId, targetId)` | Untag yourself: person tag + your own cars' tags on that content (idempotent) |
 
 **Engagement counts are trigger-owned.** Every denormalized count — `posts.likes_count`,
-`saved_count`, `shares_count`, `quote_shares_count`, `comments_count`, and `comments.likes_count`
+`saved_count`, `shares_count` (reposts), `comments_count`, and `comments.likes_count`
 — is maintained by a Supabase `AFTER INSERT/DELETE` (and, for comments, `UPDATE`) trigger on the
 engagement table. The service only inserts/deletes the engagement row and **never writes a count
-column**. The share trigger keys `quote_shares_count` off a non-blank `post_shares.content`, so the
-service normalizes a blank caption to `null`. The comments trigger decrements `comments_count` when
+column**. The comments trigger decrements `comments_count` when
 a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE`), not a row removal.
 
 ### DTOs / records
 
 | Type | Used for |
 |---|---|
-| `PostDto` | Full post for feed/detail: author, images, tagged people/cars, counts + visibility flags, viewer like/save state |
+| `PostDto` | Full post for feed/detail: author, images, tagged people/cars, counts + visibility flags, viewer like/save/repost state, `repostedBy` (feed only) |
 | `PostImageDto` | One image: `id`, full `imageUrl` (built from R2 key), `displayOrder` |
 | `CreateCommentRequest` | Comment payload: `content` (required) + optional `parentCommentId` for a reply, `taggedPeople`, `taggedCars` (≤30 each) |
-| `SharePostRequest` | Share payload: optional `content` caption (non-blank = quote share) |
+| `RepostedByDto` | `users` (≤2 followed reposters, most recent first) + `totalCount`; set on global-feed posts only |
 | `CreatePostRequest` | Create payload: caption, `taggedPeople`, `taggedCars`, three `*CountEnabled` toggles. No images |
 | `UpdatePostRequest` | Partial-update payload (PATCH semantics: null = leave unchanged; non-null tag list = replace-all) |
 | `PostImageKeysRequest` | Ordered list of R2 keys (max 10) — the post's complete desired image set |
@@ -117,6 +122,7 @@ a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE
 | `CarOwnerNotTaggedException` | 400 | A tagged car's owner is neither the author nor a tagged person (post **or** comment tags) |
 | `ParticipantCardNotFoundException` | 404 | Sharing a participant card that does not exist or is not the caller's (event not marked finished, car not an accepted participant, someone else's) |
 | `ParticipantCardCooldownException` | 409 | The same card was shared within `PARTICIPANT_CARD_REPOST_COOLDOWN` (48 h). Body carries `error = participant_card_cooldown` and `details.next_post_allowed_at` (ISO-8601) |
+| `CannotRepostOwnPostException` | 400 | The caller tries to repost their own post |
 | `InvalidCursorException` | 400 | A pagination cursor can't be decoded |
 
 ## REST endpoints
@@ -128,7 +134,8 @@ Base path: `/api/v1/posts`
 | POST | `/` | Create a post (201) |
 | GET | `/me` | Keyset page of the caller's own posts (`?cursor=&size=`) |
 | GET | `/saved` | Keyset page of the caller's saved posts (`?cursor=&size=`) |
-| GET | `/shared` | Keyset page of the caller's shared posts (`?cursor=&size=`) |
+| GET | `/shared` | Keyset page of the caller's reposts (`?cursor=&size=`) |
+| GET | `/by-username/{username}/reposts` | Keyset page of a user's reposts, newest repost first (`?cursor=&size=`) |
 | GET | `/by-username/{username}` | Keyset page of another user's posts; privacy-gated (`?cursor=&size=`) |
 | GET | `/{postId}` | One post, fully assembled; privacy-gated |
 | PATCH | `/{postId}` | Partial update of caption / tags / count toggles (owner only) |
@@ -139,7 +146,7 @@ Base path: `/api/v1/posts`
 | GET | `/{postId}/likes` | Keyset page of likers (`?cursor=&size=`) |
 | POST / DELETE | `/{postId}/likes` | Like / unlike a post (204; idempotent) |
 | POST / DELETE | `/{postId}/saves` | Save / unsave a post (204; idempotent) |
-| POST / DELETE | `/{postId}/shares` | Share / unshare a post (204; idempotent). POST body `{ "content": "…" }` optional → quote share |
+| POST / DELETE | `/{postId}/shares` | Repost / undo (204; idempotent). No body — one sent by an older client is ignored. 400 on your own post |
 | POST | `/participant-card` | Share one of the caller's participant cards (201 → `PostDto`). Body `{ event_id, car_id, description? }`. 404 if it is not their card; 409 `participant_card_cooldown` inside the repost cooldown |
 | POST | `/{postId}/comments` | Add a comment / reply (201); body `{ "content": "…", "parent_comment_id": "…"?, "tagged_people": [uuid]?, "tagged_cars": [uuid]? }` |
 | DELETE | `/{postId}/comments/{commentId}` | Soft-delete the caller's comment (204; author only) |
@@ -182,7 +189,7 @@ self-event. The `notification` module consumes these; nothing depends back on po
 |---|---|---|---|
 | `PostLikedEvent(postId, recipientId, actorId)` | `likePost` | only on a real first like (not on a duplicate) | post author |
 | `PostCommentedEvent(postId, commentId, recipientId, actorId, excerpt)` | `addComment` | any comment or reply, whatever the nesting | post author |
-| `PostSharedEvent(postId, recipientId, actorId)` | `sharePost` | only on a real first share (plain or quote) | post author |
+| `PostSharedEvent(postId, recipientId, actorId)` | `sharePost` | only on a real first repost | post author |
 | `PostTaggedEvent(postId, recipientId, actorId, carTagged)` | `createPost` / `updatePost` | one per **newly** tagged user (re-saving an unchanged set is silent) | the tagged user |
 | `PostCommentTaggedEvent(postId, commentId, recipientId, actorId, carTagged)` | `addComment` | one per tagged user (comments aren't editable, so every tag is new) | the tagged user |
 
@@ -230,3 +237,29 @@ so a double tap cannot slip two posts past the check.
 
 `ErrorResponse` now carries optional `error` (a stable code) and `details` (structured data) fields,
 filled from `ApiException.getErrorCode()` / `getDetails()`; both are `null` for every other error.
+
+## Reposts
+
+A repost is Instagram's: one tap puts someone else's post in front of your followers, with nothing of
+your own attached. The storage and wire still say `share` (`post_shares`, `/shares`, `shares_count`,
+`shares_count_enabled`) — never rename them. The cross-repo reference, including how other content
+types become repostable, is `REPOSTS.md` in the mobile repo.
+
+- **Rules.** Idempotent by PK `(post_id, user_id)`, inserted with `ON CONFLICT DO NOTHING`
+  (`PostShareRepository.insertIgnoringConflict`, race-safe on double taps); your own post is rejected
+  (`CannotRepostOwnPostException`).
+- **Notify once, ever.** `PostSharedEvent` is published once per (post, reposter). An undo deletes the
+  `post_shares` row, so that table can't tell a first repost from repost → undo → repost; the
+  `post_repost_notifications` ledger (`markRepostNotified`, returns 1 only the first time) outlives the
+  repost and decides. Migration `20260915120000_post_repost_notify_once.sql`, tested by
+  `PostRepostNotificationLedgerIT`.
+- **Viewer flag.** `toPostDtos` adds `viewerHasReposted` with one `findRepostedPostIds` per page.
+- **Feed boost.** `getRankedPosts` receives the viewer's followee ids from the `feed` module (posts never
+  reads `follows`). `PostRepository.findRankedPostPage` ranks a post any followee reposted at
+  `ranking_score + (epoch(latest followee repost) − epoch(created_at)) / 45000` — the engagement it earned
+  plus the freshness of the repost, weights left in the trigger. Plain posts page off the ranking index,
+  followee reposts are a separate bounded branch, the two are merged by `(score, id)` and the `RankCursor`
+  carries that score. Followee ids bind as one Postgres array literal. The page's `reposted_by` comes from
+  `findFollowedReposts` and its reposters join the page's single profile lookup.
+- **Profile tab.** `getUserReposts` pages `post_shares` by `created_at` (`findSharedPage`).
+- **Tests.** `PostRankedFeedRepositoryIT` exercises the query against the real triggers.

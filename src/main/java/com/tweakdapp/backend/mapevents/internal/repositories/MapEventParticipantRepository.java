@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 
 public interface MapEventParticipantRepository extends JpaRepository<MapEventParticipantEntity, MapEventParticipantId> {
 
@@ -23,6 +24,7 @@ public interface MapEventParticipantRepository extends JpaRepository<MapEventPar
               from MapEventParticipantEntity p
              where p.id.eventId = :eventId
                and (cast(:status as string) is null or p.status = :status)
+               and p.ownerId not in :hiddenIds
                and (cast(:cursorCreatedAt as timestamp) is null
                     or p.createdAt < :cursorCreatedAt
                     or (p.createdAt = :cursorCreatedAt and p.id.carId < :cursorCarId))
@@ -32,6 +34,7 @@ public interface MapEventParticipantRepository extends JpaRepository<MapEventPar
                                              @Param("status") String status,
                                              @Param("cursorCreatedAt") Instant cursorCreatedAt,
                                              @Param("cursorCarId") UUID cursorCarId,
+                                             @Param("hiddenIds") Collection<UUID> hiddenIds,
                                              Limit limit);
 
     /**
@@ -43,6 +46,7 @@ public interface MapEventParticipantRepository extends JpaRepository<MapEventPar
               from MapEventParticipantEntity p
              where p.id.eventId = :eventId
                and p.status in ('accepted', 'withdrawn')
+               and p.ownerId not in :hiddenIds
                and (cast(:cursorCreatedAt as timestamp) is null
                     or p.createdAt < :cursorCreatedAt
                     or (p.createdAt = :cursorCreatedAt and p.id.carId < :cursorCarId))
@@ -51,6 +55,7 @@ public interface MapEventParticipantRepository extends JpaRepository<MapEventPar
     List<MapEventParticipantEntity> findLineupPage(@Param("eventId") UUID eventId,
                                                    @Param("cursorCreatedAt") Instant cursorCreatedAt,
                                                    @Param("cursorCarId") UUID cursorCarId,
+                                                   @Param("hiddenIds") Collection<UUID> hiddenIds,
                                                    Limit limit);
 
     /** The caller's own registrations for one event — shown back to them whatever their status. */

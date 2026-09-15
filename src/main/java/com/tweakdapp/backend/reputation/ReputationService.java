@@ -174,7 +174,7 @@ public interface ReputationService {
      *
      * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if the username does not resolve
      */
-    ReputationSummaryDto getSummaryByUsername(String username);
+    ReputationSummaryDto getSummaryByUsername(UUID viewerId, String username);
 
     /**
      * One keyset page of a user's history, newest first — <strong>the privileged view</strong>,
@@ -184,7 +184,7 @@ public interface ReputationService {
      * from the caller's own JWT subject, or by staff who already hold the id. Revoked entries carry
      * {@code revokedAt} and {@code revokedReason} so the owner can see why their score moved.
      * Anything rendering someone else's profile must call
-     * {@link #getHistoryByUsername(String, String, int)} instead.
+     * {@link #getHistoryByUsername(UUID, String, String, int)} instead.
      *
      * @param cursor the previous page's {@code nextCursor}, or {@code null} for the first page
      * @param size   requested page size, clamped to a sane maximum
@@ -202,7 +202,7 @@ public interface ReputationService {
      *
      * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if the username does not resolve
      */
-    ReputationHistoryPageDto getHistoryByUsername(String username, String cursor, int size);
+    ReputationHistoryPageDto getHistoryByUsername(UUID viewerId, String username, String cursor, int size);
 
     // ---- reference data -----------------------------------------------------
 

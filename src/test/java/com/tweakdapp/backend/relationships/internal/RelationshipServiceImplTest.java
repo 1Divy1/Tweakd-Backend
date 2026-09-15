@@ -60,7 +60,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void followPersistsAnAcceptedRowAndReturnsAccepted() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findById(new RelationshipId(VIEWER, TARGET)))
                 .thenReturn(Optional.empty());
 
@@ -76,7 +76,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void followingYourselfIsRejectedBeforePersistence() {
-        when(profileService.findIdByUsername("me")).thenReturn(Optional.of(VIEWER));
+        when(profileService.findVisibleIdByUsername(VIEWER, "me")).thenReturn(Optional.of(VIEWER));
 
         assertThatExceptionOfType(CannotFollowSelfException.class)
                 .isThrownBy(() -> service.follow(VIEWER.toString(), "me"));
@@ -87,7 +87,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void followingAnUnknownUsernameThrowsProfileNotFound() {
-        when(profileService.findIdByUsername("ghost")).thenReturn(Optional.empty());
+        when(profileService.findVisibleIdByUsername(VIEWER, "ghost")).thenReturn(Optional.empty());
 
         assertThatExceptionOfType(ProfileNotFoundException.class)
                 .isThrownBy(() -> service.follow(VIEWER.toString(), "ghost"));
@@ -97,7 +97,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void reFollowingIsIdempotentAndReturnsTheExistingStatusWithoutSaving() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findById(new RelationshipId(VIEWER, TARGET)))
                 .thenReturn(Optional.of(acceptedRow(VIEWER, TARGET)));
 
@@ -111,7 +111,7 @@ class RelationshipServiceImplTest {
     void anExistingNonAcceptedRowMapsToNotFollowing() {
         RelationshipEntity pending = acceptedRow(VIEWER, TARGET);
         pending.setStatus("pending");
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findById(new RelationshipId(VIEWER, TARGET)))
                 .thenReturn(Optional.of(pending));
 
@@ -122,6 +122,15 @@ class RelationshipServiceImplTest {
     }
 
     // ---- unfollow -----------------------------------------------------------
+
+    @Test
+    void followingAnAccountHiddenByABlockReadsAsNotFound() {
+        when(profileService.findVisibleIdByUsername(VIEWER, "blocked")).thenReturn(Optional.empty());
+
+        assertThatExceptionOfType(ProfileNotFoundException.class)
+                .isThrownBy(() -> service.follow(VIEWER.toString(), "blocked"));
+        verifyNoInteractions(relationshipRepository);
+    }
 
     @Test
     void unfollowDeletesTheExistingRow() {
@@ -158,7 +167,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void getFollowStatusReturnsAcceptedWhenARowExists() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findById(new RelationshipId(VIEWER, TARGET)))
                 .thenReturn(Optional.of(acceptedRow(VIEWER, TARGET)));
 
@@ -168,7 +177,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void getFollowStatusReturnsNotFollowingWhenNoRowExists() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findById(new RelationshipId(VIEWER, TARGET)))
                 .thenReturn(Optional.empty());
 
@@ -180,7 +189,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void getFollowersHydratesInQueryOrderAndFlagsViewerFollowState() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findAcceptedFollowerIds(TARGET)).thenReturn(List.of(F1, F2));
         when(profileService.findByIds(List.of(F1, F2))).thenReturn(List.of(
                 new ProfileSearchResultDto(F1, "Alice", "alice", "alice.png"),
@@ -198,7 +207,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void getFollowersReturnsEmptyWithoutHydratingWhenTargetHasNoFollowers() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findAcceptedFollowerIds(TARGET)).thenReturn(List.of());
 
         assertThat(service.getFollowers(VIEWER.toString(), "target")).isEmpty();
@@ -209,7 +218,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void getFollowingDelegatesToTheFollowingQuery() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findAcceptedFollowingIds(TARGET)).thenReturn(List.of(F1));
         when(profileService.findByIds(List.of(F1))).thenReturn(List.of(
                 new ProfileSearchResultDto(F1, "Alice", "alice", "alice.png")));
@@ -224,7 +233,7 @@ class RelationshipServiceImplTest {
 
     @Test
     void listEntriesWithNoHydratedProfileAreFilteredOut() {
-        when(profileService.findIdByUsername("target")).thenReturn(Optional.of(TARGET));
+        when(profileService.findVisibleIdByUsername(VIEWER, "target")).thenReturn(Optional.of(TARGET));
         when(relationshipRepository.findAcceptedFollowerIds(TARGET)).thenReturn(List.of(F1, F2));
         // Only F1 hydrates (F2's profile is missing / gone).
         when(profileService.findByIds(List.of(F1, F2))).thenReturn(List.of(

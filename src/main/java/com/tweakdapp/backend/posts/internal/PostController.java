@@ -11,7 +11,6 @@ import com.tweakdapp.backend.posts.dto.CommentDto;
 import com.tweakdapp.backend.posts.dto.request.CreateCommentRequest;
 import com.tweakdapp.backend.posts.dto.request.CreatePostRequest;
 import com.tweakdapp.backend.posts.dto.request.PostImageKeysRequest;
-import com.tweakdapp.backend.posts.dto.request.SharePostRequest;
 import com.tweakdapp.backend.posts.dto.request.UpdatePostRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -96,7 +95,19 @@ public class PostController {
     }
 
     /**
-     * One keyset page of the caller's shared posts, newest share first. The client passes the
+     * One keyset page of the posts a user reposted, newest repost first — a profile's Reposts tab.
+     * The client passes the {@code nextCursor} from the previous response back as {@code ?cursor=}.
+     */
+    @GetMapping("/by-username/{username}/reposts")
+    public PostPageDto getUserReposts(@AuthenticationPrincipal Jwt jwt,
+                                      @PathVariable String username,
+                                      @RequestParam(required = false) String cursor,
+                                      @RequestParam(defaultValue = "20") int size) {
+        return postsService.getUserReposts(jwt.getSubject(), username, cursor, size);
+    }
+
+    /**
+     * One keyset page of the caller's reposted posts, newest repost first. The client passes the
      * {@code nextCursor} from the previous response back as {@code ?cursor=} to page on.
      */
     @GetMapping("/shared")
@@ -155,10 +166,11 @@ public class PostController {
      * One keyset page of the users who liked a post, most recent liker first.
      */
     @GetMapping("/{postId}/likes")
-    public LikerPageDto getPostLikers(@PathVariable UUID postId,
+    public LikerPageDto getPostLikers(@AuthenticationPrincipal Jwt jwt,
+                                      @PathVariable UUID postId,
                                       @RequestParam(required = false) String cursor,
                                       @RequestParam(defaultValue = "20") int size) {
-        return postsService.getPostLikers(postId, cursor, size);
+        return postsService.getPostLikers(UUID.fromString(jwt.getSubject()), postId, cursor, size);
     }
 
     // -------------------------------------------------------------------
@@ -198,18 +210,17 @@ public class PostController {
     }
 
     /**
-     * Shares a post (idempotent). The optional body's {@code content} is the sharer's caption; a
-     * non-blank value makes it a quote share. The body may be omitted for a plain share.
+     * Reposts a post (idempotent). There is no body: a repost carries nothing of the reposter's own.
+     * A body sent by an older client (the retired share note) is ignored. 400 on your own post.
      */
     @PostMapping("/{postId}/shares")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void sharePost(@AuthenticationPrincipal Jwt jwt,
-                          @PathVariable UUID postId,
-                          @Valid @RequestBody(required = false) SharePostRequest request) {
-        postsService.sharePost(jwt.getSubject(), postId, request == null ? null : request.content());
+                          @PathVariable UUID postId) {
+        postsService.sharePost(jwt.getSubject(), postId);
     }
 
-    /** Removes the caller's share of a post (idempotent). */
+    /** Undoes the caller's repost of a post (idempotent). */
     @DeleteMapping("/{postId}/shares")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unsharePost(@AuthenticationPrincipal Jwt jwt,

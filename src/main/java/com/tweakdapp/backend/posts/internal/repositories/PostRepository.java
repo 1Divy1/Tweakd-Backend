@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 
 public interface PostRepository extends JpaRepository<PostEntity, UUID> {
 
@@ -40,28 +41,71 @@ public interface PostRepository extends JpaRepository<PostEntity, UUID> {
                                       Pageable pageable);
 
     /**
-     * One keyset page of the global feed: every post ranked by virality, highest first, with the
-     * post {@code id} as a total-order tiebreaker. {@code ranking_score} is maintained by a
-     * Supabase trigger from engagement and age. The cursor is the {@code (rankingScore, id)} of the
-     * last row of the previous page, or {@code null} for the first page. Pass a {@link Pageable} of
-     * {@code size + 1} to detect a further page.
+     * One keyset page of the global feed: post ids with the score they rank by, highest first, the
+     * post {@code id} as a total-order tiebreaker. The score is {@code ranking_score} (maintained by
+     * a Supabase trigger from engagement and age) — except for a post that one of
+     * {@code followeeIds} reposted, which ranks as if it had been published at the most recent such
+     * repost: its {@code ranking_score} plus the repost's distance from the post's creation, in the
+     * same 45000-second units the trigger uses for age. So the post keeps every point of engagement
+     * and gains exactly the freshness of the repost, and the weights live only in the trigger.
      *
-     * <p>Note: {@code ranking_score} is mutable (it shifts as a post gains engagement), so a post
-     * may occasionally repeat or be skipped across pages — an accepted trade-off for a ranked
-     * "most viral" feed.
+     * <p>The two populations are paged separately and merged: posts nobody the viewer follows
+     * reposted come off {@code idx_posts_ranking_keyset} in index order; followed reposts are
+     * bounded by what the viewer's followees reposted. Keeping them disjoint ({@code not exists})
+     * is what makes {@code limit} on the first branch safe.
+     *
+     * <p>The cursor is the {@code (score, id)} of the last row of the previous page; the first page
+     * passes {@code +Infinity} so every row qualifies. {@code followeeIds} is a Postgres array
+     * literal ({@code {uuid,uuid}}, {@code {}} for none) — one bind parameter however many accounts
+     * the viewer follows. {@code hiddenIds} (same literal form) are authors a block separates from the
+     * viewer; their posts are left out of both branches. Pass {@code size + 1} as {@code limit} to
+     * detect a further page.
+     *
+     * <p>Note: scores are mutable (engagement moves {@code ranking_score}, a new repost moves the
+     * boost), so a post may occasionally repeat or be skipped across pages — an accepted trade-off
+     * for a ranked "most viral" feed.
      */
-    @Query("""
-            select p
-              from PostEntity p
-             where (:firstPage = true
-                    or p.rankingScore < :cursorScore
-                    or (p.rankingScore = :cursorScore and p.id < :cursorId))
-             order by p.rankingScore desc, p.id desc
-            """)
-    List<PostEntity> findRankedPostPage(@Param("firstPage") boolean firstPage,
-                                        @Param("cursorScore") Double cursorScore,
-                                        @Param("cursorId") UUID cursorId,
-                                        Pageable pageable);
+    @Query(value = """
+            with reposted as (
+                select ps.post_id, max(ps.created_at) as reposted_at
+                  from public.post_shares ps
+                 where ps.user_id = any(cast(:followeeIds as uuid[]))
+                 group by ps.post_id
+            ),
+            boosted as (
+                select p.id,
+                       p.ranking_score
+                         + greatest(cast(extract(epoch from r.reposted_at) as double precision)
+                                    - cast(extract(epoch from p.created_at) as double precision), 0)
+                           / 45000.0 as score
+                  from reposted r
+                  join public.posts p on p.id = r.post_id
+                 where p.user_id <> all(cast(:hiddenIds as uuid[]))
+            ),
+            plain as (
+                select p.id, p.ranking_score as score
+                  from public.posts p
+                 where not exists (select 1 from reposted r where r.post_id = p.id)
+                   and p.user_id <> all(cast(:hiddenIds as uuid[]))
+                   and (p.ranking_score < :cursorScore
+                        or (p.ranking_score = :cursorScore and p.id < :cursorId))
+                 order by p.ranking_score desc, p.id desc
+                 limit :limit
+            )
+            select u.id as "id", u.score as "score"
+              from (select id, score from plain
+                    union all
+                    select id, score from boosted) u
+             where u.score < :cursorScore
+                or (u.score = :cursorScore and u.id < :cursorId)
+             order by u.score desc, u.id desc
+             limit :limit
+            """, nativeQuery = true)
+    List<RankedPostRow> findRankedPostPage(@Param("followeeIds") String followeeIds,
+                                           @Param("hiddenIds") String hiddenIds,
+                                           @Param("cursorScore") double cursorScore,
+                                           @Param("cursorId") UUID cursorId,
+                                           @Param("limit") int limit);
 
     /**
      * When this participant card was last shared to the feed, or {@code null} if never (or every

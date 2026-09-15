@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.tweakdapp.backend.profile.ProfileService;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -30,7 +31,7 @@ class DmPresencePusherTest {
     void setUp() {
         conversationRepository = mock(DmConversationRepository.class);
         eventPusher = mock(DmEventPusher.class);
-        pusher = new DmPresencePusher(conversationRepository, eventPusher);
+        pusher = new DmPresencePusher(conversationRepository, eventPusher, mock(ProfileService.class));
     }
 
     @Test

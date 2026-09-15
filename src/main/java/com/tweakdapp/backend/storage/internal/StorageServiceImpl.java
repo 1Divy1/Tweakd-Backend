@@ -2,6 +2,8 @@ package com.tweakdapp.backend.storage.internal;
 
 import com.tweakdapp.backend.storage.StorageBucket;
 import com.tweakdapp.backend.storage.StorageService;
+import com.tweakdapp.backend.storage.UploadAccessPolicy;
+import com.tweakdapp.backend.storage.UploadTarget;
 import com.tweakdapp.backend.storage.dto.ModificationUploadUrlsResponse;
 import com.tweakdapp.backend.storage.dto.PostImagesUploadUrlsResponse;
 import com.tweakdapp.backend.storage.dto.UploadUrlResponse;
@@ -15,7 +17,9 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -24,11 +28,14 @@ public class StorageServiceImpl implements StorageService {
     private final PresignedUrlGenerator presigner;
     private final R2Config config;
     private final S3Client s3Client;
+    private final Map<UploadTarget, UploadAccessPolicy> accessPolicies = new EnumMap<>(UploadTarget.class);
 
-    StorageServiceImpl(PresignedUrlGenerator presigner, R2Config config, S3Client s3Client) {
+    StorageServiceImpl(PresignedUrlGenerator presigner, R2Config config, S3Client s3Client,
+                       List<UploadAccessPolicy> accessPolicies) {
         this.presigner = presigner;
         this.config = config;
         this.s3Client = s3Client;
+        accessPolicies.forEach(policy -> this.accessPolicies.put(policy.target(), policy));
     }
 
     // === AVATARS ===
@@ -42,11 +49,14 @@ public class StorageServiceImpl implements StorageService {
     }
 
     // === GARAGE ===
-    // cars/{carId}/cover.webp
+    // cars/{carId}/cover/{uuid}.webp
+    // A random suffix rather than a fixed "cover.webp": a URL minted for the cover can never overwrite
+    // the one that is live, and a replaced cover gets a key the CDN has never cached.
     @Override
-    public UploadUrlResponse coverUploadUrlRequest(UUID carId) {
+    public UploadUrlResponse coverUploadUrlRequest(UUID userId, UUID carId) {
+        requireUploadAccess(UploadTarget.CAR, userId, carId);
         String key = "cars/" + carId +
-                "/cover" + FileFormat.WEBP.getExtension();
+                "/cover/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
 
         return buildUploadUrlResponse(config.getGarage(), key, FileFormat.WEBP);
     }
@@ -54,7 +64,8 @@ public class StorageServiceImpl implements StorageService {
     // TODO: consider modifying the file extension to allow videos too
     // cars/{carId}/gallery/{uuid}.webp
     @Override
-    public UploadUrlResponse galleryUploadUrlRequest(UUID carId) {
+    public UploadUrlResponse galleryUploadUrlRequest(UUID userId, UUID carId) {
+        requireUploadAccess(UploadTarget.CAR, userId, carId);
         String key = "cars/" + carId +
                 "/gallery/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
 
@@ -62,8 +73,11 @@ public class StorageServiceImpl implements StorageService {
     }
 
     // cars/{carId}/modifications/{modId}/{phase}/{uuid}.{ext}
+    // Owning the car is enough: a modId from another car only yields a key under the caller's own car,
+    // which the garage module refuses to attach to that other car's modification.
     @Override
-    public UploadUrlResponse modificationUploadUrlRequest(UUID carId, UUID modId, ModificationPhase phase, FileFormat format) {
+    public UploadUrlResponse modificationUploadUrlRequest(UUID userId, UUID carId, UUID modId, ModificationPhase phase, FileFormat format) {
+        requireUploadAccess(UploadTarget.CAR, userId, carId);
         String key = "cars/" + carId +
                 "/modifications/" + modId +
                 "/" + phase.folder() +
@@ -74,7 +88,8 @@ public class StorageServiceImpl implements StorageService {
 
     // cars/{carId}/modifications/{modId}/{phase}/{uuid}.{ext}  (one per item)
     @Override
-    public ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files) {
+    public ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID userId, UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files) {
+        requireUploadAccess(UploadTarget.CAR, userId, carId);
         List<ModificationUploadUrlsResponse.Item> uploads = files.stream()
                 .map(file -> {
                     String key = "cars/" + carId +
@@ -92,7 +107,8 @@ public class StorageServiceImpl implements StorageService {
     // === POSTS ===
     // posts/{postId}/{uuid}.webp  (one per requested image)
     @Override
-    public PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count) {
+    public PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID userId, UUID postId, int count) {
+        requireUploadAccess(UploadTarget.POST, userId, postId);
         List<UploadUrlResponse> uploads = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
@@ -108,7 +124,8 @@ public class StorageServiceImpl implements StorageService {
     // A random suffix rather than a fixed "cover.webp": replacing a cover writes a new key, so the
     // CDN can never serve a stale copy of the old one, and the previous object can be deleted.
     @Override
-    public UploadUrlResponse eventCoverUploadUrlRequest(UUID eventId) {
+    public UploadUrlResponse eventCoverUploadUrlRequest(UUID userId, UUID eventId) {
+        requireUploadAccess(UploadTarget.MAP_EVENT, userId, eventId);
         String key = "events/" + eventId +
                 "/" + UUID.randomUUID() + FileFormat.WEBP.getExtension();
 
@@ -146,6 +163,15 @@ public class StorageServiceImpl implements StorageService {
     }
 
     // ========== HELPERS ==========
+    private void requireUploadAccess(UploadTarget target, UUID userId, UUID resourceId) {
+        UploadAccessPolicy policy = accessPolicies.get(target);
+        if (policy == null) {
+            // Fail closed: a target nobody guards must never get upload URLs.
+            throw new IllegalStateException("No upload access policy registered for " + target);
+        }
+        policy.requireUploadAccess(userId, resourceId);
+    }
+
     private UploadUrlResponse buildUploadUrlResponse(
             R2Config.BucketTarget target,
             String key,

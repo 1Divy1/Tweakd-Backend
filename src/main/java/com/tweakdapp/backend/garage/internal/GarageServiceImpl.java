@@ -169,7 +169,7 @@ class GarageServiceImpl implements GarageService {
 
         // Check if the user exists
         UUID ownerId = profileService
-                .findIdByUsername(username)
+                .findVisibleIdByUsername(UUID.fromString(currentUserId), username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
 
         // Fetch the garage entity for the owner if it exists or throw if not found
@@ -275,6 +275,14 @@ class GarageServiceImpl implements GarageService {
                 .findDetailById(carId)
                 .orElseThrow(() -> new CarNotFoundException(carId));
 
+        // A car whose owner a block separates from the viewer reads as missing.
+        if (currentUserId != null) {
+            UUID ownerId = findCarOwnerIds(List.of(carId)).get(carId);
+            if (ownerId != null && profileService.isHiddenFrom(UUID.fromString(currentUserId), ownerId)) {
+                throw new CarNotFoundException(carId);
+            }
+        }
+
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
         return toCarDto(car, mods);
     }
@@ -298,9 +306,31 @@ class GarageServiceImpl implements GarageService {
         // Verify that the current user is the owner of the car
         ensureOwnership(car, userId);
 
+        String previous = car.getCoverImageKey();
+        requireOwnedKeys(List.of(key), previous == null ? List.of() : List.of(previous),
+                "cars/" + carId + "/cover/");
+
         // Persist the R2 key (not the full URL) and save the changes in the DB
         car.setCoverImageKey(key);
         carRepository.save(car);
+
+        // Only ever delete an object under this car's own prefix, even if an older row says otherwise.
+        if (previous != null && !previous.equals(key) && previous.startsWith("cars/" + carId + "/")) {
+            deleteR2ObjectsAfterCommit(List.of(previous), carId);
+        }
+    }
+
+    /**
+     * Upload URLs mint keys under the resource they were issued for. A key that is neither already
+     * stored on the resource nor under {@code prefix} was minted for someone else, and accepting it
+     * would let the caller attach, and later delete, another user's object.
+     */
+    private static void requireOwnedKeys(List<String> incoming, List<String> stored, String prefix) {
+        for (String key : incoming) {
+            if (key == null || (!stored.contains(key) && !key.startsWith(prefix))) {
+                throw new InvalidReferenceException("Media key does not belong to this car: " + key);
+            }
+        }
     }
 
     @Override
@@ -312,11 +342,15 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new CarNotFoundException(carId));
         ensureOwnership(car, userId);
 
-        // Diff: find keys that are in the DB but not in the incoming list — those are removed.
-        Set<String> incomingSet = new HashSet<>(imageKeys);
-        List<String> removedKeys = carGalleryRepository.findAllByCarIdOrderByPositionAsc(carId)
+        List<String> storedKeys = carGalleryRepository.findAllByCarIdOrderByPositionAsc(carId)
                 .stream()
                 .map(CarGalleryEntity::getKey)
+                .toList();
+        requireOwnedKeys(imageKeys, storedKeys, "cars/" + carId + "/gallery/");
+
+        // Diff: find keys that are in the DB but not in the incoming list — those are removed.
+        Set<String> incomingSet = new HashSet<>(imageKeys);
+        List<String> removedKeys = storedKeys.stream()
                 .filter(key -> !incomingSet.contains(key))
                 .toList();
 
@@ -458,6 +492,10 @@ class GarageServiceImpl implements GarageService {
         }
 
         if (request.addMedia() != null) {
+            List<String> addedKeys = request.addMedia().stream()
+                    .map(UpdateModificationRequest.MediaItem::key)
+                    .toList();
+            requireOwnedKeys(addedKeys, List.of(), "cars/" + carId + "/modifications/" + modificationId + "/");
             for (UpdateModificationRequest.MediaItem item : request.addMedia()) {
                 insertModificationMedia(mod, item.key(), item.phase());
             }

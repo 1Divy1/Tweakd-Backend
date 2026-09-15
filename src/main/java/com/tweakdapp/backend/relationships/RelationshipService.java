@@ -4,6 +4,7 @@ import com.tweakdapp.backend.relationships.dto.FollowProfileSearchResult;
 import com.tweakdapp.backend.relationships.dto.FollowStatusDto;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface RelationshipService {
 
@@ -28,6 +29,13 @@ public interface RelationshipService {
 
     /** Users that {@code targetUsername} follows. All accounts are public, so always visible. */
     List<FollowProfileSearchResult> getFollowing(String currentUserId, String targetUsername);
+
+    /**
+     * Ids of the accounts {@code userId} follows, most recent follow first. An id-only read for
+     * modules that shape content around who someone follows (the feed's reposts), so they never
+     * touch the {@code follows} table themselves.
+     */
+    List<UUID> findFollowingIds(UUID userId);
 
     /**
      * Removes a follower from the current user's list of followers.

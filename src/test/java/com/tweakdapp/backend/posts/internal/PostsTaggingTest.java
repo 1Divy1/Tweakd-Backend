@@ -142,7 +142,6 @@ class PostsTaggingTest {
         p.setLikesCount(0L);
         p.setCommentsCount(0L);
         p.setSharesCount(0L);
-        p.setQuoteSharesCount(0L);
         p.setSavedCount(0L);
         p.setCreatedAt(Instant.now());
         return p;
@@ -277,7 +276,7 @@ class PostsTaggingTest {
     @Test
     void commentPageResolvesTagsAndSkipsThemForADeletedComment() {
         profilesExist(AUTHOR, OWNER);
-        when(commentRepository.findRootCommentPage(any(), anyBoolean(), any(), any(), any()))
+        when(commentRepository.findRootCommentPage(any(), anyBoolean(), any(), any(), any(), any()))
                 .thenReturn(List.of(comment(COMMENT, AUTHOR, false), comment(DELETED_COMMENT, AUTHOR, true)));
         when(commentTaggedPersonRepository.findAllByIdCommentIdIn(List.of(COMMENT)))
                 .thenReturn(List.of(taggedPerson(COMMENT, OWNER)));

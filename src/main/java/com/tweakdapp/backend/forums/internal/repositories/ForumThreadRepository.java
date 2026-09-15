@@ -35,6 +35,7 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
                and (:topicId is null or exists (
                         select 1 from ForumThreadTopicEntity tt
                          where tt.id.threadId = t.id and tt.id.topicId = :topicId))
+               and t.userId not in :hiddenIds
                and (:firstPage = true
                     or t.rankingScore < :cursorScore
                     or (t.rankingScore = :cursorScore and t.id < :cursorId))
@@ -46,6 +47,7 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
                                         @Param("firstPage") boolean firstPage,
                                         @Param("cursorScore") Double cursorScore,
                                         @Param("cursorId") UUID cursorId,
+                                        @Param("hiddenIds") Collection<UUID> hiddenIds,
                                         Pageable pageable);
 
     /**
@@ -60,6 +62,7 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
                and (:topicId is null or exists (
                         select 1 from ForumThreadTopicEntity tt
                          where tt.id.threadId = t.id and tt.id.topicId = :topicId))
+               and t.userId not in :hiddenIds
                and (:firstPage = true
                     or t.createdAt < :cursorTs
                     or (t.createdAt = :cursorTs and t.id < :cursorId))
@@ -71,6 +74,7 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
                                         @Param("firstPage") boolean firstPage,
                                         @Param("cursorTs") Instant cursorTs,
                                         @Param("cursorId") UUID cursorId,
+                                        @Param("hiddenIds") Collection<UUID> hiddenIds,
                                         Pageable pageable);
 
     /**
@@ -86,6 +90,7 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
                and (:topicId is null or exists (
                         select 1 from ForumThreadTopicEntity tt
                          where tt.id.threadId = t.id and tt.id.topicId = :topicId))
+               and t.userId not in :hiddenIds
                and (:firstPage = true
                     or t.lastActivityAt < :cursorTs
                     or (t.lastActivityAt = :cursorTs and t.id < :cursorId))
@@ -97,6 +102,7 @@ public interface ForumThreadRepository extends JpaRepository<ForumThreadEntity, 
                                            @Param("firstPage") boolean firstPage,
                                            @Param("cursorTs") Instant cursorTs,
                                            @Param("cursorId") UUID cursorId,
+                                           @Param("hiddenIds") Collection<UUID> hiddenIds,
                                            Pageable pageable);
 
     /**
