@@ -71,7 +71,7 @@ class TagsServiceImplTest {
         profileService = mock(ProfileService.class);
         service = new TagsServiceImpl(postsService, forumsService, garageService, profileService);
 
-        when(profileService.findIdByUsername("owner")).thenReturn(Optional.of(OWNER));
+        when(profileService.findVisibleIdByUsername(any(), eq("owner"))).thenReturn(Optional.of(OWNER));
         when(garageService.findCarIdsByOwner(OWNER)).thenReturn(List.of(CAR));
 
         // Default: every stream empty; individual tests fill in the ones they care about.
@@ -232,12 +232,12 @@ class TagsServiceImplTest {
         service.getMyTaggedContent(OWNER.toString(), null, 20);
 
         verify(postsService).findTaggedPostRefs(eq(OWNER), any(), any(), any(), anyInt());
-        verify(profileService, never()).findIdByUsername(any());
+        verify(profileService, never()).findVisibleIdByUsername(any(), any());
     }
 
     @Test
     void unknownUsernameIsNotFound() {
-        when(profileService.findIdByUsername("ghost")).thenReturn(Optional.empty());
+        when(profileService.findVisibleIdByUsername(any(), eq("ghost"))).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getTaggedContent(VIEWER.toString(), "ghost", null, 20))
                 .isInstanceOf(ProfileNotFoundException.class);
@@ -281,7 +281,7 @@ class TagsServiceImplTest {
 
     private static PostDto post(UUID id) {
         return new PostDto(id, "caption", null, List.of(), List.of(), List.of(),
-                0, 0, 0, 0, true, true, true, true, false, false, T1, T1, null);
+                0, 0, 0, 0, true, true, true, true, false, false, T1, T1, null, false, null);
     }
 
     private static CommentDto comment(UUID id) {

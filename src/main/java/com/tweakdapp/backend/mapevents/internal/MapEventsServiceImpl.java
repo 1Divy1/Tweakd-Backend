@@ -83,6 +83,8 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
+import java.util.Collection;
 
 @Service
 class MapEventsServiceImpl implements MapEventsService {
@@ -270,6 +272,7 @@ class MapEventsServiceImpl implements MapEventsService {
                 normalisedStatus,
                 decoded == null ? null : decoded.timestamp(),
                 decoded == null ? null : decoded.id(),
+                hiddenIdsFor(currentUserId),
                 Limit.of(pageSize + 1));
 
         boolean hasMore = rows.size() > pageSize;
@@ -317,8 +320,10 @@ class MapEventsServiceImpl implements MapEventsService {
         // No filter = the public line-up, which now includes withdrawn cars alongside accepted
         // ones (a pending withdrawal does not remove a participant from the entry list).
         List<MapEventParticipantEntity> rows = normalisedStatus == null
-                ? participantRepository.findLineupPage(eventId, cursorCreatedAt, cursorCarId, Limit.of(pageSize + 1))
-                : participantRepository.findPage(eventId, normalisedStatus, cursorCreatedAt, cursorCarId, Limit.of(pageSize + 1));
+                ? participantRepository.findLineupPage(eventId, cursorCreatedAt, cursorCarId,
+                        hiddenIdsFor(currentUserId), Limit.of(pageSize + 1))
+                : participantRepository.findPage(eventId, normalisedStatus, cursorCreatedAt, cursorCarId,
+                        hiddenIdsFor(currentUserId), Limit.of(pageSize + 1));
 
         boolean hasMore = rows.size() > pageSize;
         List<MapEventParticipantEntity> page = hasMore ? rows.subList(0, pageSize) : rows;
@@ -665,12 +670,12 @@ class MapEventsServiceImpl implements MapEventsService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<OrganizerCandidateDto> searchOrganizerCandidates(String query) {
+    public List<OrganizerCandidateDto> searchOrganizerCandidates(UUID currentUserId, String query) {
         if (query == null || query.isBlank()) {
             return List.of();
         }
 
-        Stream<OrganizerCandidateDto> individuals = profileService.searchByUsername(query).stream()
+        Stream<OrganizerCandidateDto> individuals = profileService.searchByUsername(currentUserId, query).stream()
                 .map(profile -> new OrganizerCandidateDto(
                         MapEventOrganizerDto.INDIVIDUAL, profile.id(), profile.name(), profile.username(), profile.avatarUrl()));
 
@@ -1239,6 +1244,11 @@ class MapEventsServiceImpl implements MapEventsService {
             throw new MapEventNotFoundException(eventId);
         }
         return event;
+    }
+
+    /** The caller's block-hidden account ids, shaped for a {@code not in :hiddenIds} query. */
+    private Collection<UUID> hiddenIdsFor(UUID currentUserId) {
+        return BlockDirectory.asQueryParam(profileService.findHiddenProfileIds(currentUserId));
     }
 
     private void requireVisible(UUID currentUserId, UUID eventId) {

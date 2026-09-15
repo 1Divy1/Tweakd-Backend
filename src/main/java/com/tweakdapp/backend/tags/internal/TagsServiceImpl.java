@@ -51,9 +51,10 @@ public class TagsServiceImpl implements TagsService {
 
     @Override
     public TaggedItemPageDto getTaggedContent(String currentUserId, String username, String cursor, int size) {
-        UUID ownerId = profileService.findIdByUsername(username)
+        UUID viewerId = UUID.fromString(currentUserId);
+        UUID ownerId = profileService.findVisibleIdByUsername(viewerId, username)
                 .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
-        return taggedPage(UUID.fromString(currentUserId), ownerId, cursor, size);
+        return taggedPage(viewerId, ownerId, cursor, size);
     }
 
     @Override

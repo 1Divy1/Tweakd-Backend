@@ -10,9 +10,20 @@ import com.tweakdapp.backend.storage.internal.enums.ModificationPhase;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Presigned upload URLs and key → URL resolution for R2.
+ *
+ * <p>A presigned URL is a bearer credential for one object key, so every resource-scoped request
+ * below first asks the owning module's {@link UploadAccessPolicy} whether {@code userId} may upload
+ * for that resource, and propagates that module's not-found / forbidden exception when not.
+ */
 public interface StorageService {
-    UploadUrlResponse coverUploadUrlRequest(UUID carId);
-    UploadUrlResponse galleryUploadUrlRequest(UUID carId);
+
+    /** Cover slot for a car the caller owns. Keys are {@code cars/{carId}/cover/{uuid}.webp}. */
+    UploadUrlResponse coverUploadUrlRequest(UUID userId, UUID carId);
+
+    /** Gallery slot for a car the caller owns. Keys are {@code cars/{carId}/gallery/{uuid}.webp}. */
+    UploadUrlResponse galleryUploadUrlRequest(UUID userId, UUID carId);
 
     /**
      * Issues a presigned PUT URL for the given user's avatar image. Flutter uploads directly to R2
@@ -28,23 +39,29 @@ public interface StorageService {
      * image directly to R2 and then sends the returned {@code key}s back to the posts module to
      * persist. Replaces N single-image round-trips for a multi-image post.
      *
+     * @param userId the caller; must be the post's author
      * @param postId the post the images belong to (used to namespace the R2 keys)
      * @param count how many upload slots to mint (1–10)
      * @return one {@code {key, uploadUrl}} slot per requested image
      */
-    PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID postId, int count);
+    PostImagesUploadUrlsResponse postImagesUploadUrlRequest(UUID userId, UUID postId, int count);
 
     /**
      * Issues a presigned PUT URL for a car event's cover image. Follows the same create-then-attach
      * flow as posts: the event row is created first so its id exists, Flutter uploads the cover
      * straight to R2, then sends the returned {@code key} back to the events module to persist.
      *
+     * @param userId the caller; must be one of the event's organizers
      * @param eventId the event the cover belongs to (used to namespace the R2 key)
      * @return a {@code {key, uploadUrl}} slot
      */
-    UploadUrlResponse eventCoverUploadUrlRequest(UUID eventId);
-    UploadUrlResponse modificationUploadUrlRequest(UUID carId, UUID modId, ModificationPhase phase, FileFormat format);
-    ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files);
+    UploadUrlResponse eventCoverUploadUrlRequest(UUID userId, UUID eventId);
+
+    /** Modification media slot for a car the caller owns. */
+    UploadUrlResponse modificationUploadUrlRequest(UUID userId, UUID carId, UUID modId, ModificationPhase phase, FileFormat format);
+
+    /** Modification media slots, one per item and in request order, for a car the caller owns. */
+    ModificationUploadUrlsResponse modificationBatchUploadUrlRequest(UUID userId, UUID carId, UUID modId, List<ModificationUploadRequest.MediaItem> files);
 
     /**
      * Builds the public URL for a stored R2 object key. The bucket name and public domain are

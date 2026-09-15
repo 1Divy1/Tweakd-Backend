@@ -91,7 +91,7 @@ class PostsNotificationListener {
         notificationService.push(
                 event.recipientId(),
                 "post_share",
-                username + " shared your post",
+                username + " reposted your post",
                 null,
                 basePayload(event.actorId(), username, "post_id", event.postId()));
     }

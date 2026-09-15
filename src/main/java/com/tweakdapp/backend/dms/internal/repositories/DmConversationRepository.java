@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
 
 public interface DmConversationRepository extends JpaRepository<DmConversationEntity, UUID> {
 
@@ -40,9 +41,13 @@ public interface DmConversationRepository extends JpaRepository<DmConversationEn
             where s.userId = :userId
               and s.hiddenAt is null
               and c.lastMessageAt is not null
+              and c.userA not in :hiddenIds
+              and c.userB not in :hiddenIds
             order by c.lastMessageAt desc, c.id desc
             """)
-    List<DmConversationEntity> findFirstPage(@Param("userId") UUID userId, Pageable pageable);
+    List<DmConversationEntity> findFirstPage(@Param("userId") UUID userId,
+                                             @Param("hiddenIds") Collection<UUID> hiddenIds,
+                                             Pageable pageable);
 
     /**
      * Everyone the user has an actual (message-carrying) conversation with — the audience for
@@ -65,10 +70,13 @@ public interface DmConversationRepository extends JpaRepository<DmConversationEn
               and c.lastMessageAt is not null
               and (c.lastMessageAt < :lastMessageAt
                    or (c.lastMessageAt = :lastMessageAt and c.id < :id))
+              and c.userA not in :hiddenIds
+              and c.userB not in :hiddenIds
             order by c.lastMessageAt desc, c.id desc
             """)
     List<DmConversationEntity> findPageAfter(@Param("userId") UUID userId,
                                              @Param("lastMessageAt") Instant lastMessageAt,
                                              @Param("id") UUID id,
+                                             @Param("hiddenIds") Collection<UUID> hiddenIds,
                                              Pageable pageable);
 }

@@ -124,7 +124,7 @@ class PostsNotificationListenerTest {
         listener.on(new PostSharedEvent(POST, RECIPIENT, ACTOR));
 
         verify(notificationService).push(eq(RECIPIENT), eq("post_share"),
-                eq("marius_dev shared your post"), isNull(), any());
+                eq("marius_dev reposted your post"), isNull(), any());
     }
 
     @Test

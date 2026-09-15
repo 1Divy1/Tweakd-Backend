@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 
 public interface MapEventAttendeeRepository extends JpaRepository<MapEventAttendeeEntity, MapEventAttendeeId> {
 
@@ -22,6 +23,7 @@ public interface MapEventAttendeeRepository extends JpaRepository<MapEventAttend
               from MapEventAttendeeEntity a
              where a.id.eventId = :eventId
                and (cast(:status as string) is null or a.status = :status)
+               and a.id.userId not in :hiddenIds
                and (cast(:cursorCreatedAt as timestamp) is null
                     or a.createdAt < :cursorCreatedAt
                     or (a.createdAt = :cursorCreatedAt and a.id.userId < :cursorUserId))
@@ -31,6 +33,7 @@ public interface MapEventAttendeeRepository extends JpaRepository<MapEventAttend
                                           @Param("status") String status,
                                           @Param("cursorCreatedAt") Instant cursorCreatedAt,
                                           @Param("cursorUserId") UUID cursorUserId,
+                                          @Param("hiddenIds") Collection<UUID> hiddenIds,
                                           Limit limit);
 
     long countByIdEventIdAndStatus(UUID eventId, String status);

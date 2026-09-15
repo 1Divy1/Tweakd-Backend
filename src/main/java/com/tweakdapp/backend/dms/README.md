@@ -40,8 +40,10 @@
 The rest of this document describes the module **as implemented**. Treat the send and WebSocket
 sections as a reference for code that exists, not as a description of live traffic.
 
-Anyone can DM anyone (all accounts are public; there is no block check yet — `blocked_accounts`
-exists but the `relationships` module exposes no public API for it). Conversations are created
+Anyone can DM anyone they are not blocked from (all accounts are public). A block in either direction
+hides the conversation from both chats lists and 404s its reads; sending is refused inside Supabase's
+`dm_send_message` (same error as an unknown recipient). Unblocking brings the conversation back intact.
+Conversations are created
 implicitly by the pair's first message. "Delete chat" is a per-user *hide*; a new message from
 either side unhides it. Message delete is a soft delete: the row keeps its place, `deleted` flips,
 content is blanked, tagged cars drop to an empty list, both sides render a placeholder.

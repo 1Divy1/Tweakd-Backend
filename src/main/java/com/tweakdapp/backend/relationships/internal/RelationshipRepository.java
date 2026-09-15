@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.jpa.repository.Modifying;
 
 interface RelationshipRepository extends JpaRepository<RelationshipEntity, RelationshipId> {
 
@@ -29,4 +30,11 @@ interface RelationshipRepository extends JpaRepository<RelationshipEntity, Relat
             "and f.id.followingId in :candidateIds")
     List<UUID> findAcceptedFollowingIdsIn(@Param("followerId") UUID followerId,
                                           @Param("candidateIds") List<UUID> candidateIds);
+
+    /** Deletes the follow edges between two users, in both directions — part of blocking. */
+    @Modifying
+    @Query("delete from RelationshipEntity f " +
+            "where (f.id.followerId = :first and f.id.followingId = :second) " +
+            "or (f.id.followerId = :second and f.id.followingId = :first)")
+    int deleteFollowsBetween(@Param("first") UUID first, @Param("second") UUID second);
 }

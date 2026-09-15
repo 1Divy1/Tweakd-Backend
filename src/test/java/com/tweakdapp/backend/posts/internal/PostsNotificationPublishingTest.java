@@ -6,6 +6,7 @@ import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.posts.PostCommentedEvent;
 import com.tweakdapp.backend.posts.PostLikedEvent;
 import com.tweakdapp.backend.posts.PostSharedEvent;
+import com.tweakdapp.backend.posts.exception.CannotRepostOwnPostException;
 import com.tweakdapp.backend.posts.dto.request.CreateCommentRequest;
 import com.tweakdapp.backend.posts.internal.entities.CommentEntity;
 import com.tweakdapp.backend.posts.internal.entities.PostEntity;
@@ -35,6 +36,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -99,7 +101,8 @@ class PostsNotificationPublishingTest {
     @Test
     void likePostPublishesPostLikedEventOnRealInsert() {
         when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
-        when(postLikeRepository.existsByIdPostIdAndIdUserId(POST, ACTOR)).thenReturn(false);
+        when(postLikeRepository.insertIgnoringConflict(POST, ACTOR)).thenReturn(1);
+        when(postLikeRepository.markLikeNotified(POST, ACTOR)).thenReturn(1);
 
         service.likePost(ACTOR.toString(), POST);
 
@@ -113,7 +116,20 @@ class PostsNotificationPublishingTest {
     @Test
     void likePostDoesNotPublishForDuplicateLike() {
         when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
-        when(postLikeRepository.existsByIdPostIdAndIdUserId(POST, ACTOR)).thenReturn(true);
+        when(postLikeRepository.insertIgnoringConflict(POST, ACTOR)).thenReturn(0);
+
+        service.likePost(ACTOR.toString(), POST);
+
+        verify(eventPublisher, never()).publishEvent(any());
+        verify(postLikeRepository, never()).markLikeNotified(any(), any());
+    }
+
+    /** Unlike deletes the like row, so the re-like inserts again — but the author was already told. */
+    @Test
+    void likePostDoesNotRenotifyAfterUnlikeAndLike() {
+        when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
+        when(postLikeRepository.insertIgnoringConflict(POST, ACTOR)).thenReturn(1);
+        when(postLikeRepository.markLikeNotified(POST, ACTOR)).thenReturn(0);
 
         service.likePost(ACTOR.toString(), POST);
 
@@ -123,7 +139,8 @@ class PostsNotificationPublishingTest {
     @Test
     void likePostDoesNotSelfNotify() {
         when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
-        when(postLikeRepository.existsByIdPostIdAndIdUserId(POST, AUTHOR)).thenReturn(false);
+        when(postLikeRepository.insertIgnoringConflict(POST, AUTHOR)).thenReturn(1);
+        when(postLikeRepository.markLikeNotified(POST, AUTHOR)).thenReturn(1);
 
         service.likePost(AUTHOR.toString(), POST);
 
@@ -133,9 +150,10 @@ class PostsNotificationPublishingTest {
     @Test
     void sharePostPublishesPostSharedEventOnRealInsert() {
         when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
-        when(postShareRepository.existsByIdPostIdAndIdUserId(POST, ACTOR)).thenReturn(false);
+        when(postShareRepository.insertIgnoringConflict(POST, ACTOR)).thenReturn(1);
+        when(postShareRepository.markRepostNotified(POST, ACTOR)).thenReturn(1);
 
-        service.sharePost(ACTOR.toString(), POST, "check this");
+        service.sharePost(ACTOR.toString(), POST);
 
         ArgumentCaptor<PostSharedEvent> captor = ArgumentCaptor.forClass(PostSharedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
@@ -146,10 +164,34 @@ class PostsNotificationPublishingTest {
     @Test
     void sharePostDoesNotPublishForDuplicateShare() {
         when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
-        when(postShareRepository.existsByIdPostIdAndIdUserId(POST, ACTOR)).thenReturn(true);
+        when(postShareRepository.insertIgnoringConflict(POST, ACTOR)).thenReturn(0);
 
-        service.sharePost(ACTOR.toString(), POST, null);
+        service.sharePost(ACTOR.toString(), POST);
 
+        verify(eventPublisher, never()).publishEvent(any());
+        verify(postShareRepository, never()).markRepostNotified(any(), any());
+    }
+
+    /** Undo deletes the repost row, so the re-repost inserts again — but the author was already told. */
+    @Test
+    void sharePostDoesNotRenotifyAfterUndoAndRepost() {
+        when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
+        when(postShareRepository.insertIgnoringConflict(POST, ACTOR)).thenReturn(1);
+        when(postShareRepository.markRepostNotified(POST, ACTOR)).thenReturn(0);
+
+        service.sharePost(ACTOR.toString(), POST);
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void repostingYourOwnPostIsRejectedAndWritesNothing() {
+        when(postRepository.findById(POST)).thenReturn(Optional.of(post(AUTHOR)));
+
+        assertThatThrownBy(() -> service.sharePost(AUTHOR.toString(), POST))
+                .isInstanceOf(CannotRepostOwnPostException.class);
+
+        verify(postShareRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
     }
 

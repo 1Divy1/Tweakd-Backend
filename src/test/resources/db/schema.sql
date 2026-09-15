@@ -125,21 +125,16 @@ CREATE FUNCTION public.compute_post_ranking_score() RETURNS trigger
     SET search_path TO ''
     AS $$
 declare
-  w_like        constant double precision := 1;
-  w_comment     constant double precision := 4;
-  w_share_plain constant double precision := 6;
-  w_share_desc  constant double precision := 10;
-  w_save        constant double precision := 3;
-  plain_shares  bigint;
-  s             double precision;
+  w_like    constant double precision := 1;
+  w_comment constant double precision := 4;
+  w_repost  constant double precision := 6;
+  w_save    constant double precision := 3;
+  s         double precision;
 begin
-  plain_shares := greatest(coalesce(new.shares_count, 0) - coalesce(new.quote_shares_count, 0), 0);
-
-  s := w_like        * coalesce(new.likes_count, 0)
-     + w_comment     * coalesce(new.comments_count, 0)
-     + w_share_plain * plain_shares
-     + w_share_desc  * coalesce(new.quote_shares_count, 0)
-     + w_save        * coalesce(new.saved_count, 0);
+  s := w_like    * coalesce(new.likes_count, 0)
+     + w_comment * coalesce(new.comments_count, 0)
+     + w_repost  * coalesce(new.shares_count, 0)
+     + w_save    * coalesce(new.saved_count, 0);
 
   new.ranking_score :=
         log(greatest(s, 1))
@@ -280,6 +275,16 @@ begin
     raise exception 'recipient not found' using errcode = '22023';
   end if;
 
+  -- A block in either direction reads as an unknown recipient: the blocked side must not learn
+  -- that a block exists.
+  if exists (
+    select 1 from public.blocked_accounts b
+     where (b.blocker_id = v_sender and b.blocked_id = p_recipient_id)
+        or (b.blocker_id = p_recipient_id and b.blocked_id = v_sender)
+  ) then
+    raise exception 'recipient not found' using errcode = '22023';
+  end if;
+
   -- A send needs text, cars, or both — never an empty payload.
   if btrim(v_content) = '' and coalesce(cardinality(v_cars), 0) = 0 then
     raise exception 'message must have content or at least one tagged car'
@@ -386,10 +391,15 @@ CREATE FUNCTION public.dm_topic_is_peer(topic text) RETURNS boolean
   select exists (
     select 1
     from public.dm_conversations c
-    where (c.user_a = auth.uid()
-           and c.user_b::text = substring(topic from 6))
-       or (c.user_b = auth.uid()
-           and c.user_a::text = substring(topic from 6))
+    where ((c.user_a = auth.uid()
+            and c.user_b::text = substring(topic from 6))
+        or (c.user_b = auth.uid()
+            and c.user_a::text = substring(topic from 6)))
+      and not exists (
+        select 1 from public.blocked_accounts b
+         where (b.blocker_id = c.user_a and b.blocked_id = c.user_b)
+            or (b.blocker_id = c.user_b and b.blocked_id = c.user_a)
+      )
   );
 $$;
 
@@ -848,17 +858,9 @@ CREATE FUNCTION public.sync_post_shares_count() RETURNS trigger
     AS $$
 begin
   if (tg_op = 'INSERT') then
-    if nullif(btrim(new.content), '') is not null then
-      update public.posts set quote_shares_count = quote_shares_count + 1 where id = new.post_id;
-    else
-      update public.posts set shares_count = shares_count + 1 where id = new.post_id;
-    end if;
+    update public.posts set shares_count = shares_count + 1 where id = new.post_id;
   elsif (tg_op = 'DELETE') then
-    if nullif(btrim(old.content), '') is not null then
-      update public.posts set quote_shares_count = quote_shares_count - 1 where id = old.post_id;
-    else
-      update public.posts set shares_count = shares_count - 1 where id = old.post_id;
-    end if;
+    update public.posts set shares_count = shares_count - 1 where id = old.post_id;
   end if;
   return null;
 end;
@@ -901,6 +903,77 @@ begin
    where id = new.ticket_id;
   return new;
 end $$;
+
+
+--
+-- Name: trg_contest_entries_count(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_contest_entries_count() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'accepted' then
+      update public.car_event_contests set entries_count = entries_count + 1 where id = new.contest_id;
+    end if;
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if (old.status = 'accepted') <> (new.status = 'accepted') then
+      update public.car_event_contests
+         set entries_count = entries_count + (case when new.status = 'accepted' then 1 else -1 end)
+       where id = new.contest_id;
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    if old.status = 'accepted' then
+      update public.car_event_contests set entries_count = entries_count - 1 where id = old.contest_id;
+    end if;
+    return old;
+  end if;
+  return null;
+end;
+$$;
+
+
+--
+-- Name: trg_contest_vote_counts(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.trg_contest_vote_counts() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if tg_op = 'INSERT' then
+    update public.car_event_contest_entries
+       set votes_count = votes_count + 1, last_vote_at = now()
+     where contest_id = new.contest_id and car_id = new.car_id;
+    update public.car_event_contests
+       set votes_count = votes_count + 1
+     where id = new.contest_id;
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if new.car_id <> old.car_id then
+      update public.car_event_contest_entries
+         set votes_count = votes_count - 1
+       where contest_id = old.contest_id and car_id = old.car_id;
+      update public.car_event_contest_entries
+         set votes_count = votes_count + 1, last_vote_at = now()
+       where contest_id = new.contest_id and car_id = new.car_id;
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    update public.car_event_contest_entries
+       set votes_count = votes_count - 1
+     where contest_id = old.contest_id and car_id = old.car_id;
+    update public.car_event_contests
+       set votes_count = votes_count - 1
+     where id = old.contest_id;
+    return old;
+  end if;
+  return null;
+end;
+$$;
 
 
 --
@@ -1162,77 +1235,6 @@ $$;
 
 
 --
--- Name: trg_contest_vote_counts(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.trg_contest_vote_counts() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-begin
-  if tg_op = 'INSERT' then
-    update public.car_event_contest_entries
-       set votes_count = votes_count + 1, last_vote_at = now()
-     where contest_id = new.contest_id and car_id = new.car_id;
-    update public.car_event_contests
-       set votes_count = votes_count + 1
-     where id = new.contest_id;
-    return new;
-  elsif tg_op = 'UPDATE' then
-    if new.car_id <> old.car_id then
-      update public.car_event_contest_entries
-         set votes_count = votes_count - 1
-       where contest_id = old.contest_id and car_id = old.car_id;
-      update public.car_event_contest_entries
-         set votes_count = votes_count + 1, last_vote_at = now()
-       where contest_id = new.contest_id and car_id = new.car_id;
-    end if;
-    return new;
-  elsif tg_op = 'DELETE' then
-    update public.car_event_contest_entries
-       set votes_count = votes_count - 1
-     where contest_id = old.contest_id and car_id = old.car_id;
-    update public.car_event_contests
-       set votes_count = votes_count - 1
-     where id = old.contest_id;
-    return old;
-  end if;
-  return null;
-end;
-$$;
-
-
---
--- Name: trg_contest_entries_count(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.trg_contest_entries_count() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-begin
-  if tg_op = 'INSERT' then
-    if new.status = 'accepted' then
-      update public.car_event_contests set entries_count = entries_count + 1 where id = new.contest_id;
-    end if;
-    return new;
-  elsif tg_op = 'UPDATE' then
-    if (old.status = 'accepted') <> (new.status = 'accepted') then
-      update public.car_event_contests
-         set entries_count = entries_count + (case when new.status = 'accepted' then 1 else -1 end)
-       where id = new.contest_id;
-    end if;
-    return new;
-  elsif tg_op = 'DELETE' then
-    if old.status = 'accepted' then
-      update public.car_event_contests set entries_count = entries_count - 1 where id = old.contest_id;
-    end if;
-    return old;
-  end if;
-  return null;
-end;
-$$;
-
-
---
 -- Name: update_comment_reply_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1410,7 +1412,7 @@ COMMENT ON COLUMN public.badges.locked_badge_url IS 'R2 object key of the not-ye
 -- Name: COLUMN badges.award_trigger; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.badges.award_trigger IS 'The event that unlocks this badge automatically, matching the BadgeTrigger enum in the backend. NULL = hand-granted only. Known codes: account_created. Adding one means extending badges_award_trigger_known_ck and BadgeTrigger in the same release.';
+COMMENT ON COLUMN public.badges.award_trigger IS 'The event that unlocks this badge automatically, matching the BadgeTrigger enum in the backend. NULL = hand-granted only. Known codes: account_created, contest_first_place, contest_second_place, contest_third_place. Adding one means extending badges_award_trigger_known_ck and BadgeTrigger in the same release.';
 
 
 --
@@ -1434,7 +1436,8 @@ COMMENT ON COLUMN public.badges.earnable_until IS 'End of the window in which th
 CREATE TABLE public.blocked_accounts (
     blocker_id uuid NOT NULL,
     blocked_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now()
+    created_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT blocked_accounts_no_self_block CHECK ((blocker_id <> blocked_id))
 );
 
 
@@ -1510,6 +1513,27 @@ CREATE TABLE public.business_accounts (
 --
 
 COMMENT ON COLUMN public.business_accounts.timezone IS 'IANA zone id (e.g. Europe/Bucharest) used to interpret this business''s opening hours.';
+
+
+--
+-- Name: COLUMN business_accounts.rejection_reason; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.business_accounts.rejection_reason IS 'Why a verification request was turned down. Set when verification_status = ''rejected''; left in place afterwards as history.';
+
+
+--
+-- Name: COLUMN business_accounts.reviewed_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.business_accounts.reviewed_by IS 'Staff auth user id (admin_team_members.user_id) of whoever last decided this business''s verification or active status. No FK: staff accounts have no profiles row.';
+
+
+--
+-- Name: COLUMN business_accounts.reviewed_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.business_accounts.reviewed_at IS 'When that decision was taken.';
 
 
 --
@@ -1729,6 +1753,13 @@ COMMENT ON TABLE public.car_event_contest_categories IS 'The categories an organ
 
 
 --
+-- Name: COLUMN car_event_contest_categories.icon; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contest_categories.icon IS 'Glyph key the app maps to a local icon: exhaust | wheels | paint | interior | loud | trophy. Unknown keys fall back to trophy.';
+
+
+--
 -- Name: car_event_contest_entries; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1758,6 +1789,34 @@ CREATE TABLE public.car_event_contest_entries (
 --
 
 COMMENT ON TABLE public.car_event_contest_entries IS 'A car asking to be judged in a contest. The owner requests; an organizer accepts or rejects. Only accepted rows are on the ballot.';
+
+
+--
+-- Name: COLUMN car_event_contest_entries.owner_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contest_entries.owner_id IS 'Denormalized from the car''s garage at insert time, like car_event_participants.owner_id, so "my entries" and the own-car vote check need no join.';
+
+
+--
+-- Name: COLUMN car_event_contest_entries.votes_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contest_entries.votes_count IS 'Trigger-owned (trg_contest_vote_counts).';
+
+
+--
+-- Name: COLUMN car_event_contest_entries.last_vote_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contest_entries.last_vote_at IS 'Trigger-owned. When this car most recently gained a vote. The tie-break: on equal counts the car that reached the count first ranks higher.';
+
+
+--
+-- Name: COLUMN car_event_contest_entries.final_rank; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contest_entries.final_rank IS 'Set once, when the contest is finished. 1..n over accepted entries. A podium (<= 3) counts only with final_votes_count >= 1.';
 
 
 --
@@ -1815,7 +1874,56 @@ CREATE TABLE public.car_event_contests (
 -- Name: TABLE car_event_contests; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.car_event_contests IS 'A vote that runs inside a car event. scheduled = published, entries open, voting locked; open = voting; finished = results final (top 3 awarded); canceled is reserved.';
+COMMENT ON TABLE public.car_event_contests IS 'A vote that runs inside a car event. scheduled = published, entries open, voting locked until an organizer opens it; open = voting; finished = results final (top 3 awarded); canceled is reserved. Status only ever moves because an organizer acted, or because the event was finished/cancelled — never on a timer.';
+
+
+--
+-- Name: COLUMN car_event_contests.opens_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.opens_at IS 'The *planned* start of voting, shown in the app. Not enforced: a contest is scheduled until an organizer opens it.';
+
+
+--
+-- Name: COLUMN car_event_contests.closes_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.closes_at IS 'The *planned* end of voting, shown in the app. Not enforced: a contest stays open until an organizer finishes it, or until the event is marked finished or cancelled.';
+
+
+--
+-- Name: COLUMN car_event_contests.finished_early; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.finished_early IS 'Whether it was finished before its planned closes_at. Presentation only.';
+
+
+--
+-- Name: COLUMN car_event_contests.finished_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.finished_by IS 'The organizer who finished it. NULL = closed by the event''s own finish/cancel cascade. Not an FK: a departed organizer must not take the result with them.';
+
+
+--
+-- Name: COLUMN car_event_contests.votes_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.votes_count IS 'Trigger-owned (trg_contest_vote_counts). Live total of votes cast.';
+
+
+--
+-- Name: COLUMN car_event_contests.entries_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.entries_count IS 'Trigger-owned (trg_contest_entries_count). Number of accepted entries.';
+
+
+--
+-- Name: COLUMN car_event_contests.created_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_event_contests.created_by IS 'The organizer who created it. Not an FK for the same reason as finished_by; resolved to a profile on read, rendered nameless if gone.';
 
 
 --
@@ -2871,6 +2979,24 @@ CREATE TABLE public.follows (
 
 
 --
+-- Name: forum_post_like_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_post_like_notifications (
+    post_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_post_like_notifications; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_post_like_notifications IS 'One row per (forum reply, liker) whose like already notified the reply''s author. Outlives the like (unlike keeps it), so liking again never re-notifies.';
+
+
+--
 -- Name: forum_post_likes; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2904,6 +3030,24 @@ CREATE TABLE public.forum_shortcuts (
 --
 
 COMMENT ON TABLE public.forum_shortcuts IS 'A saved forum filter. Any combination of brand/model/topic. E.g. (model=M4, topic=tuning).';
+
+
+--
+-- Name: forum_thread_like_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.forum_thread_like_notifications (
+    thread_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE forum_thread_like_notifications; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.forum_thread_like_notifications IS 'One row per (thread, liker) whose like already notified the thread''s author. Outlives the like (unlike keeps it), so liking again never re-notifies.';
 
 
 --
@@ -3348,6 +3492,24 @@ COMMENT ON COLUMN public.post_images.image_key IS 'Contains only the Cloudflare'
 
 
 --
+-- Name: post_like_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.post_like_notifications (
+    post_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE post_like_notifications; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.post_like_notifications IS 'One row per (post, liker) whose like already notified the post''s author. Outlives the like (unlike keeps it), so liking again never re-notifies.';
+
+
+--
 -- Name: post_likes; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3372,22 +3534,39 @@ CREATE TABLE public.post_reports (
 
 
 --
+-- Name: post_repost_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.post_repost_notifications (
+    post_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE post_repost_notifications; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.post_repost_notifications IS 'One row per (post, reposter) whose repost already notified the post''s author. Outlives the repost (undo keeps it), so reposting again never re-notifies.';
+
+
+--
 -- Name: post_shares; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.post_shares (
     post_id uuid NOT NULL,
     user_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now(),
-    content text
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
 --
--- Name: COLUMN post_shares.content; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE post_shares; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.post_shares.content IS '(Optional) If the user wants to add his thoughts on someone else''s post (just like on Facebook)';
+COMMENT ON TABLE public.post_shares IS 'Reposts: one row per (post, user) who reposted it to their followers. Never the author''s own post.';
 
 
 --
@@ -3407,9 +3586,11 @@ CREATE TABLE public.posts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     ranking_score double precision DEFAULT '0'::double precision NOT NULL,
-    quote_shares_count bigint DEFAULT '0'::bigint NOT NULL,
     saved_count bigint DEFAULT '0'::bigint NOT NULL,
     saved_count_enabled boolean DEFAULT true NOT NULL,
+    participant_card_event_id uuid,
+    participant_card_car_id uuid,
+    CONSTRAINT posts_participant_card_both_or_neither_ck CHECK (((participant_card_event_id IS NULL) = (participant_card_car_id IS NULL))),
     CONSTRAINT posts_saved_count_check CHECK ((saved_count >= 0))
 );
 
@@ -3422,17 +3603,17 @@ COMMENT ON TABLE public.posts IS 'Contains the posts of each user within the app
 
 
 --
+-- Name: COLUMN posts.shares_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.posts.shares_count IS 'How many users reposted this post. Maintained by trg_sync_post_shares_count.';
+
+
+--
 -- Name: COLUMN posts.ranking_score; Type: COMMENT; Schema: public; Owner: -
 --
 
 COMMENT ON COLUMN public.posts.ranking_score IS 'The ranking score of the post. It is used in the feed to show the posts with the highest score (most viral); DESC order';
-
-
---
--- Name: COLUMN posts.quote_shares_count; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.posts.quote_shares_count IS 'How many shares on this post with a description attached by the user (eg: description not null)';
 
 
 --
@@ -3447,6 +3628,20 @@ COMMENT ON COLUMN public.posts.saved_count IS 'The number of times a post was sa
 --
 
 COMMENT ON COLUMN public.posts.saved_count_enabled IS 'Whether the number of saves on a post is visible for other users or not.';
+
+
+--
+-- Name: COLUMN posts.participant_card_event_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.posts.participant_card_event_id IS 'Event half of the participant card this post shares (with participant_card_car_id: both or neither). The card itself is derived on read by the backend, never stored.';
+
+
+--
+-- Name: COLUMN posts.participant_card_car_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.posts.participant_card_car_id IS 'Car half of the participant card this post shares (with participant_card_event_id: both or neither).';
 
 
 --
@@ -4148,13 +4343,6 @@ ALTER TABLE ONLY public.admin_team_members
 
 
 --
--- Name: admin_team_members_single_owner_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX admin_team_members_single_owner_idx ON public.admin_team_members USING btree (((true))) WHERE (role = 'owner'::text);
-
-
---
 -- Name: app_language_options app_language_options_language_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4360,6 +4548,38 @@ ALTER TABLE ONLY public.car_event_attendee_status
 
 ALTER TABLE ONLY public.car_event_attendees_list
     ADD CONSTRAINT car_event_attendees_list_pkey PRIMARY KEY (user_id, event_id);
+
+
+--
+-- Name: car_event_contest_categories car_event_contest_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_categories
+    ADD CONSTRAINT car_event_contest_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_pkey PRIMARY KEY (contest_id, car_id);
+
+
+--
+-- Name: car_event_contest_votes car_event_contest_votes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_votes
+    ADD CONSTRAINT car_event_contest_votes_pkey PRIMARY KEY (contest_id, voter_id);
+
+
+--
+-- Name: car_event_contests car_event_contests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contests
+    ADD CONSTRAINT car_event_contests_pkey PRIMARY KEY (id);
 
 
 --
@@ -4747,6 +4967,14 @@ ALTER TABLE ONLY public.follows
 
 
 --
+-- Name: forum_post_like_notifications forum_post_like_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_post_like_notifications
+    ADD CONSTRAINT forum_post_like_notifications_pkey PRIMARY KEY (post_id, user_id);
+
+
+--
 -- Name: forum_post_likes forum_post_likes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4768,6 +4996,14 @@ ALTER TABLE ONLY public.forum_thread_replies
 
 ALTER TABLE ONLY public.forum_shortcuts
     ADD CONSTRAINT forum_shortcuts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: forum_thread_like_notifications forum_thread_like_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_like_notifications
+    ADD CONSTRAINT forum_thread_like_notifications_pkey PRIMARY KEY (thread_id, user_id);
 
 
 --
@@ -4947,6 +5183,14 @@ ALTER TABLE ONLY public.post_images
 
 
 --
+-- Name: post_like_notifications post_like_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.post_like_notifications
+    ADD CONSTRAINT post_like_notifications_pkey PRIMARY KEY (post_id, user_id);
+
+
+--
 -- Name: post_likes post_likes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4960,6 +5204,14 @@ ALTER TABLE ONLY public.post_likes
 
 ALTER TABLE ONLY public.post_reports
     ADD CONSTRAINT post_reports_pkey PRIMARY KEY (post_id, reporter_id);
+
+
+--
+-- Name: post_repost_notifications post_repost_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.post_repost_notifications
+    ADD CONSTRAINT post_repost_notifications_pkey PRIMARY KEY (post_id, user_id);
 
 
 --
@@ -5179,6 +5431,20 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
+-- Name: admin_team_members_single_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX admin_team_members_single_owner_idx ON public.admin_team_members USING btree ((true)) WHERE (role = 'owner'::text);
+
+
+--
+-- Name: blocked_accounts_blocked_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX blocked_accounts_blocked_id_idx ON public.blocked_accounts USING btree (blocked_id);
+
+
+--
 -- Name: business_accounts_location_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5190,13 +5456,6 @@ CREATE INDEX business_accounts_location_idx ON public.business_accounts USING gi
 --
 
 CREATE INDEX business_accounts_pending_review_idx ON public.business_accounts USING btree (created_at, id) WHERE (verification_status = 'pending'::text);
-
-
---
--- Name: feedback_feed_messages_new_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX feedback_feed_messages_new_idx ON public.feedback_feed_messages USING btree (created_at DESC, id DESC) WHERE ((status = 'sent'::text) AND (is_deleted = false));
 
 
 --
@@ -5228,6 +5487,48 @@ CREATE INDEX car_event_attendees_list_status_idx ON public.car_event_attendees_l
 
 
 --
+-- Name: car_event_contest_entries_board_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_board_idx ON public.car_event_contest_entries USING btree (contest_id, status, votes_count DESC);
+
+
+--
+-- Name: car_event_contest_entries_car_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_car_idx ON public.car_event_contest_entries USING btree (car_id);
+
+
+--
+-- Name: car_event_contest_entries_owner_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_owner_idx ON public.car_event_contest_entries USING btree (owner_id);
+
+
+--
+-- Name: car_event_contest_entries_podium_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_entries_podium_idx ON public.car_event_contest_entries USING btree (car_id) WHERE (final_rank <= 3);
+
+
+--
+-- Name: car_event_contest_votes_entry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contest_votes_entry_idx ON public.car_event_contest_votes USING btree (contest_id, car_id);
+
+
+--
+-- Name: car_event_contests_event_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_contests_event_status_idx ON public.car_event_contests USING btree (event_id, status);
+
+
+--
 -- Name: car_event_organizers_individual_organizer_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5253,6 +5554,13 @@ CREATE UNIQUE INDEX car_event_organizers_unique_business ON public.car_event_org
 --
 
 CREATE UNIQUE INDEX car_event_organizers_unique_individual ON public.car_event_organizers USING btree (event_id, individual_organizer_id) WHERE (individual_organizer_id IS NOT NULL);
+
+
+--
+-- Name: car_event_participants_car_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX car_event_participants_car_id_idx ON public.car_event_participants USING btree (car_id);
 
 
 --
@@ -5358,6 +5666,13 @@ CREATE INDEX feedback_comments_feedback_idx ON public.feedback_comments USING bt
 --
 
 CREATE INDEX feedback_feed_messages_created_at_idx ON public.feedback_feed_messages USING btree (created_at);
+
+
+--
+-- Name: feedback_feed_messages_new_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX feedback_feed_messages_new_idx ON public.feedback_feed_messages USING btree (created_at DESC, id DESC) WHERE ((status = 'sent'::text) AND (is_deleted = false));
 
 
 --
@@ -5844,6 +6159,13 @@ CREATE INDEX notifications_user_unread_idx ON public.notifications USING btree (
 
 
 --
+-- Name: posts_participant_card_recent_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX posts_participant_card_recent_idx ON public.posts USING btree (participant_card_event_id, participant_card_car_id, created_at DESC) WHERE (participant_card_event_id IS NOT NULL);
+
+
+--
 -- Name: reputation_score_history_source_uq; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6075,6 +6397,20 @@ CREATE TRIGGER trg_comments_reply_count AFTER INSERT OR DELETE ON public.comment
 
 
 --
+-- Name: car_event_contest_entries trg_contest_entries_count; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contest_entries_count AFTER INSERT OR DELETE OR UPDATE ON public.car_event_contest_entries FOR EACH ROW EXECUTE FUNCTION public.trg_contest_entries_count();
+
+
+--
+-- Name: car_event_contest_votes trg_contest_vote_counts; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contest_vote_counts AFTER INSERT OR DELETE OR UPDATE ON public.car_event_contest_votes FOR EACH ROW EXECUTE FUNCTION public.trg_contest_vote_counts();
+
+
+--
 -- Name: forum_post_likes trg_forum_post_likes_count; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -6127,7 +6463,7 @@ CREATE TRIGGER trg_forum_threads_set_brand BEFORE INSERT OR UPDATE OF model_id O
 -- Name: posts trg_posts_ranking_score; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_posts_ranking_score BEFORE INSERT OR UPDATE OF likes_count, comments_count, shares_count, quote_shares_count, saved_count ON public.posts FOR EACH ROW EXECUTE FUNCTION public.compute_post_ranking_score();
+CREATE TRIGGER trg_posts_ranking_score BEFORE INSERT OR UPDATE OF likes_count, comments_count, shares_count, saved_count ON public.posts FOR EACH ROW EXECUTE FUNCTION public.compute_post_ranking_score();
 
 
 --
@@ -6279,6 +6615,62 @@ ALTER TABLE ONLY public.car_event_attendees_list
 
 ALTER TABLE ONLY public.car_event_attendees_list
     ADD CONSTRAINT car_event_attendees_list_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_contest_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_contest_id_fkey FOREIGN KEY (contest_id) REFERENCES public.car_event_contests(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_entries car_event_contest_entries_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_entries
+    ADD CONSTRAINT car_event_contest_entries_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_votes car_event_contest_votes_entry_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_votes
+    ADD CONSTRAINT car_event_contest_votes_entry_fkey FOREIGN KEY (contest_id, car_id) REFERENCES public.car_event_contest_entries(contest_id, car_id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contest_votes car_event_contest_votes_voter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contest_votes
+    ADD CONSTRAINT car_event_contest_votes_voter_id_fkey FOREIGN KEY (voter_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: car_event_contests car_event_contests_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contests
+    ADD CONSTRAINT car_event_contests_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.car_event_contest_categories(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: car_event_contests car_event_contests_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.car_event_contests
+    ADD CONSTRAINT car_event_contests_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -6834,6 +7226,22 @@ ALTER TABLE ONLY public.follows
 
 
 --
+-- Name: forum_post_like_notifications forum_post_like_notifications_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_post_like_notifications
+    ADD CONSTRAINT forum_post_like_notifications_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.forum_thread_replies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_post_like_notifications forum_post_like_notifications_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_post_like_notifications
+    ADD CONSTRAINT forum_post_like_notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: forum_post_likes forum_post_likes_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6895,6 +7303,22 @@ ALTER TABLE ONLY public.forum_shortcuts
 
 ALTER TABLE ONLY public.forum_shortcuts
     ADD CONSTRAINT forum_shortcuts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_like_notifications forum_thread_like_notifications_thread_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_like_notifications
+    ADD CONSTRAINT forum_thread_like_notifications_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.forum_threads(id) ON DELETE CASCADE;
+
+
+--
+-- Name: forum_thread_like_notifications forum_thread_like_notifications_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.forum_thread_like_notifications
+    ADD CONSTRAINT forum_thread_like_notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 
 --
@@ -7154,6 +7578,22 @@ ALTER TABLE ONLY public.post_images
 
 
 --
+-- Name: post_like_notifications post_like_notifications_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.post_like_notifications
+    ADD CONSTRAINT post_like_notifications_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: post_like_notifications post_like_notifications_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.post_like_notifications
+    ADD CONSTRAINT post_like_notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: post_likes post_likes_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7194,6 +7634,22 @@ ALTER TABLE ONLY public.post_reports
 
 
 --
+-- Name: post_repost_notifications post_repost_notifications_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.post_repost_notifications
+    ADD CONSTRAINT post_repost_notifications_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: post_repost_notifications post_repost_notifications_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.post_repost_notifications
+    ADD CONSTRAINT post_repost_notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: post_shares post_shares_post_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7207,6 +7663,14 @@ ALTER TABLE ONLY public.post_shares
 
 ALTER TABLE ONLY public.post_shares
     ADD CONSTRAINT post_shares_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: posts posts_participant_card_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.posts
+    ADD CONSTRAINT posts_participant_card_fkey FOREIGN KEY (participant_card_event_id, participant_card_car_id) REFERENCES public.car_event_participants(event_id, car_id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 
 --
@@ -7535,6 +7999,26 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
+-- Name: car_event_contest_categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contest_entries; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contest_votes; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: car_event_contests; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
 -- Name: car_event_organizer_rules; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -7735,12 +8219,22 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
+-- Name: forum_post_like_notifications; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
 -- Name: forum_post_likes; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
 -- Name: forum_shortcuts; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: forum_thread_like_notifications; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
@@ -7840,12 +8334,22 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
+-- Name: post_like_notifications; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
 -- Name: post_likes; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
 --
 -- Name: post_reports; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+
+--
+-- Name: post_repost_notifications; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 
@@ -7967,222 +8471,7 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 
 --
--- Name: car_event_contest_categories car_event_contest_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_categories
-    ADD CONSTRAINT car_event_contest_categories_pkey PRIMARY KEY (id);
-
-
---
--- Name: car_event_contests car_event_contests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contests
-    ADD CONSTRAINT car_event_contests_pkey PRIMARY KEY (id);
-
-
---
--- Name: car_event_contest_entries car_event_contest_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_entries
-    ADD CONSTRAINT car_event_contest_entries_pkey PRIMARY KEY (contest_id, car_id);
-
-
---
--- Name: car_event_contest_votes car_event_contest_votes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_votes
-    ADD CONSTRAINT car_event_contest_votes_pkey PRIMARY KEY (contest_id, voter_id);
-
-
---
--- Name: car_event_contests_event_status_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_contests_event_status_idx ON public.car_event_contests USING btree (event_id, status);
-
-
---
--- Name: car_event_contest_entries_car_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_contest_entries_car_idx ON public.car_event_contest_entries USING btree (car_id);
-
-
---
--- Name: car_event_contest_entries_owner_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_contest_entries_owner_idx ON public.car_event_contest_entries USING btree (owner_id);
-
-
---
--- Name: car_event_contest_entries_board_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_contest_entries_board_idx ON public.car_event_contest_entries USING btree (contest_id, status, votes_count DESC);
-
-
---
--- Name: car_event_contest_entries_podium_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_contest_entries_podium_idx ON public.car_event_contest_entries USING btree (car_id) WHERE (final_rank <= 3);
-
-
---
--- Name: car_event_contest_votes_entry_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_contest_votes_entry_idx ON public.car_event_contest_votes USING btree (contest_id, car_id);
-
-
---
--- Name: car_event_participants_car_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX car_event_participants_car_id_idx ON public.car_event_participants USING btree (car_id);
-
-
---
--- Name: car_event_contest_votes trg_contest_vote_counts; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_contest_vote_counts AFTER INSERT OR DELETE OR UPDATE ON public.car_event_contest_votes FOR EACH ROW EXECUTE FUNCTION public.trg_contest_vote_counts();
-
-
---
--- Name: car_event_contest_entries trg_contest_entries_count; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_contest_entries_count AFTER INSERT OR DELETE OR UPDATE ON public.car_event_contest_entries FOR EACH ROW EXECUTE FUNCTION public.trg_contest_entries_count();
-
-
---
--- Name: car_event_contests car_event_contests_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contests
-    ADD CONSTRAINT car_event_contests_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.car_events(id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
---
--- Name: car_event_contests car_event_contests_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contests
-    ADD CONSTRAINT car_event_contests_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.car_event_contest_categories(id) ON UPDATE CASCADE ON DELETE RESTRICT;
-
-
---
--- Name: car_event_contest_entries car_event_contest_entries_contest_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_entries
-    ADD CONSTRAINT car_event_contest_entries_contest_id_fkey FOREIGN KEY (contest_id) REFERENCES public.car_event_contests(id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
---
--- Name: car_event_contest_entries car_event_contest_entries_car_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_entries
-    ADD CONSTRAINT car_event_contest_entries_car_id_fkey FOREIGN KEY (car_id) REFERENCES public.cars(id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
---
--- Name: car_event_contest_entries car_event_contest_entries_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_entries
-    ADD CONSTRAINT car_event_contest_entries_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
---
--- Name: car_event_contest_votes car_event_contest_votes_voter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_votes
-    ADD CONSTRAINT car_event_contest_votes_voter_id_fkey FOREIGN KEY (voter_id) REFERENCES public.profiles(id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
---
--- Name: car_event_contest_votes car_event_contest_votes_entry_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.car_event_contest_votes
-    ADD CONSTRAINT car_event_contest_votes_entry_fkey FOREIGN KEY (contest_id, car_id) REFERENCES public.car_event_contest_entries(contest_id, car_id) ON UPDATE CASCADE ON DELETE CASCADE;
-
-
---
--- Name: car_event_contest_categories; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: car_event_contests; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: car_event_contest_entries; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
--- Name: car_event_contest_votes; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-
---
 -- PostgreSQL database dump complete
 --
 
 
-
-
---
--- Applied from supabase/migrations/20260911120000_participant_cards_on_posts.sql until the next
--- dump regeneration folds it in above.
---
-
--- Participant cards: a post can share one.
---
--- A participant card is not stored. It is derived on read from an (event_id, car_id) pair — an
--- accepted row in car_event_participants of an event an organizer has marked finished — so nobody,
--- the owner included, can create or edit one, and it can never go stale or be forged. A post that
--- shares a card stores only that pair; the backend re-derives the card every time the post is read.
---
--- The reference is a composite foreign key onto car_event_participants' primary key, so the pair
--- must be a real participant row. ON DELETE SET NULL clears both columns together when that row
--- goes (deleting the car or the event cascades into car_event_participants), and the post degrades
--- to a plain one instead of breaking the feed.
-
-alter table public.posts
-    add column participant_card_event_id uuid,
-    add column participant_card_car_id   uuid;
-
-alter table public.posts
-    add constraint posts_participant_card_both_or_neither_ck check (
-        (participant_card_event_id is null) = (participant_card_car_id is null)
-    );
-
-alter table public.posts
-    add constraint posts_participant_card_fkey
-        foreign key (participant_card_event_id, participant_card_car_id)
-        references public.car_event_participants (event_id, car_id)
-        on update cascade on delete set null;
-
--- The repost cooldown asks "was this card posted recently?"; this index answers it, and stays tiny
--- because ordinary posts are excluded.
-create index posts_participant_card_recent_idx
-    on public.posts (participant_card_event_id, participant_card_car_id, created_at desc)
-    where participant_card_event_id is not null;
-
-comment on column public.posts.participant_card_event_id is
-    'Event half of the participant card this post shares (with participant_card_car_id: both or neither). The card itself is derived on read by the backend, never stored.';
-comment on column public.posts.participant_card_car_id is
-    'Car half of the participant card this post shares (with participant_card_event_id: both or neither).';

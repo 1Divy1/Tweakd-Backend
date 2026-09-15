@@ -16,7 +16,9 @@ import java.util.UUID;
 public interface ProfileRepository extends JpaRepository<ProfileEntity, UUID> {
     boolean existsByUsername(String username);
     Optional<ProfileEntity> findByUsername(String username);
-    List<ProfileEntity> findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc(String prefix);
+    /** Prefix search that skips {@code excludedIds} (accounts a block hides from the searcher). */
+    List<ProfileEntity> findTop20ByUsernameStartingWithIgnoreCaseAndIdNotInOrderByUsernameAsc(
+            String prefix, Collection<UUID> excludedIds);
     List<ProfileEntity> findAllByIdIn(Collection<UUID> ids);
 
     /** Which of the given profiles are business accounts — for support-ticket badges etc. */

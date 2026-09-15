@@ -230,8 +230,8 @@ class ReputationServiceImpl implements ReputationService {
 
     @Override
     @Transactional(readOnly = true)
-    public ReputationSummaryDto getSummaryByUsername(String username) {
-        return getSummary(resolveUsername(username));
+    public ReputationSummaryDto getSummaryByUsername(UUID viewerId, String username) {
+        return getSummary(resolveVisibleUsername(viewerId, username));
     }
 
     @Override
@@ -242,8 +242,8 @@ class ReputationServiceImpl implements ReputationService {
 
     @Override
     @Transactional(readOnly = true)
-    public ReputationHistoryPageDto getHistoryByUsername(String username, String cursor, int size) {
-        return readHistory(resolveUsername(username), cursor, size, false);
+    public ReputationHistoryPageDto getHistoryByUsername(UUID viewerId, String username, String cursor, int size) {
+        return readHistory(resolveVisibleUsername(viewerId, username), cursor, size, false);
     }
 
     /**
@@ -291,6 +291,12 @@ class ReputationServiceImpl implements ReputationService {
     }
 
     // ---- helpers ------------------------------------------------------------
+
+    /** A block between the viewer and the account reads as an unknown username. */
+    private UUID resolveVisibleUsername(UUID viewerId, String username) {
+        return profileService.findVisibleIdByUsername(viewerId, username)
+                .orElseThrow(() -> ProfileNotFoundException.byUsername(username));
+    }
 
     private UUID resolveUsername(String username) {
         return profileService.findIdByUsername(username)

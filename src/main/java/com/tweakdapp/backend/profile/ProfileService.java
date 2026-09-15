@@ -17,6 +17,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
 
 public interface ProfileService {
 
@@ -119,7 +120,14 @@ public interface ProfileService {
      */
     ProfileDto updateAvatar(String userId, String key);
 
-    PublicProfileDto getPublicProfileByUsername(String username);
+    /**
+     * A profile as another user sees it. A block between {@code viewerId} and the profile, in either
+     * direction, reads exactly like an unknown username.
+     *
+     * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if the username does not
+     *         resolve, or a block separates the two accounts
+     */
+    PublicProfileDto getPublicProfileByUsername(UUID viewerId, String username);
 
     /**
      * Just the badges on a profile, by username — the same list
@@ -133,11 +141,27 @@ public interface ProfileService {
      * module's job, and {@code badges} deliberately reads nothing from {@code profiles} — that is
      * what keeps the dependency one-way.
      *
-     * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if the username does not resolve
+     * @throws com.tweakdapp.backend.profile.exception.ProfileNotFoundException if the username does not
+     *         resolve, or a block separates the two accounts
      */
-    List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(String username);
+    List<com.tweakdapp.backend.badges.dto.UserBadgeDto> getBadgesByUsername(UUID viewerId, String username);
 
-    List<ProfileSearchResultDto> searchByUsername(String prefix);
+    /** Up to 20 profiles whose username starts with {@code prefix}, minus accounts a block separates from {@code viewerId}. */
+    List<ProfileSearchResultDto> searchByUsername(UUID viewerId, String prefix);
+
+    // ---- blocking (blocked_accounts is owned by relationships; read here through shared BlockDirectory) ----
+
+    /**
+     * {@link #findIdByUsername}, but empty when a block separates {@code viewerId} from that account.
+     * Any "open someone's X by username" read should use it, so a block reads as a missing account.
+     */
+    Optional<UUID> findVisibleIdByUsername(UUID viewerId, String username);
+
+    /** Every account a block separates from {@code viewerId}, whichever side placed it. */
+    Set<UUID> findHiddenProfileIds(UUID viewerId);
+
+    /** Whether a block separates the two accounts, in either direction. */
+    boolean isHiddenFrom(UUID viewerId, UUID otherUserId);
 
     // ---- onboarding reference data (read-only lookups) ---------------------
 

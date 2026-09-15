@@ -40,6 +40,8 @@ public interface SavedPostRepository extends JpaRepository<SavedPostEntity, Save
             select sp
               from SavedPostEntity sp
              where sp.id.userId = :userId
+               and not exists (select 1 from PostEntity p
+                                where p.id = sp.id.postId and p.userId in :hiddenIds)
                and (:firstPage = true
                     or sp.createdAt < :cursorTs
                     or (sp.createdAt = :cursorTs and sp.id.postId < :cursorPostId))
@@ -49,5 +51,6 @@ public interface SavedPostRepository extends JpaRepository<SavedPostEntity, Save
                                         @Param("firstPage") boolean firstPage,
                                         @Param("cursorTs") Instant cursorTs,
                                         @Param("cursorPostId") UUID cursorPostId,
+                                        @Param("hiddenIds") Collection<UUID> hiddenIds,
                                         Pageable pageable);
 }

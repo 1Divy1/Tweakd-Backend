@@ -30,12 +30,11 @@ import java.util.UUID;
  * @param taggedCars cars tagged in the post
  * @param likesCount denormalized like count
  * @param commentsCount denormalized comment count
- * @param sharesCount total shares shown — plain shares plus quote shares (re-shares with a custom
- *        description); i.e. the post's {@code shares_count + quote_shares_count}
+ * @param sharesCount how many users reposted the post
  * @param savedCount denormalized count of how many users saved the post
  * @param likesCountEnabled whether the author exposes the like count
  * @param commentsCountEnabled whether the author exposes the comment count
- * @param sharesCountEnabled whether the author exposes the share count
+ * @param sharesCountEnabled whether the author exposes the repost count
  * @param savedCountEnabled whether the author exposes the saved count
  * @param viewerHasLiked whether the requesting user has liked this post
  * @param viewerHasSaved whether the requesting user has saved this post
@@ -44,6 +43,9 @@ import java.util.UUID;
  * @param participantCard the participant card this post shares, drawn in place of images —
  *        re-derived on every read, so it always shows the real placements; {@code null} on an
  *        ordinary post, and on one whose card no longer derives (car gone, entry revoked)
+ * @param viewerHasReposted whether the requesting user has reposted this post
+ * @param repostedBy which accounts the viewer follows reposted it — filled on the global feed only,
+ *        where it explains why the post is there; {@code null} everywhere else and when none did
  */
 public record PostDto(
         UUID id,
@@ -67,5 +69,7 @@ public record PostDto(
 
         Instant createdAt,
         Instant updatedAt,
-        ParticipantCardDto participantCard
+        ParticipantCardDto participantCard,
+        boolean viewerHasReposted,
+        RepostedByDto repostedBy
 ) {}

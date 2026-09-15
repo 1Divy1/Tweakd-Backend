@@ -24,6 +24,12 @@ resolves staff UUIDs to `StaffRefDto` (id, display name, avatar) so lower-level 
 `support` can render staff actors without depending on `admin` (which would be a cycle — `admin`
 orchestrates them).
 
+## Blocking — `blocking/`
+
+`BlockDirectory` (implemented by `relationships`, owner of `blocked_accounts`) answers two-way
+"is this account hidden from the viewer" lookups for every module without a dependency on
+`relationships`. `UserBlockedEvent` is published after a new block. See the relationships README.
+
 ## Exception hierarchy
 
 All domain exceptions extend `ApiException`, which carries an `HttpStatus`. `GlobalExceptionHandler` translates them to `ErrorResponse` JSON automatically.

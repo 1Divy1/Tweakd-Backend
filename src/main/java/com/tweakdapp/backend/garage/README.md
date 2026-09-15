@@ -136,9 +136,11 @@ Base path: `/api/v1/garage`
 | DELETE | `/cars/{carId}/images/{imageId}` | Delete a gallery image record (204; owner only) |
 | POST | `/storage/download-url` | Exchange a `storagePath` for a short-lived presigned download URL |
 
-> Upload URLs for cover, modification before/after, and gallery slots are issued by
-> `POST /cars` as part of car creation. Clients PUT file bytes directly to the returned
-> Supabase URLs — no bytes travel through the backend.
+> Upload URLs for cover, gallery and modification media come from the storage module
+> (`/api/storage/cars/{carId}/...`), car owner only (`CarUploadAccessPolicy`). Clients PUT bytes
+> straight to R2, then attach the keys here. Attach endpoints reject keys outside
+> `cars/{carId}/cover/`, `cars/{carId}/gallery/` or `cars/{carId}/modifications/{modId}/` that are
+> not already stored on the car, and replacing a cover deletes the previous object after commit.
 
 ### Dream cars
 

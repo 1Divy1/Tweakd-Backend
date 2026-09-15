@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/profile")
@@ -48,8 +49,9 @@ class ProfileController {
 
     // TODO: remove '/by-username' and just use '/{username}'
     @GetMapping("/by-username/{username}")
-    public PublicProfileDto getProfileByUsername(@PathVariable String username) {
-        return profileService.getPublicProfileByUsername(username);
+    public PublicProfileDto getProfileByUsername(@AuthenticationPrincipal Jwt jwt,
+                                                 @PathVariable String username) {
+        return profileService.getPublicProfileByUsername(UUID.fromString(jwt.getSubject()), username);
     }
 
     /**
@@ -58,8 +60,9 @@ class ProfileController {
      * re-fetching the whole profile.
      */
     @GetMapping("/by-username/{username}/badges")
-    public List<UserBadgeDto> getBadgesByUsername(@PathVariable String username) {
-        return profileService.getBadgesByUsername(username);
+    public List<UserBadgeDto> getBadgesByUsername(@AuthenticationPrincipal Jwt jwt,
+                                                  @PathVariable String username) {
+        return profileService.getBadgesByUsername(UUID.fromString(jwt.getSubject()), username);
     }
 
     @GetMapping("/exists/{username}")
@@ -68,8 +71,9 @@ class ProfileController {
     }
 
     @GetMapping("/search")
-    public List<ProfileSearchResultDto> searchByUsername(@RequestParam("q") String query) {
-        return profileService.searchByUsername(query);
+    public List<ProfileSearchResultDto> searchByUsername(@AuthenticationPrincipal Jwt jwt,
+                                                         @RequestParam("q") String query) {
+        return profileService.searchByUsername(UUID.fromString(jwt.getSubject()), query);
     }
 
     @GetMapping("/me")

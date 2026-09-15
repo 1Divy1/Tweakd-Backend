@@ -16,6 +16,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import com.tweakdapp.backend.shared.blocking.BlockDirectory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -74,11 +75,23 @@ class ProfileRepositoryIT extends AbstractPostgresIT {
         createProfile(B, "Carlos");   // capitalized — must still match "car"
         createProfile(C, "bianca");   // no match
 
-        List<ProfileEntity> matches =
-                profileRepository.findTop20ByUsernameStartingWithIgnoreCaseOrderByUsernameAsc("car");
+        List<ProfileEntity> matches = profileRepository
+                .findTop20ByUsernameStartingWithIgnoreCaseAndIdNotInOrderByUsernameAsc(
+                        "car", List.of(BlockDirectory.NOBODY));
 
         assertThat(matches).extracting(ProfileEntity::getUsername)
                 .containsExactly("carla", "Carlos"); // DB collation orders case-insensitively
+    }
+
+    @Test
+    void prefixSearchLeavesOutExcludedIds() {
+        createProfile(A, "carla");
+        createProfile(B, "Carlos");
+
+        List<ProfileEntity> matches = profileRepository
+                .findTop20ByUsernameStartingWithIgnoreCaseAndIdNotInOrderByUsernameAsc("car", List.of(A));
+
+        assertThat(matches).extracting(ProfileEntity::getUsername).containsExactly("Carlos");
     }
 
     @Test
