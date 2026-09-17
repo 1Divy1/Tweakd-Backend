@@ -4,6 +4,8 @@ import com.tweakdapp.backend.posts.PostsService;
 import com.tweakdapp.backend.report.ReportService;
 import com.tweakdapp.backend.report.dto.ReportReasonDto;
 import com.tweakdapp.backend.report.dto.ReportRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -50,6 +52,7 @@ public class PostReportController {
 
     /** Files a report against a post. The body (and its {@code reasonId}) is optional. */
     @PostMapping("/{postId}/report")
+    @RateLimited(RateLimits.REPORTS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reportPost(@AuthenticationPrincipal Jwt jwt,
                            @PathVariable UUID postId,
@@ -59,6 +62,7 @@ public class PostReportController {
 
     /** Files a report against a comment. The body (and its {@code reasonId}) is optional. */
     @PostMapping("/{postId}/comments/{commentId}/report")
+    @RateLimited(RateLimits.REPORTS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reportComment(@AuthenticationPrincipal Jwt jwt,
                               @PathVariable UUID postId,

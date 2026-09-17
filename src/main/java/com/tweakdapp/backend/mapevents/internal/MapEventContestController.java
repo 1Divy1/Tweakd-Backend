@@ -11,6 +11,8 @@ import com.tweakdapp.backend.mapevents.dto.request.ContestEntryRequest;
 import com.tweakdapp.backend.mapevents.dto.request.ContestVoteRequest;
 import com.tweakdapp.backend.mapevents.dto.request.CreateContestRequest;
 import com.tweakdapp.backend.mapevents.dto.request.UpdateContestRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -74,6 +76,7 @@ class MapEventContestController {
 
     /** Creates and publishes a contest. Organizer only. */
     @PostMapping("/{eventId}/contests")
+    @RateLimited(RateLimits.MAPEVENTS_CREATE)
     @ResponseStatus(HttpStatus.CREATED)
     public ContestDto createContest(@AuthenticationPrincipal Jwt jwt,
                                     @PathVariable UUID eventId,
@@ -117,6 +120,7 @@ class MapEventContestController {
 
     /** Asks to enter one of the caller's accepted event cars into the contest. */
     @PostMapping("/{eventId}/contests/{contestId}/entries")
+    @RateLimited(RateLimits.MAPEVENTS_PARTICIPATE)
     public ContestDto requestEntry(@AuthenticationPrincipal Jwt jwt,
                                    @PathVariable UUID eventId,
                                    @PathVariable UUID contestId,
@@ -145,6 +149,7 @@ class MapEventContestController {
 
     /** Casts or changes the caller's vote. */
     @PutMapping("/{eventId}/contests/{contestId}/vote")
+    @RateLimited(RateLimits.MAPEVENTS_PARTICIPATE)
     public ContestDto vote(@AuthenticationPrincipal Jwt jwt,
                            @PathVariable UUID eventId,
                            @PathVariable UUID contestId,

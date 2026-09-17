@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.notification.internal.push;
 
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -38,6 +40,7 @@ class DeviceController {
 
     /** Idempotent upsert keyed on the token; re-registering hands the device to the caller. */
     @PostMapping
+    @RateLimited(RateLimits.DEVICES)
     public void register(@AuthenticationPrincipal Jwt jwt,
                          @Valid @RequestBody DeviceRegistrationRequest request) {
         pushDeviceService.register(UUID.fromString(jwt.getSubject()), request);

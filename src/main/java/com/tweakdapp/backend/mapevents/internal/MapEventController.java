@@ -21,6 +21,8 @@ import com.tweakdapp.backend.mapevents.dto.request.RegisterCarRequest;
 import com.tweakdapp.backend.mapevents.dto.request.ReplaceMapEventRulesRequest;
 import com.tweakdapp.backend.mapevents.dto.request.UpdateMapEventRequest;
 import com.tweakdapp.backend.mapevents.dto.request.WithdrawParticipationRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -152,6 +154,7 @@ class MapEventController {
      * send the key to {@link #saveCover}.
      */
     @PostMapping
+    @RateLimited(RateLimits.MAPEVENTS_CREATE)
     @ResponseStatus(HttpStatus.CREATED)
     public MapEventDto createEvent(@AuthenticationPrincipal Jwt jwt,
                                    @Valid @RequestBody CreateMapEventRequest request) {
@@ -215,6 +218,7 @@ class MapEventController {
 
     /** Credits a co-organizer — an app user or a business account. Creator only. */
     @PostMapping("/{eventId}/organizers")
+    @RateLimited(RateLimits.MAPEVENTS_PARTICIPATE)
     public MapEventDto addOrganizer(@AuthenticationPrincipal Jwt jwt,
                                     @PathVariable UUID eventId,
                                     @Valid @RequestBody AddOrganizerRequest request) {
@@ -232,6 +236,7 @@ class MapEventController {
 
     /** Sets or changes the caller's RSVP ({@code attending} / {@code interested}). */
     @PutMapping("/{eventId}/attendance")
+    @RateLimited(RateLimits.MAPEVENTS_PARTICIPATE)
     public MapEventDto setAttendance(@AuthenticationPrincipal Jwt jwt,
                                      @PathVariable UUID eventId,
                                      @Valid @RequestBody AttendanceRequest request) {
@@ -251,6 +256,7 @@ class MapEventController {
      * both change as a result.
      */
     @PostMapping("/{eventId}/cars")
+    @RateLimited(RateLimits.MAPEVENTS_PARTICIPATE)
     @ResponseStatus(HttpStatus.CREATED)
     public MapEventDto registerCar(@AuthenticationPrincipal Jwt jwt,
                                    @PathVariable UUID eventId,
@@ -286,6 +292,7 @@ class MapEventController {
      * {@link #registerCar}).
      */
     @PostMapping("/{eventId}/withdraw")
+    @RateLimited(RateLimits.MAPEVENTS_PARTICIPATE)
     public MapEventDto requestWithdrawal(@AuthenticationPrincipal Jwt jwt,
                                          @PathVariable UUID eventId,
                                          @Valid @RequestBody WithdrawParticipationRequest request) {

@@ -11,6 +11,8 @@ import com.tweakdapp.backend.feedback.dto.FeedbackRequest;
 import com.tweakdapp.backend.feedback.dto.FeedbackStatusDto;
 import com.tweakdapp.backend.feedback.dto.FeedbackTypeDto;
 import com.tweakdapp.backend.feedback.dto.MyFeedbackDto;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -46,6 +48,7 @@ class FeedbackController {
 
     /** Submits a piece of feedback. {@code content} and {@code type} are required. */
     @PostMapping
+    @RateLimited(RateLimits.FEEDBACK_CREATE)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void submitFeedback(@AuthenticationPrincipal Jwt jwt,
                                @Valid @RequestBody FeedbackRequest request) {
@@ -100,6 +103,7 @@ class FeedbackController {
 
     /** Upvotes a feedback. Idempotent. */
     @PostMapping("/{feedbackId}/vote")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void vote(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID feedbackId) {
         feedbackService.vote(UUID.fromString(jwt.getSubject()), feedbackId);
@@ -123,6 +127,7 @@ class FeedbackController {
 
     /** Adds a comment under a feedback entry. */
     @PostMapping("/{feedbackId}/comments")
+    @RateLimited(RateLimits.COMMENTS)
     @ResponseStatus(HttpStatus.CREATED)
     public FeedbackCommentDto addComment(@AuthenticationPrincipal Jwt jwt,
                                          @PathVariable UUID feedbackId,
@@ -141,6 +146,7 @@ class FeedbackController {
 
     /** Subscribes the caller to this feedback's status-change notifications. Idempotent. */
     @PostMapping("/{feedbackId}/subscription")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void subscribe(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID feedbackId) {
         feedbackService.subscribe(UUID.fromString(jwt.getSubject()), feedbackId);

@@ -7,6 +7,8 @@ import com.tweakdapp.backend.feedbackfeed.dto.FeedbackFeedStatusDto;
 import com.tweakdapp.backend.feedbackfeed.dto.FeedbackMessageDto;
 import com.tweakdapp.backend.feedbackfeed.dto.request.FeedbackVoteRequest;
 import com.tweakdapp.backend.feedbackfeed.dto.request.SubmitFeedbackMessageRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -80,6 +82,7 @@ class FeedbackFeedController {
 
     /** Publishes a message to the feed. */
     @PostMapping
+    @RateLimited(RateLimits.FEEDBACK_CREATE)
     @ResponseStatus(HttpStatus.CREATED)
     public FeedbackMessageDto submit(@AuthenticationPrincipal Jwt jwt,
                                      @Valid @RequestBody SubmitFeedbackMessageRequest request) {
@@ -98,6 +101,7 @@ class FeedbackFeedController {
      * direction already held withdraws the vote; the opposite direction switches it.
      */
     @PostMapping("/{messageId}/vote")
+    @RateLimited(RateLimits.REACTIONS)
     public FeedbackMessageDto vote(@AuthenticationPrincipal Jwt jwt,
                                    @PathVariable UUID messageId,
                                    @Valid @RequestBody FeedbackVoteRequest request) {

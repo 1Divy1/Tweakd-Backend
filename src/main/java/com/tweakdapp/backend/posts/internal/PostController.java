@@ -12,6 +12,8 @@ import com.tweakdapp.backend.posts.dto.request.CreateCommentRequest;
 import com.tweakdapp.backend.posts.dto.request.CreatePostRequest;
 import com.tweakdapp.backend.posts.dto.request.PostImageKeysRequest;
 import com.tweakdapp.backend.posts.dto.request.UpdatePostRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,6 +33,7 @@ public class PostController {
     }
 
     @PostMapping
+    @RateLimited(RateLimits.POSTS_CREATE)
     @ResponseStatus(HttpStatus.CREATED)
     public PostDto createPost(@AuthenticationPrincipal Jwt jwt,
                              @Valid @RequestBody CreatePostRequest request) {
@@ -43,6 +46,7 @@ public class PostController {
      * repost cooldown.
      */
     @PostMapping("/participant-card")
+    @RateLimited(RateLimits.POSTS_CREATE)
     @ResponseStatus(HttpStatus.CREATED)
     public PostDto shareParticipantCard(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody ShareParticipantCardRequest request) {
@@ -179,6 +183,7 @@ public class PostController {
 
     /** Likes a post (idempotent). */
     @PostMapping("/{postId}/likes")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void likePost(@AuthenticationPrincipal Jwt jwt,
                          @PathVariable UUID postId) {
@@ -195,6 +200,7 @@ public class PostController {
 
     /** Saves (bookmarks) a post for the caller (idempotent). */
     @PostMapping("/{postId}/saves")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void savePost(@AuthenticationPrincipal Jwt jwt,
                          @PathVariable UUID postId) {
@@ -214,6 +220,7 @@ public class PostController {
      * A body sent by an older client (the retired share note) is ignored. 400 on your own post.
      */
     @PostMapping("/{postId}/shares")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void sharePost(@AuthenticationPrincipal Jwt jwt,
                           @PathVariable UUID postId) {
@@ -230,6 +237,7 @@ public class PostController {
 
     /** Adds a comment (or threaded reply) to a post. */
     @PostMapping("/{postId}/comments")
+    @RateLimited(RateLimits.COMMENTS)
     @ResponseStatus(HttpStatus.CREATED)
     public CommentDto addComment(@AuthenticationPrincipal Jwt jwt,
                                  @PathVariable UUID postId,
@@ -248,6 +256,7 @@ public class PostController {
 
     /** Likes a comment (idempotent). */
     @PostMapping("/{postId}/comments/{commentId}/likes")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void likeComment(@AuthenticationPrincipal Jwt jwt,
                             @PathVariable UUID postId,

@@ -3,6 +3,8 @@ package com.tweakdapp.backend.relationships.internal;
 import com.tweakdapp.backend.relationships.RelationshipService;
 import com.tweakdapp.backend.relationships.dto.FollowProfileSearchResult;
 import com.tweakdapp.backend.relationships.dto.FollowStatusDto;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -29,6 +31,7 @@ class RelationshipController {
     // ---- Follow / Unfollow / Status -----------------------------------
 
     @PostMapping("/{username}")
+    @RateLimited(RateLimits.REACTIONS)
     public FollowStatusDto follow(@AuthenticationPrincipal Jwt jwt,
                                   @PathVariable String username) {
         return relationshipService.follow(jwt.getSubject(), username);
