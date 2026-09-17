@@ -32,6 +32,7 @@
 		<firebase-admin.version>9.10.0</firebase-admin.version>
 		<google-http-client.version>2.1.0</google-http-client.version>
 		<zxing.version>3.5.3</zxing.version>
+		<bucket4j.version>8.19.0</bucket4j.version>
 	</properties>
 
 	<dependencyManagement>
@@ -81,6 +82,18 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-websocket</artifactId>
+		</dependency>
+
+		<!-- Rate limiting (shared/ratelimit): Bucket4j is the token bucket algorithm, Caffeine
+		     holds the live buckets with idle eviction. Both in-memory, no server to pay for. -->
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j_jdk17-core</artifactId>
+			<version>${bucket4j.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.ben-manes.caffeine</groupId>
+			<artifactId>caffeine</artifactId>
 		</dependency>
 
 		<dependency>

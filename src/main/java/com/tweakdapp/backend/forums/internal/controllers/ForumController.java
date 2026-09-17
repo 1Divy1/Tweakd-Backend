@@ -11,6 +11,8 @@ import com.tweakdapp.backend.forums.dto.request.CreateReplyRequest;
 import com.tweakdapp.backend.forums.dto.request.CreateThreadRequest;
 import com.tweakdapp.backend.forums.dto.request.UpdateReplyRequest;
 import com.tweakdapp.backend.forums.dto.request.UpdateThreadRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -140,6 +142,7 @@ public class ForumController {
     // ---- writes ------------------------------------------------------------
 
     @PostMapping("/threads")
+    @RateLimited(RateLimits.FORUMS_THREAD)
     @ResponseStatus(HttpStatus.CREATED)
     public ThreadDetailDto createThread(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody CreateThreadRequest request) {
@@ -155,6 +158,7 @@ public class ForumController {
     }
 
     @PostMapping("/threads/{threadId}/replies")
+    @RateLimited(RateLimits.COMMENTS)
     @ResponseStatus(HttpStatus.CREATED)
     public ReplyDto addReply(@AuthenticationPrincipal Jwt jwt,
                              @PathVariable UUID threadId,
@@ -172,6 +176,7 @@ public class ForumController {
 
     /** Likes a thread (idempotent). */
     @PostMapping("/threads/{threadId}/like")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void likeThread(@AuthenticationPrincipal Jwt jwt,
                            @PathVariable UUID threadId) {
@@ -188,6 +193,7 @@ public class ForumController {
 
     /** Likes a reply (idempotent). */
     @PostMapping("/replies/{replyId}/like")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void likePost(@AuthenticationPrincipal Jwt jwt,
                          @PathVariable UUID replyId) {
@@ -204,6 +210,7 @@ public class ForumController {
 
     /** Saves (bookmarks) a thread for the caller (idempotent). */
     @PostMapping("/threads/{threadId}/save")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void saveThread(@AuthenticationPrincipal Jwt jwt,
                            @PathVariable UUID threadId) {

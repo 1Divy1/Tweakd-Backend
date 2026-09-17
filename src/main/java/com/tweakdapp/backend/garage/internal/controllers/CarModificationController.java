@@ -6,6 +6,8 @@ import com.tweakdapp.backend.garage.dto.CarModificationDto;
 import com.tweakdapp.backend.garage.dto.request.CarModificationRequest;
 import com.tweakdapp.backend.garage.dto.request.MediaKeysRequest;
 import com.tweakdapp.backend.garage.dto.request.UpdateModificationRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -38,6 +40,7 @@ public class CarModificationController {
     }
 
     @PostMapping
+    @RateLimited(RateLimits.GARAGE_WRITE)
     @ResponseStatus(HttpStatus.CREATED)
     public AddModificationResponse addModification(@AuthenticationPrincipal Jwt jwt,
                                                    @PathVariable UUID carId,

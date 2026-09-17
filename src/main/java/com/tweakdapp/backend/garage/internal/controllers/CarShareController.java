@@ -4,6 +4,8 @@ import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.garage.dto.CarShareDto;
 import com.tweakdapp.backend.garage.dto.CarShareQrDto;
 import com.tweakdapp.backend.garage.dto.request.ShareLinkUpdateRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -42,6 +44,7 @@ public class CarShareController {
      * sheet with this and does not care whether the code is new, only that it is stable.
      */
     @PostMapping
+    @RateLimited(RateLimits.GARAGE_WRITE)
     public CarShareDto createShareLink(@AuthenticationPrincipal Jwt jwt,
                                        @PathVariable UUID carId) {
         return garageService.ensureShareLink(jwt.getSubject(), carId);

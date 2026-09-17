@@ -6,6 +6,8 @@ import com.tweakdapp.backend.support.dto.TicketCategoryDto;
 import com.tweakdapp.backend.support.dto.TicketDto;
 import com.tweakdapp.backend.support.dto.TicketMessageRequest;
 import com.tweakdapp.backend.support.dto.TicketPageDto;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -44,6 +46,7 @@ class SupportController {
 
     /** Opens a ticket with its first message. */
     @PostMapping("/tickets")
+    @RateLimited(RateLimits.FEEDBACK_CREATE)
     @ResponseStatus(HttpStatus.CREATED)
     public TicketDto createTicket(@AuthenticationPrincipal Jwt jwt,
                                   @Valid @RequestBody CreateTicketRequest request) {
@@ -67,6 +70,7 @@ class SupportController {
 
     /** Replies inside the caller's own ticket (reopens it if it was resolved). */
     @PostMapping("/tickets/{ticketId}/messages")
+    @RateLimited(RateLimits.COMMENTS)
     public TicketDto addMessage(@AuthenticationPrincipal Jwt jwt,
                                 @PathVariable UUID ticketId,
                                 @Valid @RequestBody TicketMessageRequest request) {

@@ -4,6 +4,8 @@ import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.garage.dto.DreamCarDto;
 import com.tweakdapp.backend.garage.dto.request.DreamCarRequest;
 import com.tweakdapp.backend.garage.dto.request.DreamCarRequestBody;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -41,6 +43,7 @@ public class DreamCarController {
     }
 
     @PostMapping
+    @RateLimited(RateLimits.GARAGE_WRITE)
     @ResponseStatus(HttpStatus.CREATED)
     public List<DreamCarDto> addDreamCar(@AuthenticationPrincipal Jwt jwt,
                                          @Valid @RequestBody DreamCarRequest request) {
@@ -48,6 +51,7 @@ public class DreamCarController {
     }
 
     @PutMapping("/{dreamCarId}")
+    @RateLimited(RateLimits.GARAGE_WRITE)
     public DreamCarDto updateDreamCar(@AuthenticationPrincipal Jwt jwt,
                                       @PathVariable UUID dreamCarId,
                                       @Valid @RequestBody DreamCarRequestBody body) {

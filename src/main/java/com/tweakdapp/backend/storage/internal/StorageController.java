@@ -1,5 +1,7 @@
 package com.tweakdapp.backend.storage.internal;
 
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import com.tweakdapp.backend.storage.StorageService;
 import com.tweakdapp.backend.storage.dto.ModificationUploadUrlsResponse;
 import com.tweakdapp.backend.storage.dto.PostImagesUploadUrlsResponse;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
+@RateLimited(RateLimits.UPLOADS)
 @RequestMapping("/api/storage")
 @RequiredArgsConstructor
 public class StorageController {
