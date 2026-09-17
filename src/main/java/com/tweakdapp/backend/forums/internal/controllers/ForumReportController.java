@@ -3,6 +3,8 @@ package com.tweakdapp.backend.forums.internal.controllers;
 import com.tweakdapp.backend.forums.ForumsService;
 import com.tweakdapp.backend.report.dto.ReportReasonDto;
 import com.tweakdapp.backend.report.dto.ReportRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -47,6 +49,7 @@ public class ForumReportController {
 
     /** Files a report against a thread. The body (and its {@code reason_id}) is optional. */
     @PostMapping("/threads/{threadId}/report")
+    @RateLimited(RateLimits.REPORTS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reportThread(@AuthenticationPrincipal Jwt jwt,
                              @PathVariable UUID threadId,
@@ -56,6 +59,7 @@ public class ForumReportController {
 
     /** Files a report against a reply. The body (and its {@code reason_id}) is optional. */
     @PostMapping("/replies/{replyId}/report")
+    @RateLimited(RateLimits.REPORTS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reportReply(@AuthenticationPrincipal Jwt jwt,
                             @PathVariable UUID replyId,

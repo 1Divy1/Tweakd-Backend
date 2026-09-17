@@ -4,6 +4,8 @@ import com.tweakdapp.backend.profile.ProfileService;
 import com.tweakdapp.backend.report.ReportService;
 import com.tweakdapp.backend.report.dto.ReportReasonDto;
 import com.tweakdapp.backend.report.dto.ReportRequest;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -43,6 +45,7 @@ class ProfileReportController {
 
     /** Files a report against the given user's profile. The body (and its {@code reasonId}) is optional. */
     @PostMapping("/{username}/report")
+    @RateLimited(RateLimits.REPORTS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reportProfile(@AuthenticationPrincipal Jwt jwt,
                               @PathVariable String username,

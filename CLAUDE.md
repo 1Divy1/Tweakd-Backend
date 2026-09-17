@@ -27,6 +27,10 @@ See [`CONTEXT.md`](CONTEXT.md) for the full architecture overview and module REA
 - **JWT user ID** — in controllers, get the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the UUID primary key of `profiles.id`.
 - **Controllers stay thin** — extract `userId` from the JWT, delegate to the module's service interface, return DTO records. No business logic in controllers.
 - **REST base path** — `/api/v1/<module>/...`
+- **Rate limiting** — a new write endpoint (content, reactions, reports, uploads) gets
+  `@RateLimited(RateLimits.X)` with the closest existing constant from `shared/ratelimit`. Put the
+  numbers in `RateLimitProperties`/`application.yaml`, never in the annotation, and never add a
+  literal limit name.
 
 ## Lombok
 

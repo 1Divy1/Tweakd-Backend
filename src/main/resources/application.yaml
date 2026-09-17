@@ -54,6 +54,55 @@ firebase:
   android-channel-id: tweakd_default
   dry-run: ${FIREBASE_DRY_RUN:false}
 
+origin-guard:
+  # Shared secret that Cloudflare adds to every request for api.tweakdapp.com as the
+  # X-Origin-Secret header (a request header Transform Rule). Requests without it get 403, which is
+  # what stops callers from skipping Cloudflare by using the *.run.app URL directly.
+  # Unset = guard off: local runs, tests, and the rollout window before every client has moved to
+  # api.tweakdapp.com. Set it on Cloud Run only once they have. See shared/README.md.
+  secret: ${ORIGIN_SECRET:}
+
+rate-limit:
+  # ENFORCE: over-limit requests get 429 + Retry-After. The Flutter app handles that (it shows a
+  # "slow down" notice and never retries), so enforcement is on from day one rather than tuned from
+  # LOG_ONLY logs first — every limit below is set with enough headroom that a real user cannot
+  # reach it.
+  #
+  # Override with the RATE_LIMIT_MODE env var, no rebuild needed:
+  #   OFF       kill switch, and what to use for load-test runs (the limiter would reject most of a
+  #             load test, making the results meaningless). Local .env sets this.
+  #   LOG_ONLY  counts and logs what it would block, blocks nothing. Useful if a limit is suspected
+  #             of being too tight and you want evidence before loosening it.
+  # See RATE_LIMITING_PROGRESS.md.
+  mode: ${RATE_LIMIT_MODE:ENFORCE}
+  #
+  # Every limit has a default in shared/ratelimit/RateLimitProperties — deliberately, so tests and
+  # local runs behave like production. Override only what needs tuning, e.g.
+  #
+  #   limits:
+  #     comments:
+  #       capacity: 20
+  #       refill-tokens: 1
+  #       refill-period: 10s
+  #
+  # Defaults, as "burst, then sustained rate":
+  #   general               240, then 240/min   every authenticated request (app launch is ~5 calls;
+  #                                             a busy human minute is well under 100)
+  #   public.backstop       600, then 600/min   per IP on /public/** (real visitors come via the
+  #                                             web.tweakdapp.com Worker, so these IPs are usually
+  #                                             Cloudflare's — per-visitor limiting belongs there)
+  #   posts.create            5, then 1/2min    composing a post is minutes of work
+  #   forums.thread           5, then 1/2min
+  #   comments               15, then 1/6s      typing a reply takes longer than 6s
+  #   reactions              60, then 1/1s      likes/saves/shares/votes/follows (notification spam)
+  #   reports                10, then 1/2min    room to report a whole spam wave
+  #   feedback.create         5, then 1/5min
+  #   mapevents.create        5, then 1/20min   an organizer setting up several meets in one sitting
+  #   mapevents.participate  20, then 1/15s
+  #   garage.write           30, then 1/5s      a car plus a dozen modifications in one session
+  #   uploads                40, then 1/5s      presigned R2 upload URLs; one call = up to 10 images
+  #   devices                30, then 1/min     runs on every app start/sign-in, not on user intent
+
 spring:
   application:
     name: backend

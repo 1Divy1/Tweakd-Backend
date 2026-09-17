@@ -2,6 +2,8 @@ package com.tweakdapp.backend.relationships.internal;
 
 import com.tweakdapp.backend.relationships.BlockService;
 import com.tweakdapp.backend.relationships.dto.BlockedAccountDto;
+import com.tweakdapp.backend.shared.ratelimit.RateLimited;
+import com.tweakdapp.backend.shared.ratelimit.RateLimits;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,6 +33,7 @@ class BlockController {
     }
 
     @PostMapping("/{username}")
+    @RateLimited(RateLimits.REACTIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void block(@AuthenticationPrincipal Jwt jwt, @PathVariable String username) {
         blockService.block(jwt.getSubject(), username);

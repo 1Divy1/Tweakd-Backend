@@ -100,6 +100,19 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
   `profiles`. A person who is both an app user and staff has two logins.
 - Banned users (`profiles.is_banned`) are rejected with 403 on every request by the profile
   module's `BannedUserInterceptor` (60s cache; a missing profile — i.e. staff — reads as not banned).
+- **Origin guard** — the API is served at `api.tweakdapp.com` through Cloudflare, which adds an
+  `X-Origin-Secret` header. `shared/security/OriginSecretFilter` rejects requests without it
+  (`403`), so the public `*.run.app` URL can't be used to bypass Cloudflare. Configured by the
+  `ORIGIN_SECRET` env var, and off when unset (local, tests). See the `shared` README.
+- **Rate limiting** — `shared/ratelimit` counts requests per caller (JWT subject, or client IP on
+  `/public/**`) with token buckets and answers over-limit requests with 429 + `Retry-After`. Every
+  `/api/**` request consumes from a broad general limit; endpoints annotated `@RateLimited(RateLimits.X)`
+  also consume from that named bucket. Counters are in-memory per instance — no Redis, a deliberate
+  cost decision. **Enforced in production**; the `RATE_LIMIT_MODE` env var overrides it with no
+  rebuild (`OFF` is the kill switch and what load tests need, `LOG_ONLY` counts without blocking).
+  Local runs set `OFF` in `.env`. Numbers live in `RateLimitProperties` (defaults) and
+  `application.yaml` (overrides), never in the annotation — they are set with enough headroom that
+  a real user cannot reach them. See `RATE_LIMITING_PROGRESS.md`.
 - Roles come from the JWT claim `app_metadata.role`, prefixed with `ROLE_`. Missing claim defaults to `ROLE_USER`.
 - In controllers, retrieve the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the primary key of the `profiles` table (for app users; staff have no profile row).
 - `@EnableMethodSecurity` is active — `@PreAuthorize` works on service and controller methods.
