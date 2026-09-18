@@ -27,9 +27,6 @@ public class ProfileEntity {
     @Id
     private UUID id;
 
-    @Column(name = "role")
-    private String role;
-
     @Column(name = "name")
     private String name;
 

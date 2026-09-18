@@ -8,6 +8,23 @@ The point of the feature is that the number is **not fakeable** — it takes tim
 So the timeline is the product, not the total: anyone deciding whether to trust a seller can read
 what they actually did and when.
 
+## Paused (2026-09-18)
+
+The owner paused reputation until the app has users. Two halves:
+
+- **Backend:** `reputation.enabled` (env `REPUTATION_ENABLED`, default **`false`**). While it is
+  off, every `award(...)` returns `null` and `revoke(...)` returns `false`. The score and the history
+  are not touched. That covers every caller, current and future. Today that is only
+  `ContestFinalizer`: podiums still get their badges and notifications, just no points. Reads and
+  REST endpoints keep working and report whatever is stored.
+- **Mobile:** the reputation counter is removed from the profile header. `ProfileEntity` still
+  parses `reputation_score`, so bringing it back is UI-only. The public car page
+  (`PublicCarOwnerDto.reputationScore`) still carries the field, but Tweakd-Web-App never
+  rendered it.
+
+To resume: set `REPUTATION_ENABLED=true` and restore the UI. Earning actions still to be wired and
+the product decisions behind them are in the mobile repo's `REPUTATION_PROGRESS.md`.
+
 ## Ownership split
 
 | Thing | Owned by | Why |
