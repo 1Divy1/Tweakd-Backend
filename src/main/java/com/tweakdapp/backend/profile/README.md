@@ -35,7 +35,7 @@ Manages user profile data and onboarding. Owns the `profiles` table plus the
 
 | Type | Fields | Used for |
 |---|---|---|
-| `ProfileDto` | id, role, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding, reputationScore | Own-profile responses |
+| `ProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, requiresOnboarding, reputationScore | Own-profile responses |
 | `PublicProfileDto` | id, name, username, avatarUrl, bio, externalLink, followersCount, followingCount, isVerified, isBusiness, reputationScore | Public profile view (no `requiresOnboarding`) |
 | `ProfileSearchResultDto` | id, name, username, avatarUrl | Search results and cross-module hydration |
 | `OnboardingRequest` | name, username, cityId, discoveryRadiusKm (required), bio (optional) | POST /onboarding body |
@@ -81,7 +81,6 @@ Reference reads (base path `/api/v1/profile/reference`):
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID | PK, matches Supabase auth user id |
-| role | String | |
 | name | String | |
 | username | String | Unique |
 | avatarUrl | String | |

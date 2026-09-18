@@ -216,6 +216,8 @@ public class ContestFinalizer {
                 default -> BadgeTrigger.CONTEST_THIRD_PLACE;
             };
             try {
+                // A no-op while reputation is paused (reputation.enabled=false); the badge below
+                // is still awarded.
                 reputationService.award(owner, reason, source);
             } catch (RuntimeException e) {
                 // A retired reason must not stop the result from being published; log and go on.

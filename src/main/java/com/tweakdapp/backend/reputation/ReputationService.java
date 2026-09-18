@@ -22,6 +22,11 @@ import java.util.UUID;
  * is a row to point at. It is what lets a timeline entry read "+10 · Attended a car event · Cluj
  * Auto Show" and link through to the event, and it is what makes the award idempotent, so callers
  * can fire it from a listener without guarding against a retry paying twice.
+ *
+ * <p><strong>Paused.</strong> While {@code reputation.enabled} is {@code false} (the default), every
+ * {@code award} overload returns {@code null} and {@link #revoke} returns {@code false}, without
+ * touching the score or the history. Callers must not rely on the returned entry. The reads are
+ * unaffected.
  */
 public interface ReputationService {
 

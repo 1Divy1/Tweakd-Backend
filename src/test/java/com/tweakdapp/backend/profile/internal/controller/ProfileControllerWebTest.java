@@ -59,7 +59,7 @@ class ProfileControllerWebTest {
     private ProfileService profileService;
 
     private ProfileDto sampleProfile() {
-        return new ProfileDto(ID, "user", "Racer", "racer", "http://a/x.png", "vroom",
+        return new ProfileDto(ID, "Racer", "racer", "http://a/x.png", "vroom",
                 "http://link", 12, 7, true, false, false, 340, "cluj", 25, "en",
                 List.of(pioneerBadge()));
     }

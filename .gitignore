@@ -67,3 +67,6 @@ supabase/.branches/
 # Firebase service account keys — never commit
 *serviceAccount*.json
 firebase-adminsdk*.json
+
+# Claude stuff
+*_PROGRESS.md

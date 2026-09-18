@@ -17,6 +17,9 @@ import com.tweakdapp.backend.reputation.internal.repository.ReputationReasonRepo
 import com.tweakdapp.backend.reputation.internal.repository.ReputationScoreHistoryRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,21 +34,32 @@ import java.util.UUID;
 @Service
 class ReputationServiceImpl implements ReputationService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReputationServiceImpl.class);
+
     private static final int MAX_PAGE_SIZE = 50;
 
     private final ReputationScoreHistoryRepository historyRepository;
     private final ReputationReasonRepository reasonRepository;
     private final ProfileService profileService;
 
+    /**
+     * The pause switch, {@code reputation.enabled}. While {@code false}, awarding and revoking are
+     * no-ops: no score moves and no history row is written, whoever calls in. Reads keep working
+     * and simply report what is already stored. See the module README, "Paused".
+     */
+    private final boolean enabled;
+
     @PersistenceContext
     private EntityManager entityManager;
 
     ReputationServiceImpl(ReputationScoreHistoryRepository historyRepository,
                           ReputationReasonRepository reasonRepository,
-                          ProfileService profileService) {
+                          ProfileService profileService,
+                          @Value("${reputation.enabled:false}") boolean enabled) {
         this.historyRepository = historyRepository;
         this.reasonRepository = reasonRepository;
         this.profileService = profileService;
+        this.enabled = enabled;
     }
 
     // ---- awarding -----------------------------------------------------------
@@ -53,6 +67,9 @@ class ReputationServiceImpl implements ReputationService {
     @Override
     @Transactional
     public ReputationEntryDto award(UUID userId, String reasonId) {
+        if (paused(userId, reasonId)) {
+            return null;
+        }
         ReputationReasonEntity reason = requireAwardableReason(reasonId);
         return doAward(userId, reason, reason.getPoints(), null);
     }
@@ -60,6 +77,9 @@ class ReputationServiceImpl implements ReputationService {
     @Override
     @Transactional
     public ReputationEntryDto award(UUID userId, String reasonId, ReputationSource source) {
+        if (paused(userId, reasonId)) {
+            return null;
+        }
         ReputationReasonEntity reason = requireAwardableReason(reasonId);
         return doAward(userId, reason, reason.getPoints(), source);
     }
@@ -73,6 +93,9 @@ class ReputationServiceImpl implements ReputationService {
     @Override
     @Transactional
     public ReputationEntryDto award(UUID userId, String reasonId, int points, ReputationSource source) {
+        if (paused(userId, reasonId)) {
+            return null;
+        }
         ReputationReasonEntity reason = requireAwardableReason(reasonId);
         if (points == 0) {
             throw InvalidReputationAwardException.zeroPoints(reasonId);
@@ -161,6 +184,9 @@ class ReputationServiceImpl implements ReputationService {
     @Override
     @Transactional
     public boolean revoke(UUID userId, String reasonId, ReputationSource source, String reason) {
+        if (paused(userId, reasonId)) {
+            return false;
+        }
         if (source == null) {
             throw InvalidReputationAwardException.revocationNeedsSource(reasonId);
         }
@@ -186,6 +212,18 @@ class ReputationServiceImpl implements ReputationService {
 
         entry.setRevokedAt(Instant.now());
         entry.setRevokedReason(reason == null || reason.isBlank() ? null : reason.strip());
+        return true;
+    }
+
+    /**
+     * Whether reputation is paused, logging the skipped call so it is traceable. Checked before
+     * anything else, so a paused award does not even validate its reason code.
+     */
+    private boolean paused(UUID userId, String reasonId) {
+        if (enabled) {
+            return false;
+        }
+        log.debug("Reputation is paused; skipping {} for user {}", reasonId, userId);
         return true;
     }
 
