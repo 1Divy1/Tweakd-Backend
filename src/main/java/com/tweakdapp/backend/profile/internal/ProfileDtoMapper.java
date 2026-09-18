@@ -50,7 +50,7 @@ class ProfileDtoMapper {
      */
     ProfileDto toDto(ProfileEntity p, List<UserBadgeDto> badges) {
         return new ProfileDto(
-                p.getId(), p.getRole(), p.getName(), p.getUsername(),
+                p.getId(), p.getName(), p.getUsername(),
                 resolveAvatarUrl(p.getAvatarUrl()), p.getBio(),
                 p.getExternalLink(), p.getFollowersCount(), p.getFollowingCount(),
                 p.isVerified(), p.isBusiness(), p.isRequiresOnboarding(), p.getReputationScore(),

@@ -54,6 +54,13 @@ firebase:
   android-channel-id: tweakd_default
   dry-run: ${FIREBASE_DRY_RUN:false}
 
+reputation:
+  # Paused by the owner (2026-09-18): the score is hidden in the app, and while this is false no
+  # award or revocation moves it — contest podiums still get their badges, just no points. Flip to
+  # true (REPUTATION_ENABLED=true on Cloud Run, no rebuild) to switch awarding back on. See
+  # reputation/README.md, "Paused".
+  enabled: ${REPUTATION_ENABLED:false}
+
 origin-guard:
   # Shared secret that Cloudflare adds to every request for api.tweakdapp.com as the
   # X-Origin-Secret header (a request header Transform Rule). Requests without it get 403, which is
