@@ -79,6 +79,32 @@ CREATE TYPE public.target_entity AS ENUM (
 
 
 --
+-- Name: accept_signup_terms(boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.accept_signup_terms(p_analytics_consent boolean DEFAULT false) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid     uuid    := auth.uid();
+  v_consent boolean := coalesce(p_analytics_consent, false);
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  update public.profiles
+     set terms_accepted_at    = now(),
+         analytics_consent    = v_consent,
+         analytics_consent_at = case when v_consent then now() end
+   where id = v_uid
+     and terms_accepted_at is null;
+end;
+$$;
+
+
+--
 -- Name: bump_feedback_comment_count(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -141,6 +167,34 @@ begin
       + extract(epoch from coalesce(new.created_at, now())) / 45000.0;
 
   return new;
+end;
+$$;
+
+
+--
+-- Name: discard_unregistered_account(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.discard_unregistered_account() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    return;
+  end if;
+
+  delete from auth.users u
+   where u.id = v_uid
+     and exists (
+       select 1
+         from public.profiles p
+        where p.id = v_uid
+          and p.terms_accepted_at is null
+          and p.requires_onboarding
+     );
 end;
 $$;
 
@@ -641,8 +695,10 @@ begin
     following_count,
     is_verified,
     is_business,
-    role,
-    requires_onboarding
+    requires_onboarding,
+    terms_accepted_at,
+    analytics_consent,
+    analytics_consent_at
   ) values (
     new.id,
 
@@ -671,8 +727,12 @@ begin
     -- have defaults in schema, but set explicitly for safety
     false,
     false,
-    'user',
-    true
+    true,
+
+    -- email sign-up only; social sign-ups record these through accept_signup_terms()
+    case when new.raw_user_meta_data ->> 'terms_accepted' = 'true' then now() end,
+    coalesce(new.raw_user_meta_data ->> 'analytics_consent' = 'true', false),
+    case when new.raw_user_meta_data ->> 'analytics_consent' = 'true' then now() end
   );
 
   return new;
@@ -733,6 +793,30 @@ BEGIN
      END IF;
   END LOOP;
 END;
+$$;
+
+
+--
+-- Name: set_analytics_consent(boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.set_analytics_consent(p_granted boolean) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid     uuid    := auth.uid();
+  v_granted boolean := coalesce(p_granted, false);
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  update public.profiles
+     set analytics_consent    = v_granted,
+         analytics_consent_at = case when v_granted then now() end
+   where id = v_uid;
+end;
 $$;
 
 
@@ -864,27 +948,6 @@ begin
   end if;
   return null;
 end;
-$$;
-
-
---
--- Name: sync_role_to_auth(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.sync_role_to_auth() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO ''
-    AS $$
-BEGIN
-  UPDATE auth.users
-  SET raw_app_meta_data = jsonb_set(
-    COALESCE(raw_app_meta_data, '{}'::jsonb),
-    '{role}',
-    to_jsonb(NEW.role)
-  )
-  WHERE id = NEW.id;
-  RETURN NEW;
-END;
 $$;
 
 
@@ -3690,7 +3753,6 @@ CREATE TABLE public.profiles (
     is_verified boolean DEFAULT false NOT NULL,
     is_business boolean DEFAULT false NOT NULL,
     external_link text DEFAULT ''::text NOT NULL,
-    role text DEFAULT 'user'::text NOT NULL,
     requires_onboarding boolean DEFAULT true NOT NULL,
     city_id text,
     discovery_radius_km integer DEFAULT 10,
@@ -3700,6 +3762,9 @@ CREATE TABLE public.profiles (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     app_language text DEFAULT 'en'::text NOT NULL,
     reputation_score integer DEFAULT 0 NOT NULL,
+    terms_accepted_at timestamp with time zone,
+    analytics_consent boolean DEFAULT false NOT NULL,
+    analytics_consent_at timestamp with time zone,
     CONSTRAINT profiles_bio_check CHECK ((length(bio) <= 500)),
     CONSTRAINT profiles_discovery_radius_km_check CHECK (((discovery_radius_km >= 1) AND (discovery_radius_km <= 100))),
     CONSTRAINT profiles_followers_count_check CHECK ((followers_count >= 0)),
@@ -3803,6 +3868,27 @@ COMMENT ON COLUMN public.profiles.banned_until IS 'Temp-ban expiry. Only meaning
 --
 
 COMMENT ON COLUMN public.profiles.app_language IS 'What language is the user''s app set to.';
+
+
+--
+-- Name: COLUMN profiles.terms_accepted_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.profiles.terms_accepted_at IS 'When the user accepted the Terms and Privacy Policy on the sign-up page. Null = the auth user was created by a login-page social sign-in and never registered.';
+
+
+--
+-- Name: COLUMN profiles.analytics_consent; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.profiles.analytics_consent IS 'Opt-in to product analytics (PostHog). False until the user ticks the box at sign-up or turns it on in Settings.';
+
+
+--
+-- Name: COLUMN profiles.analytics_consent_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.profiles.analytics_consent_at IS 'When analytics consent was last granted. Null while not granted.';
 
 
 --
@@ -6376,13 +6462,6 @@ CREATE TRIGGER support_ticket_messages_touch AFTER INSERT ON public.support_tick
 
 
 --
--- Name: profiles sync_role_trigger; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER sync_role_trigger AFTER UPDATE OF role ON public.profiles FOR EACH ROW WHEN ((old.role IS DISTINCT FROM new.role)) EXECUTE FUNCTION public.sync_role_to_auth();
-
-
---
 -- Name: forum_thread_reports thread_reports_case; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8380,12 +8459,6 @@ ALTER TABLE ONLY public.vehicle_history_entries
 
 --
 -- Name: profiles profiles_select_own; Type: POLICY; Schema: public; Owner: -
---
-
-
-
---
--- Name: profiles profiles_update_own; Type: POLICY; Schema: public; Owner: -
 --
 
 

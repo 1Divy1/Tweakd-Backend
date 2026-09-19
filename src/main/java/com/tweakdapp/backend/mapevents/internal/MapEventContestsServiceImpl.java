@@ -545,6 +545,15 @@ class MapEventContestsServiceImpl implements MapEventContestsService {
         if (garageService.findCarsByIds(List.of(carId)).isEmpty()) {
             throw new HistoryCarNotFoundException(carId);
         }
+        return historyFor(carId);
+    }
+
+    /**
+     * The history itself, without the existence check. Package-visible for
+     * {@link PublicCarEventsAdapter}, which serves the public car page: garage has already loaded
+     * that car, and asking garage again from inside its own call would be a pointless round trip.
+     */
+    List<CarEventHistoryItemDto> historyFor(UUID carId) {
         Instant now = Instant.now();
 
         List<MapEventParticipantEntity> participations =

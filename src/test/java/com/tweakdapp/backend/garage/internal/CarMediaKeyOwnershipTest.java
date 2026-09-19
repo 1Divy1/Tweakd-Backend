@@ -68,7 +68,7 @@ class CarMediaKeyOwnershipTest {
         service = new GarageServiceImpl(
                 null, carRepository, modificationRepository, modificationGalleryRepository,
                 carGalleryRepository, null, null, null, null, null, null, null, null, null,
-                null, null, storageService, null, null, null);
+                null, null, storageService, null, null, null, null);
 
         GarageEntity garage = new GarageEntity();
         garage.setOwnerId(OWNER);
