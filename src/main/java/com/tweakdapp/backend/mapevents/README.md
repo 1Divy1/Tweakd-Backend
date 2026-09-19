@@ -218,7 +218,27 @@ Every write answers with the fresh `ContestDto`, so no write needs a follow-up r
 | `findOwnedParticipantCard(...)` | — | the ownership check behind sharing a card to the feed |
 | `getCarHistory(carId)` | `GET /cars/{carId}/history` | the car's attended events and podium places, newest first |
 
-Base path `/api/v1/map-events`. All endpoints require authentication; none are under `/public/**`.
+Base path `/api/v1/map-events`. All endpoints require authentication, except the one below.
+
+### Public event page — `getPublicEvent(eventId)`
+
+`GET /public/v1/events/{eventId}` (`PublicMapEventController`) is **unauthenticated** — it sits
+under `/public/**` next to the public car route and is called by the Tweakd-Web-App Worker for
+`web.tweakdapp.com/e/{eventId}`, the link the app's share button hands out. It returns
+`PublicMapEventDto`, a hand-written projection: title, description, category label, venue and
+coordinates, times, cover, a clock-derived `phase`, the two head-counts, organizer credits (no ids)
+and rule texts. Never attendee names, ids, approval state or the rejection reason.
+
+| Event | Response |
+|---|---|
+| approved, upcoming / live / finished | 200 (`phase` = `upcoming` / `live` / `previous`, same 24h rule as the map search) |
+| approved, then cancelled | 410 (`MapEventGoneException`) |
+| pending, rejected, `hidden`, deleted, unknown | 404 — indistinguishable, like `getEvent` |
+| malformed id | 400 from Spring's UUID conversion, before any query |
+
+Events are shared by UUID, not a code: an approved event is already visible to every app user, so
+there is nothing to pause, revoke or count. Cached `public, max-age=60, s-maxage=300` like the car.
+Organizers whose account no longer resolves are dropped from the credits.
 
 ### Admin surface
 

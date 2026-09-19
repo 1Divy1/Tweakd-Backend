@@ -28,6 +28,8 @@ import com.tweakdapp.backend.mapevents.dto.MapEventSummaryDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventViewerStateDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.tweakdapp.backend.mapevents.dto.OrganizerCandidateDto;
+import com.tweakdapp.backend.mapevents.dto.PublicMapEventDto;
+import com.tweakdapp.backend.mapevents.dto.PublicMapEventOrganizerDto;
 import com.tweakdapp.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.tweakdapp.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.tweakdapp.backend.mapevents.dto.request.GeocodeQuery;
@@ -37,6 +39,7 @@ import com.tweakdapp.backend.mapevents.exception.EventClosedException;
 import com.tweakdapp.backend.mapevents.exception.EventNotEditableException;
 import com.tweakdapp.backend.mapevents.exception.InvalidMapEventException;
 import com.tweakdapp.backend.mapevents.exception.InvalidSearchAreaException;
+import com.tweakdapp.backend.mapevents.exception.MapEventGoneException;
 import com.tweakdapp.backend.mapevents.exception.MapEventNotFoundException;
 import com.tweakdapp.backend.mapevents.exception.NotEventOrganizerException;
 import com.tweakdapp.backend.mapevents.internal.entities.CarMeetEntity;
@@ -72,6 +75,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -118,6 +122,9 @@ class MapEventsServiceImpl implements MapEventsService {
     private static final Set<String> DEFAULT_SEARCH_STATUSES = Set.of(
             MapEventEntity.STATUS_UPCOMING, MapEventEntity.STATUS_LIVE);
     private static final int MAX_PAGE_SIZE = 50;
+
+    /** How long an event with no {@code ends_at} counts as running — the map queries' 24-hour rule. */
+    private static final Duration OPEN_ENDED_EVENT_LENGTH = Duration.ofHours(24);
 
     private final MapEventRepository eventRepository;
     private final MapEventCategoryRepository categoryRepository;
@@ -337,6 +344,69 @@ class MapEventsServiceImpl implements MapEventsService {
             throw new MapEventNotFoundException(eventId);
         }
         return assemble(event, currentUserId, organizer);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PublicMapEventDto getPublicEvent(UUID eventId) {
+        MapEventEntity event = loadEvent(eventId);
+
+        // No organizer exception here — there is no caller. Only an event that is on the map, or
+        // was, is public. `hidden` is an organizer-side state nothing writes today; treating it as
+        // missing keeps it off the open internet if anything ever does.
+        if (!event.isApproved() || MapEventEntity.STATUS_HIDDEN.equals(event.getStatus())) {
+            throw new MapEventNotFoundException(eventId);
+        }
+        // Checked after approval, so a 410 is only ever said about an event that was once public
+        // and never leaks that a rejected submission exists.
+        if (MapEventEntity.STATUS_CANCELED.equals(event.getStatus())) {
+            throw new MapEventGoneException();
+        }
+
+        // Organizers whose account no longer resolves (deleted, banned) are dropped rather than
+        // rendered as a nameless credit on a page a stranger reads.
+        List<PublicMapEventOrganizerDto> organizers = resolveOrganizers(eventId).stream()
+                .filter(credit -> credit.name() != null || credit.username() != null)
+                .map(credit -> new PublicMapEventOrganizerDto(
+                        credit.type(), credit.role(), credit.name(), credit.username(), credit.imageUrl()))
+                .toList();
+
+        List<String> rules = resolveRules(eventId).stream().map(MapEventRuleDto::rule).toList();
+
+        return new PublicMapEventDto(
+                event.getTitle(),
+                event.getDescription(),
+                event.getCategory().getLabel(),
+                event.getLocationName(),
+                GeoSupport.latOf(event.getLocation()),
+                GeoSupport.lngOf(event.getLocation()),
+                event.getStartsAt(),
+                event.getEndsAt(),
+                resolveCoverUrl(event.getCoverImageKey()),
+                publicPhase(event, Instant.now()),
+                event.getAttendeesCount(),
+                event.getAttendingCarsCount(),
+                organizers,
+                rules);
+    }
+
+    /**
+     * The map search's phase rule, in Java: nothing sweeps {@code status}, so the clock decides.
+     * An event without {@code ends_at} counts as over 24 hours after it starts — the same window
+     * the map and search queries use, so the public page never calls "live" an event the map has
+     * already dropped.
+     */
+    static String publicPhase(MapEventEntity event, Instant now) {
+        Instant end = event.getEndsAt() != null
+                ? event.getEndsAt()
+                : event.getStartsAt().plus(OPEN_ENDED_EVENT_LENGTH);
+        if (MapEventEntity.STATUS_PREVIOUS.equals(event.getStatus()) || end.isBefore(now)) {
+            return MapEventEntity.STATUS_PREVIOUS;
+        }
+        if (MapEventEntity.STATUS_LIVE.equals(event.getStatus()) || !event.getStartsAt().isAfter(now)) {
+            return MapEventEntity.STATUS_LIVE;
+        }
+        return MapEventEntity.STATUS_UPCOMING;
     }
 
     @Override
