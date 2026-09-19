@@ -171,6 +171,7 @@ picker's result list can show what kind of match each candidate is, not just its
 | Method | REST | Notes |
 |---|---|---|
 | `findNearby(lat, lng, radiusKm, categoryId, limit)` | `GET /nearby?lat=&lng=&radius_km=25&category=&limit=200` | `MapEventPinDto` list, nearest first |
+| `search(query, lat, lng, statuses, cursor, size)` | `GET /search?q=&lat=&lng=&status=upcoming,live&cursor=&size=20` | `MapEventPageDto<MapEventPinDto>` — the map's search box; see § Map search |
 | `listCategories()` | `GET /categories` | subcategory reference data |
 | `geocode(query, proximityLat, proximityLng)` | `GET /geocode?address_line1=&address_number=&street=&block=&place=&region=&postcode=&locality=&neighborhood=&country=&proximity_lat=&proximity_lng=` | `GeocodeCandidateDto` list, best match first, up to 5 — proxies Mapbox Geocoding v6 structured input |
 | `getEvent(userId, eventId)` | `GET /{eventId}` | full page + the viewer's own standing |
@@ -249,6 +250,31 @@ abandoned contest takes votes forever and no organizer means nobody in the app c
 force-finish is the organizer's own path — `ContestFinalizer.finalizeLocked` under the same row
 lock, awards suppressed only when the event was cancelled — with the staff id written to
 `finished_by`, which has no FK precisely so a non-profile id can go there.
+
+## Map search
+
+`search` backs the map screen's search box: approved events whose title, category label or venue
+name contains `q`, **anywhere** (no radius), nearest to `lat`/`lng` first, keyset-paged on
+`(st_distance, id)` exactly like the business search (same escaping, 2-character minimum, 1..50 page
+size, cursor valid only against the same centre and status filter).
+
+**The phase is derived from the clock, not read from `status`** — nothing sweeps that column, and
+in practice no event is ever stored as `live`. The query computes it with the map's own rule:
+
+| Phase | Rule |
+|---|---|
+| `previous` | stored `previous`, or `coalesce(ends_at, starts_at + 24h) < now()` |
+| `live` | otherwise, stored `live` or `starts_at <= now()` |
+| `upcoming` | everything else |
+
+`status` filters on that phase (any of `upcoming`, `live`, `previous`; default `upcoming,live`;
+anything else is a 400), and each returned pin's `status` **is** the derived phase. Canceled,
+hidden and unapproved events never match. Unlike `/nearby`, past events are reachable — the app
+shows them behind a "Past" chip.
+
+**Known mismatch:** `MapEventEntity.hasFinished` has no 24-hour rule for an event without
+`ends_at`, so such an event can read as `previous` here while `viewer.can_rsvp` still says true.
+The map query already had this gap; search just makes those events reachable.
 
 ## Visibility
 

@@ -74,8 +74,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -101,6 +103,20 @@ class MapEventsServiceImpl implements MapEventsService {
     private static final int MAX_LIMIT = 500;
 
     private static final int DEFAULT_PAGE_SIZE = 20;
+
+    /** Shorter queries match nearly everything and tell the user nothing. */
+    private static final int MIN_SEARCH_LENGTH = 2;
+
+    /** Longer than any real title; trimmed rather than refused. */
+    private static final int MAX_SEARCH_LENGTH = 100;
+
+    /** The phases the map search accepts — the clock-derived ones, never hidden or canceled. */
+    private static final Set<String> SEARCH_STATUSES = Set.of(
+            MapEventEntity.STATUS_UPCOMING, MapEventEntity.STATUS_LIVE, MapEventEntity.STATUS_PREVIOUS);
+
+    /** What search shows when no phase is asked for: what a user can still act on. */
+    private static final Set<String> DEFAULT_SEARCH_STATUSES = Set.of(
+            MapEventEntity.STATUS_UPCOMING, MapEventEntity.STATUS_LIVE);
     private static final int MAX_PAGE_SIZE = 50;
 
     private final MapEventRepository eventRepository;
@@ -167,22 +183,96 @@ class MapEventsServiceImpl implements MapEventsService {
 
         return eventRepository.findVisibleNearby(lat, lng, radiusKm * 1000.0, normalisedCategory, limit)
                 .stream()
-                .map(row -> new MapEventPinDto(
-                        row.getId(),
-                        row.getTitle(),
-                        row.getCategoryId(),
-                        row.getCategoryLabel(),
-                        row.getLat(),
-                        row.getLng(),
-                        row.getLocationName(),
-                        resolveCoverUrl(row.getCoverImageKey()),
-                        row.getStartsAt(),
-                        row.getEndsAt(),
-                        row.getStatus(),
-                        row.getAttendeesCount(),
-                        row.getAttendingCarsCount(),
-                        row.getMaxParticipantCapacity()))
+                .map(this::toPin)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MapEventPageDto<MapEventPinDto> search(String query, double lat, double lng,
+                                                  Collection<String> statuses, String cursor, int size) {
+        validateCentre(lat, lng);
+        Set<String> phases = normaliseSearchStatuses(statuses);
+        MapEventSearchCursor after = MapEventSearchCursor.decode(cursor);
+
+        String text = query == null ? "" : query.strip();
+        if (text.length() < MIN_SEARCH_LENGTH) {
+            return new MapEventPageDto<>(List.of(), null);
+        }
+        if (text.length() > MAX_SEARCH_LENGTH) {
+            text = text.substring(0, MAX_SEARCH_LENGTH);
+        }
+        int pageSize = clampPageSize(size);
+
+        List<MapEventRepository.SearchPinRow> rows = eventRepository.searchVisible(
+                containsPattern(text), lat, lng,
+                phases.contains(MapEventEntity.STATUS_LIVE),
+                phases.contains(MapEventEntity.STATUS_UPCOMING),
+                phases.contains(MapEventEntity.STATUS_PREVIOUS),
+                after.distanceMetres(), after.id(), pageSize + 1);
+
+        // One row over the page size is the "is there more" probe; it is never returned.
+        boolean hasMore = rows.size() > pageSize;
+        List<MapEventRepository.SearchPinRow> page = hasMore ? rows.subList(0, pageSize) : rows;
+        String nextCursor = hasMore
+                ? new MapEventSearchCursor(page.getLast().getDistanceMetres(), page.getLast().getId()).encode()
+                : null;
+
+        return new MapEventPageDto<>(page.stream().map(this::toPin).toList(), nextCursor);
+    }
+
+    private MapEventPinDto toPin(MapEventRepository.MapPinRow row) {
+        return new MapEventPinDto(
+                row.getId(),
+                row.getTitle(),
+                row.getCategoryId(),
+                row.getCategoryLabel(),
+                row.getLat(),
+                row.getLng(),
+                row.getLocationName(),
+                resolveCoverUrl(row.getCoverImageKey()),
+                row.getStartsAt(),
+                row.getEndsAt(),
+                row.getStatus(),
+                row.getAttendeesCount(),
+                row.getAttendingCarsCount(),
+                row.getMaxParticipantCapacity());
+    }
+
+    /**
+     * Blank means the default ({@code upcoming} + {@code live} — what a user can still act on);
+     * anything else must be one of the three phases. An unknown value is refused rather than
+     * ignored: silently dropping it would return fewer results than asked for, which reads as
+     * "nothing found".
+     */
+    private static Set<String> normaliseSearchStatuses(Collection<String> statuses) {
+        Set<String> phases = new HashSet<>();
+        if (statuses != null) {
+            for (String status : statuses) {
+                if (status == null || status.isBlank()) {
+                    continue;
+                }
+                String normalised = status.strip().toLowerCase(Locale.ROOT);
+                if (!SEARCH_STATUSES.contains(normalised)) {
+                    throw new InvalidMapEventException(
+                            "status must be any of " + SEARCH_STATUSES + " (got: " + status + ")");
+                }
+                phases.add(normalised);
+            }
+        }
+        return phases.isEmpty() ? DEFAULT_SEARCH_STATUSES : phases;
+    }
+
+    /**
+     * {@code %text%} for an {@code ILIKE ... ESCAPE '\'}, with the user's own wildcard characters
+     * escaped so they match literally — otherwise a search for {@code "_"} would match every title.
+     */
+    static String containsPattern(String text) {
+        String escaped = text
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+        return "%" + escaped + "%";
     }
 
     @Override
@@ -1365,6 +1455,15 @@ class MapEventsServiceImpl implements MapEventsService {
         }
         T last = page.get(page.size() - 1);
         return new MapEventCursor(timestamp.apply(last), id.apply(last)).encode();
+    }
+
+    private static void validateCentre(double lat, double lng) {
+        if (!Double.isFinite(lat) || lat < -90 || lat > 90) {
+            throw new InvalidSearchAreaException("lat must be a number between -90 and 90");
+        }
+        if (!Double.isFinite(lng) || lng < -180 || lng > 180) {
+            throw new InvalidSearchAreaException("lng must be a number between -180 and 180");
+        }
     }
 
     private void validateSearchArea(double lat, double lng, double radiusKm, int limit) {

@@ -16,6 +16,7 @@ import com.tweakdapp.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.tweakdapp.backend.mapevents.dto.request.GeocodeQuery;
 import com.tweakdapp.backend.mapevents.dto.request.UpdateMapEventRequest;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,6 +50,34 @@ public interface MapEventsService {
      * @throws com.tweakdapp.backend.mapevents.exception.InvalidSearchAreaException if any bound is violated
      */
     List<MapEventPinDto> findNearby(double lat, double lng, double radiusKm, String categoryId, int limit);
+
+    /**
+     * The map's search box: approved events whose title, category label or venue name contains
+     * {@code query} (case-insensitive), <strong>nearest to the centre first</strong>, one keyset
+     * page at a time. Unlike {@link #findNearby} there is no radius — search reaches the whole map,
+     * and it can reach finished events too.
+     *
+     * <p>Each pin's {@code status} is the <em>clock-derived</em> phase ({@code upcoming},
+     * {@code live} or {@code previous}), not the stored column, which nothing updates
+     * automatically. Canceled, hidden and unapproved events never match.
+     *
+     * @param query    search text; fewer than 2 non-blank characters returns an empty page
+     * @param lat      centre latitude, -90..90 — the map's current centre
+     * @param lng      centre longitude, -180..180
+     * @param statuses phases to include, any of {@code upcoming}, {@code live}, {@code previous};
+     *                 {@code null} or empty means {@code upcoming} + {@code live}
+     * @param cursor   opaque token from the previous page (same centre and statuses), or
+     *                 {@code null} for the first
+     * @param size     page size, clamped to 1..50 (0 or less means the default, 20)
+     * @throws com.tweakdapp.backend.mapevents.exception.InvalidSearchAreaException if the centre is
+     *         out of range
+     * @throws com.tweakdapp.backend.mapevents.exception.InvalidMapEventException if a status is not
+     *         one of the three phases
+     * @throws com.tweakdapp.backend.mapevents.exception.InvalidCursorException if the cursor cannot
+     *         be parsed
+     */
+    MapEventPageDto<MapEventPinDto> search(String query, double lat, double lng, Collection<String> statuses,
+                                           String cursor, int size);
 
     /** All selectable event subcategories (reference data), by label. */
     List<MapEventCategoryDto> listCategories();

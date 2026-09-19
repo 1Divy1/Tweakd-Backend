@@ -71,6 +71,23 @@ class MapEventController {
         return mapEventsService.findNearby(lat, lng, radiusKm, category, limit);
     }
 
+    /**
+     * The map's search box: events whose title, category or venue contains {@code q}, nearest to
+     * {@code lat}/{@code lng} (the map's centre) first, one keyset page at a time.
+     * {@code status} is a comma-separated subset of {@code upcoming,live,previous} — the
+     * clock-derived phase — and defaults to {@code upcoming,live}. Send the same centre and
+     * {@code status} with every page of one search.
+     */
+    @GetMapping("/search")
+    public MapEventPageDto<MapEventPinDto> search(@RequestParam String q,
+                                                  @RequestParam double lat,
+                                                  @RequestParam double lng,
+                                                  @RequestParam(required = false) List<String> status,
+                                                  @RequestParam(required = false) String cursor,
+                                                  @RequestParam(defaultValue = "20") int size) {
+        return mapEventsService.search(q, lat, lng, status, cursor, size);
+    }
+
     /** Event subcategories — powers the create screen and the map's category filter. */
     @GetMapping("/categories")
     public List<MapEventCategoryDto> listCategories() {

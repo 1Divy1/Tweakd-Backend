@@ -77,6 +77,56 @@ public interface BusinessAccountRepository extends JpaRepository<BusinessAccount
                                       @Param("limit") int limit);
 
     /**
+     * One keyset page of the map's search box: active, verified businesses whose name or type label
+     * contains the search text, <strong>nearest to the given centre first</strong>.
+     *
+     * <p>{@code :pattern} is a ready-made {@code ILIKE} pattern ({@code %text%}) with the caller's
+     * own {@code %}, {@code _} and {@code \} already escaped, so a query of {@code "100%"} matches
+     * that literal text rather than everything.
+     *
+     * <p>The keyset is {@code (distance, id)}: the trailing id makes the order total, so two
+     * businesses at exactly the same distance can neither repeat nor go missing across pages. The
+     * first page passes {@code afterDistance = -1}, which every real distance beats — this avoids a
+     * nullable double/uuid pair, whose types Postgres cannot infer.
+     *
+     * <p>No spatial index helps here — the filter is the text match, not a radius — so this is a
+     * scan of the visible businesses. Fine at today's table size; {@code pg_trgm} is the upgrade
+     * path once it is not.
+     */
+    @Query(value = """
+            select *
+              from (select b.id                                        as "id",
+                           b.name                                      as "name",
+                           b.type                                      as "typeId",
+                           t.type                                      as "typeLabel",
+                           st_y(b.location::geometry)                  as "lat",
+                           st_x(b.location::geometry)                  as "lng",
+                           b.logo_url                                  as "logoUrl",
+                           b.average_rating                            as "averageRating",
+                           b.review_count                              as "reviewCount",
+                           b.timezone                                  as "timezone",
+                           st_distance(b.location,
+                                       st_setsrid(st_makepoint(:lng, :lat), 4326)::geography)
+                                                                       as "distanceMetres"
+                      from business_accounts b
+                      join business_type_options t on t.id = b.type
+                     where b.active_status = 'active'
+                       and b.verification_status = 'verified'
+                       and (b.name ilike :pattern escape '\\'
+                            or t.type ilike :pattern escape '\\')) m
+             where m."distanceMetres" > :afterDistance
+                or (m."distanceMetres" = :afterDistance and m."id" > :afterId)
+             order by m."distanceMetres" asc, m."id" asc
+             limit :limit
+            """, nativeQuery = true)
+    List<SearchPinRow> searchVisible(@Param("pattern") String pattern,
+                                     @Param("lat") double lat,
+                                     @Param("lng") double lng,
+                                     @Param("afterDistance") double afterDistance,
+                                     @Param("afterId") UUID afterId,
+                                     @Param("limit") int limit);
+
+    /**
      * Name + logo key for a batch of ids, active and verified only. Hidden and unknown ids simply
      * do not come back, so a caller can never learn that a suspended business exists.
      */
@@ -160,5 +210,10 @@ public interface BusinessAccountRepository extends JpaRepository<BusinessAccount
         BigDecimal getAverageRating();
         int getReviewCount();
         String getTimezone();
+    }
+
+    /** Row shape of {@link #searchVisible}: a map pin plus the distance its keyset is ordered by. */
+    interface SearchPinRow extends MapPinRow {
+        double getDistanceMetres();
     }
 }
