@@ -3,6 +3,8 @@ package com.tweakdapp.backend.garage.internal.controllers;
 import com.tweakdapp.backend.garage.GarageService;
 import com.tweakdapp.backend.garage.dto.PublicBadgeDto;
 import com.tweakdapp.backend.garage.dto.PublicCarDto;
+import com.tweakdapp.backend.garage.dto.PublicCarEventDto;
+import com.tweakdapp.backend.garage.dto.PublicCarPlacementDto;
 import com.tweakdapp.backend.garage.dto.PublicCarModificationDto;
 import com.tweakdapp.backend.garage.dto.PublicCarOwnerDto;
 import com.tweakdapp.backend.garage.dto.PublicMediaDto;
@@ -66,6 +68,9 @@ class PublicCarControllerWebTest {
                         "Suspension", "H&R Coilovers", "Dropped 30mm.",
                         List.of(new PublicMediaDto("https://media.tweakdapp.com/mods/after.jpg", "image", "after")),
                         Instant.parse("2026-04-01T10:00:00Z"), 1200, "EUR", 9_000)),
+                List.of(new PublicCarEventDto(
+                        "Waterside Show", null, "Waterside Quay", Instant.parse("2026-05-24T10:00:00Z"), "previous",
+                        List.of(new PublicCarPlacementDto("Best modified", "trophy", 1)))),
                 new PublicCarOwnerDto("dave", "Dave", "https://avatars.tweakdapp.com/dave.jpg",
                         true, 420, List.of(new PublicBadgeDto("Pioneer", "https://assets.tweakd.app/pioneer.svg"))),
                 Instant.parse("2026-09-04T12:00:00Z"));
@@ -97,6 +102,9 @@ class PublicCarControllerWebTest {
                 .andExpect(jsonPath("$.horsepower").value(635))
                 .andExpect(jsonPath("$.zero_to_one_hundred").value(3.3))
                 .andExpect(jsonPath("$.mileage_unit_name").value("km"))
+                .andExpect(jsonPath("$.events[0].starts_at").exists())
+                .andExpect(jsonPath("$.events[0].placements[0].contest_title").value("Best modified"))
+                .andExpect(jsonPath("$.events[0].placements[0].category_icon").value("trophy"))
                 .andExpect(jsonPath("$.cover_image_url").value("https://media.tweakdapp.com/cars/cover.jpg"))
                 .andExpect(jsonPath("$.gallery_urls[0]").value("https://media.tweakdapp.com/cars/g1.jpg"))
                 .andExpect(jsonPath("$.modifications[0].category_name").value("Suspension"))

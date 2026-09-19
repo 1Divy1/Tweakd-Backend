@@ -69,7 +69,8 @@ users' garages.
 | `CarShareResolutionDto` | `carId` + `ownerUsername` — all the app needs to open its own car screen |
 | `ShareLinkUpdateRequest` | `{ "enabled": bool }`. The only editable field; there is no regenerate |
 | `ShareSource` | `LINK` / `QR`, parsed from the URL's `?s=` tag |
-| `PublicCarDto`, `PublicCarModificationDto`, `PublicCarOwnerDto`, `PublicBadgeDto`, `PublicMediaDto` | The public page's shape — a hand-written projection, never a rename of `CarDto`. No ids, no R2 keys, no licence plate |
+| `PublicCarDto`, `PublicCarModificationDto`, `PublicCarOwnerDto`, `PublicBadgeDto`, `PublicMediaDto`, `PublicCarEventDto`, `PublicCarPlacementDto` | The public page's shape — a hand-written projection, never a rename of `CarDto`. No ids, no R2 keys, no licence plate |
+| `PublicCarEventsProvider` | The events a car attended, for the public page. Implemented by Map Events (`PublicCarEventsAdapter`), because garage can't depend on that module. The same pattern as `storage.UploadAccessPolicy` |
 
 ### Share links (public link + QR code)
 

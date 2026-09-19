@@ -14,6 +14,7 @@ import java.util.List;
  *
  * @param code           the share code this page was reached by
  * @param url            the canonical URL of this page, for {@code og:url} and the copy button
+ * @param events         events the car attended, newest first, with any contest podium places
  * @param sharedAt       when the link was first created
  */
 public record PublicCarDto(
@@ -41,6 +42,7 @@ public record PublicCarDto(
         String coverImageUrl,
         List<String> galleryUrls,
         List<PublicCarModificationDto> modifications,
+        List<PublicCarEventDto> events,
         PublicCarOwnerDto owner,
         Instant sharedAt
 ) {}
