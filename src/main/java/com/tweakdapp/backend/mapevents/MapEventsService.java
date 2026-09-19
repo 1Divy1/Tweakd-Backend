@@ -11,6 +11,7 @@ import com.tweakdapp.backend.mapevents.dto.MapEventPinDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventSummaryDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventWithdrawalRequestDto;
 import com.tweakdapp.backend.mapevents.dto.OrganizerCandidateDto;
+import com.tweakdapp.backend.mapevents.dto.PublicMapEventDto;
 import com.tweakdapp.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.tweakdapp.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.tweakdapp.backend.mapevents.dto.request.GeocodeQuery;
@@ -116,6 +117,19 @@ public interface MapEventsService {
      *         two are deliberately indistinguishable, so pending submissions cannot be probed for.
      */
     MapEventDto getEvent(UUID currentUserId, UUID eventId);
+
+    /**
+     * An event as an anonymous visitor sees it through a shared link — the public page at
+     * {@code web.tweakdapp.com/e/{eventId}}. No caller: it runs for someone without an account.
+     *
+     * <p>Approved and still on: served, including once it has finished. Cancelled: gone.
+     * Everything else — pending, rejected, hidden, deleted, never existed — is one 404, so a
+     * submission cannot be found by probing ids, exactly as in {@link #getEvent}.
+     *
+     * @throws com.tweakdapp.backend.mapevents.exception.MapEventGoneException if it was cancelled
+     * @throws com.tweakdapp.backend.mapevents.exception.MapEventNotFoundException otherwise
+     */
+    PublicMapEventDto getPublicEvent(UUID eventId);
 
     /**
      * One keyset page of an event's attendees (spectators), most recent RSVP first.

@@ -8,6 +8,7 @@ import com.tweakdapp.backend.mapevents.MapEventWithdrawalRequestedEvent;
 import com.tweakdapp.backend.mapevents.dto.MapEventDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventParticipantDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventWithdrawalRequestDto;
+import com.tweakdapp.backend.mapevents.dto.PublicMapEventDto;
 import com.tweakdapp.backend.mapevents.dto.request.AddOrganizerRequest;
 import com.tweakdapp.backend.mapevents.dto.request.CreateMapEventRequest;
 import com.tweakdapp.backend.mapevents.dto.request.UpdateMapEventRequest;
@@ -16,6 +17,7 @@ import com.tweakdapp.backend.mapevents.exception.EventClosedException;
 import com.tweakdapp.backend.mapevents.exception.EventNotEditableException;
 import com.tweakdapp.backend.mapevents.exception.InvalidMapEventException;
 import com.tweakdapp.backend.mapevents.exception.InvalidSearchAreaException;
+import com.tweakdapp.backend.mapevents.exception.MapEventGoneException;
 import com.tweakdapp.backend.mapevents.exception.MapEventNotFoundException;
 import com.tweakdapp.backend.mapevents.exception.NotEventOrganizerException;
 import com.tweakdapp.backend.mapevents.internal.entities.CarMeetEntity;
@@ -224,6 +226,109 @@ class MapEventsServiceImplTest {
         // stripped for any non-organizer that does reach assembly (e.g. the admin read path).
         assertThatExceptionOfType(MapEventNotFoundException.class)
                 .isThrownBy(() -> service.getEvent(STRANGER, EVENT_ID));
+    }
+
+    // ---- the public page (shared link) --------------------------------------
+
+    @Test
+    void anApprovedEventIsPublicAndCarriesNoInternalState() {
+        MapEventEntity event = approvedUpcoming();
+        event.setRejectionReason("stale reason from an earlier rejection");
+        existing(event);
+        when(profileService.findByIds(any())).thenReturn(
+                List.of(new ProfileSearchResultDto(CREATOR, "Dave", "dave", "https://a/dave.jpg")));
+        MapEventRuleEntity rule = new MapEventRuleEntity();
+        rule.setRule("No burnouts");
+        rule.setSortOrder((short) 0);
+        when(ruleRepository.findByEventIdOrderBySortOrderAsc(EVENT_ID)).thenReturn(List.of(rule));
+
+        PublicMapEventDto dto = service.getPublicEvent(EVENT_ID);
+
+        assertThat(dto.title()).isEqualTo("Sunday meet");
+        assertThat(dto.categoryLabel()).isEqualTo("Car meet");
+        assertThat(dto.phase()).isEqualTo(MapEventEntity.STATUS_UPCOMING);
+        assertThat(dto.rules()).containsExactly("No burnouts");
+        assertThat(dto.organizers()).singleElement().satisfies(o -> {
+            assertThat(o.username()).isEqualTo("dave");
+            assertThat(o.role()).isEqualTo(MapEventOrganizerEntity.ROLE_CREATOR);
+        });
+    }
+
+    /** Pending and rejected read exactly like an id that never existed — even for no caller at all. */
+    @Test
+    void anUnapprovedEventIsNotPublic() {
+        for (String approval : List.of(MapEventEntity.APPROVAL_PENDING, MapEventEntity.APPROVAL_REJECTED)) {
+            existing(event(approval, MapEventEntity.STATUS_UPCOMING, Instant.now().plus(2, ChronoUnit.DAYS), null));
+            assertThatExceptionOfType(MapEventNotFoundException.class)
+                    .isThrownBy(() -> service.getPublicEvent(EVENT_ID));
+        }
+    }
+
+    @Test
+    void aHiddenEventIsNotPublic() {
+        existing(event(MapEventEntity.APPROVAL_ACCEPTED, MapEventEntity.STATUS_HIDDEN,
+                Instant.now().plus(2, ChronoUnit.DAYS), null));
+        assertThatExceptionOfType(MapEventNotFoundException.class)
+                .isThrownBy(() -> service.getPublicEvent(EVENT_ID));
+    }
+
+    @Test
+    void aMissingEventIsNotFound() {
+        when(eventRepository.findWithCategoryById(EVENT_ID)).thenReturn(Optional.empty());
+        assertThatExceptionOfType(MapEventNotFoundException.class)
+                .isThrownBy(() -> service.getPublicEvent(EVENT_ID));
+    }
+
+    @Test
+    void aCancelledEventIsGone() {
+        existing(event(MapEventEntity.APPROVAL_ACCEPTED, MapEventEntity.STATUS_CANCELED,
+                Instant.now().plus(2, ChronoUnit.DAYS), null));
+        assertThatExceptionOfType(MapEventGoneException.class)
+                .isThrownBy(() -> service.getPublicEvent(EVENT_ID));
+    }
+
+    /** Owner's rule: a finished meet stays viewable — old links in group chats keep working. */
+    @Test
+    void aFinishedEventIsStillPublic() {
+        existing(event(MapEventEntity.APPROVAL_ACCEPTED, MapEventEntity.STATUS_PREVIOUS,
+                Instant.now().minus(3, ChronoUnit.DAYS), null));
+        assertThat(service.getPublicEvent(EVENT_ID).phase()).isEqualTo(MapEventEntity.STATUS_PREVIOUS);
+    }
+
+    @Test
+    void anOrganizerWhoseAccountNoLongerResolvesIsDropped() {
+        existing(approvedUpcoming());
+        // findByIds returns nothing for the creator (deleted / banned account).
+        assertThat(service.getPublicEvent(EVENT_ID).organizers()).isEmpty();
+    }
+
+    /** Nothing sweeps `status`, so the page's phase is the map search's clock rule. */
+    @Test
+    void thePublicPhaseFollowsTheClockNotTheStoredStatus() {
+        Instant now = Instant.parse("2026-09-19T12:00:00Z");
+        String upcoming = MapEventEntity.STATUS_UPCOMING;
+
+        assertThat(MapEventsServiceImpl.publicPhase(
+                event(MapEventEntity.APPROVAL_ACCEPTED, upcoming, now.plusSeconds(3600), null), now))
+                .isEqualTo(MapEventEntity.STATUS_UPCOMING);
+        assertThat(MapEventsServiceImpl.publicPhase(
+                event(MapEventEntity.APPROVAL_ACCEPTED, upcoming, now.minusSeconds(3600), now.plusSeconds(3600)), now))
+                .isEqualTo(MapEventEntity.STATUS_LIVE);
+        // Past its end, never marked finished.
+        assertThat(MapEventsServiceImpl.publicPhase(
+                event(MapEventEntity.APPROVAL_ACCEPTED, upcoming, now.minusSeconds(7200), now.minusSeconds(60)), now))
+                .isEqualTo(MapEventEntity.STATUS_PREVIOUS);
+        // Open-ended: live for 24 hours after it starts, then over.
+        assertThat(MapEventsServiceImpl.publicPhase(
+                event(MapEventEntity.APPROVAL_ACCEPTED, upcoming, now.minus(23, ChronoUnit.HOURS), null), now))
+                .isEqualTo(MapEventEntity.STATUS_LIVE);
+        assertThat(MapEventsServiceImpl.publicPhase(
+                event(MapEventEntity.APPROVAL_ACCEPTED, upcoming, now.minus(25, ChronoUnit.HOURS), null), now))
+                .isEqualTo(MapEventEntity.STATUS_PREVIOUS);
+        // Marked finished early.
+        assertThat(MapEventsServiceImpl.publicPhase(
+                event(MapEventEntity.APPROVAL_ACCEPTED, MapEventEntity.STATUS_PREVIOUS, now.plusSeconds(3600), null), now))
+                .isEqualTo(MapEventEntity.STATUS_PREVIOUS);
     }
 
     // ---- the approval lock --------------------------------------------------
