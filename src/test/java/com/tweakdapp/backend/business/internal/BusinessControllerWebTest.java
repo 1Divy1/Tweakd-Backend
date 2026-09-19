@@ -4,6 +4,7 @@ import com.tweakdapp.backend.business.BusinessService;
 import com.tweakdapp.backend.business.dto.BusinessDto;
 import com.tweakdapp.backend.business.dto.BusinessHoursDto;
 import com.tweakdapp.backend.business.dto.BusinessMapPinDto;
+import com.tweakdapp.backend.business.dto.BusinessSearchPageDto;
 import com.tweakdapp.backend.business.dto.BusinessTypeOptionDto;
 import com.tweakdapp.backend.business.exception.BusinessNotFoundException;
 import com.tweakdapp.backend.business.exception.InvalidSearchAreaException;
@@ -112,6 +113,56 @@ class BusinessControllerWebTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message").value("radius_km must be greater than 0 and at most 500.0"));
+    }
+
+    // ---- GET /search --------------------------------------------------------
+
+    @Test
+    void searchReturnsAPageOfMapPins() throws Exception {
+        when(businessService.search(any(), anyDouble(), anyDouble(), any(), anyInt()))
+                .thenReturn(new BusinessSearchPageDto(List.of(pin()), "next-token"));
+
+        mockMvc.perform(get("/api/v1/businesses/search?q=wash&lat=46.7712&lng=23.6236")
+                        .with(TestJwts.user()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(BUSINESS_ID.toString()))
+                .andExpect(jsonPath("$.items[0].name").value("Willy Wash"))
+                .andExpect(jsonPath("$.items[0].type_label").value("Car wash"))
+                .andExpect(jsonPath("$.items[0].is_open_now").value(true))
+                .andExpect(jsonPath("$.next_cursor").value("next-token"));
+
+        // Documented default: size=20; no cursor on the first page.
+        verify(businessService).search("wash", 46.7712, 23.6236, null, 20);
+    }
+
+    @Test
+    void searchPassesTheCursorAndSizeThrough() throws Exception {
+        when(businessService.search(any(), anyDouble(), anyDouble(), any(), anyInt()))
+                .thenReturn(new BusinessSearchPageDto(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/businesses/search?q=wash&lat=46.7712&lng=23.6236&cursor=abc&size=5")
+                        .with(TestJwts.user()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.next_cursor").doesNotExist());
+
+        verify(businessService).search("wash", 46.7712, 23.6236, "abc", 5);
+    }
+
+    @Test
+    void searchRequiresTheQueryAndTheCentre() throws Exception {
+        mockMvc.perform(get("/api/v1/businesses/search?lat=46.7712&lng=23.6236").with(TestJwts.user()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/businesses/search?q=wash&lat=46.7712").with(TestJwts.user()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void searchIsNotMistakenForABusinessId() throws Exception {
+        when(businessService.search(any(), anyDouble(), anyDouble(), any(), anyInt()))
+                .thenReturn(new BusinessSearchPageDto(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/businesses/search?q=wash&lat=46.7712&lng=23.6236").with(TestJwts.user()))
+                .andExpect(status().isOk());
     }
 
     // ---- GET /{businessId} --------------------------------------------------

@@ -80,6 +80,75 @@ public interface MapEventRepository extends JpaRepository<MapEventEntity, UUID> 
                                       @Param("limit") int limit);
 
     /**
+     * One keyset page of the map's search box: approved events whose title, category label or venue
+     * name contains the search text, <strong>nearest to the given centre first</strong>, narrowed
+     * to the requested lifecycle phases.
+     *
+     * <p><strong>The phase is derived, not read.</strong> Nothing sweeps {@code status}
+     * automatically — events are created {@code upcoming} and in practice never move to
+     * {@code live} — so filtering on the stored column would put a meet that started an hour ago
+     * under "upcoming" and a meet that ended last month under "live". {@code effectiveStatus}
+     * applies the clock with the map's own rule: an event is over once
+     * {@code coalesce(ends_at, starts_at + 24h)} has passed (or it was marked {@code previous});
+     * otherwise it is live once it has started (or was marked {@code live}); otherwise upcoming.
+     * Canceled and hidden events never match.
+     *
+     * <p>{@code :pattern} is a ready-made {@code ILIKE} pattern with the caller's own wildcards
+     * escaped. The keyset is {@code (distance, id)}; the first page passes
+     * {@code afterDistance = -1} so no nullable parameter needs its type inferred.
+     */
+    @Query(value = """
+            select *
+              from (select e.id                                        as "id",
+                           e.title                                     as "title",
+                           e.event_type                                as "categoryId",
+                           c.category                                  as "categoryLabel",
+                           st_y(e.location::geometry)                  as "lat",
+                           st_x(e.location::geometry)                  as "lng",
+                           e.location_name                             as "locationName",
+                           e.cover_image_url                           as "coverImageKey",
+                           e.starts_at                                 as "startsAt",
+                           e.ends_at                                   as "endsAt",
+                           case
+                               when e.status = 'previous'
+                                    or coalesce(e.ends_at, e.starts_at + interval '24 hours') < now()
+                                   then 'previous'
+                               when e.status = 'live' or e.starts_at <= now()
+                                   then 'live'
+                               else 'upcoming'
+                           end                                         as "status",
+                           e.attendees_count                           as "attendeesCount",
+                           e.attending_cars_count                      as "attendingCarsCount",
+                           e.max_participant_capacity                  as "maxParticipantCapacity",
+                           st_distance(e.location,
+                                       st_setsrid(st_makepoint(:lng, :lat), 4326)::geography)
+                                                                       as "distanceMetres"
+                      from car_events e
+                      join car_event_categories c on c.id = e.event_type
+                     where e.approval_status = 'accepted'
+                       and e.status not in ('hidden', 'canceled')
+                       and (e.title ilike :pattern escape '\\'
+                            or c.category ilike :pattern escape '\\'
+                            or e.location_name ilike :pattern escape '\\')) m
+             where ((:includeLive and m."status" = 'live')
+                    or (:includeUpcoming and m."status" = 'upcoming')
+                    or (:includePrevious and m."status" = 'previous'))
+               and (m."distanceMetres" > :afterDistance
+                    or (m."distanceMetres" = :afterDistance and m."id" > :afterId))
+             order by m."distanceMetres" asc, m."id" asc
+             limit :limit
+            """, nativeQuery = true)
+    List<SearchPinRow> searchVisible(@Param("pattern") String pattern,
+                                     @Param("lat") double lat,
+                                     @Param("lng") double lng,
+                                     @Param("includeLive") boolean includeLive,
+                                     @Param("includeUpcoming") boolean includeUpcoming,
+                                     @Param("includePrevious") boolean includePrevious,
+                                     @Param("afterDistance") double afterDistance,
+                                     @Param("afterId") UUID afterId,
+                                     @Param("limit") int limit);
+
+    /**
      * One keyset page of the events a user created or co-organizes, newest first — including their
      * pending and rejected ones, which is the point of the screen.
      *
@@ -147,5 +216,13 @@ public interface MapEventRepository extends JpaRepository<MapEventEntity, UUID> 
         int getAttendeesCount();
         int getAttendingCarsCount();
         Integer getMaxParticipantCapacity();
+    }
+
+    /**
+     * Row shape of {@link #searchVisible}: a map pin whose {@code status} is the clock-derived
+     * phase, plus the distance its keyset is ordered by.
+     */
+    interface SearchPinRow extends MapPinRow {
+        double getDistanceMetres();
     }
 }

@@ -238,4 +238,87 @@ class BusinessAccountRepositoryIT extends AbstractPostgresIT {
                 values (?, ?, ?::time, ?::time, false)
                 """, businessId, weekday, from, to);
     }
+
+    // ---- search (the map's search box) ----------------------------------------
+
+    private static final UUID FIRST_PAGE_ID = new UUID(0, 0);
+
+    private List<String> searchNames(String pattern) {
+        return businessRepository.searchVisible(pattern, CENTRE_LAT, CENTRE_LNG, -1, FIRST_PAGE_ID, 100)
+                .stream()
+                .map(BusinessAccountRepository.MapPinRow::getName)
+                .toList();
+    }
+
+    @Test
+    void searchMatchesNameCaseInsensitivelyAnywhereInTheName() {
+        visibleBusiness("Willy Wash", CENTRE_LAT, CENTRE_LNG);
+        visibleBusiness("Tuning Garage", CENTRE_LAT, CENTRE_LNG);
+
+        assertThat(searchNames("%wASh%")).containsExactly("Willy Wash");
+    }
+
+    @Test
+    void searchMatchesTheTypeLabel() {
+        visibleBusiness("Willy", CENTRE_LAT, CENTRE_LNG);
+
+        // Seeded label of test_business_type is "Test Business Type".
+        assertThat(searchNames("%business type%")).containsExactly("Willy");
+    }
+
+    /** No radius: search reaches the whole map, nearest first. */
+    @Test
+    void searchHasNoRadiusAndOrdersNearestFirst() {
+        visibleBusiness("Shop Bucharest", 44.4268, 26.1025);
+        visibleBusiness("Shop Cluj", CENTRE_LAT, CENTRE_LNG);
+        visibleBusiness("Shop Turda", 46.5667, 23.7833);
+
+        assertThat(searchNames("%shop%")).containsExactly("Shop Cluj", "Shop Turda", "Shop Bucharest");
+    }
+
+    @Test
+    void searchHidesBusinessesThatAreNotActiveAndVerified() {
+        visibleBusiness("Wash Visible", CENTRE_LAT, CENTRE_LNG);
+        business("Wash Pending", CENTRE_LAT, CENTRE_LNG, "pending", "active");
+        business("Wash Suspended", CENTRE_LAT, CENTRE_LNG, "verified", "suspended");
+
+        assertThat(searchNames("%wash%")).containsExactly("Wash Visible");
+    }
+
+    @Test
+    void searchEscapedWildcardsMatchLiterally() {
+        visibleBusiness("100% Detailing", CENTRE_LAT, CENTRE_LNG);
+        visibleBusiness("1000 Detailing", CENTRE_LAT, CENTRE_LNG);
+
+        // What BusinessServiceImpl.containsPattern builds for the input "100%".
+        assertThat(searchNames("%100\\%%")).containsExactly("100% Detailing");
+    }
+
+    /**
+     * The keyset walks every match exactly once, even when several businesses sit at the very same
+     * spot — the id tie-break is what keeps equal distances from repeating or going missing.
+     */
+    @Test
+    void searchKeysetPagesThroughEqualDistancesWithoutGapsOrRepeats() {
+        for (int i = 0; i < 5; i++) {
+            visibleBusiness("Same Spot " + i, CENTRE_LAT, CENTRE_LNG);
+        }
+        visibleBusiness("Same Spot far", CENTRE_LAT + 0.05, CENTRE_LNG);
+
+        java.util.List<UUID> seen = new java.util.ArrayList<>();
+        double afterDistance = -1;
+        UUID afterId = FIRST_PAGE_ID;
+        while (true) {
+            var page = businessRepository.searchVisible("%same spot%", CENTRE_LAT, CENTRE_LNG,
+                    afterDistance, afterId, 2);
+            if (page.isEmpty()) {
+                break;
+            }
+            page.forEach(row -> seen.add(row.getId()));
+            afterDistance = page.getLast().getDistanceMetres();
+            afterId = page.getLast().getId();
+        }
+
+        assertThat(seen).hasSize(6).doesNotHaveDuplicates();
+    }
 }
