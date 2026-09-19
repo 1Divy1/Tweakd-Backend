@@ -73,11 +73,28 @@ the profile module needs to expose the caller's realtime location or city coordi
 Search parameters are bounded (`radius_km` ≤ 500, `limit` ≤ 500, coordinates in WGS84 range, NaN and
 infinity rejected) so a hand-crafted request cannot turn the spatial index into a table scan.
 
+## Map search
+
+`search` backs the map screen's search box. It is deliberately not a radius query: the user is
+looking for a named thing, wherever it is, so it matches **every** visible business and orders
+them by distance from the map's centre.
+
+- **Match**: `name ILIKE %q%` or the type label `ILIKE %q%`. The caller's own `%`, `_` and `\` are
+  escaped (`containsPattern`), so `"100%"` matches literally. Fewer than 2 characters → an empty
+  page without a query; longer than 100 is trimmed.
+- **Paging**: keyset on `(st_distance, id)`. The cursor encodes that pair, so it is only valid
+  against the **same centre** — the client sends the same `lat`/`lng` with every page. The first
+  page passes `afterDistance = -1` rather than nulls (Postgres cannot type a null double/uuid pair).
+  `size` is clamped to 1..50.
+- **Cost**: no index serves `%q%`, so this scans the visible businesses. Fine at today's size; the
+  upgrade path is `pg_trgm` (+ `unaccent`, which would also make `Brasov` find `Brașov`).
+
 ## Public API — `BusinessService`
 
 | Method | REST | Notes |
 |--------|------|-------|
 | `findNearby(lat, lng, radiusKm, typeId, limit)` | `GET /api/v1/businesses/nearby?lat=&lng=&radius_km=25&type=&limit=200` | `BusinessMapPinDto` list, nearest first. `type` filters by business type id. |
+| `search(query, lat, lng, cursor, size)` | `GET /api/v1/businesses/search?q=&lat=&lng=&cursor=&size=20` | `BusinessSearchPageDto` — the map's search box. Name or type label contains `q` (case-insensitive), **no radius**, nearest to `lat`/`lng` first, keyset-paged on `(distance, id)`. See § Map search. |
 | `getBusiness(businessId)` | `GET /api/v1/businesses/{businessId}` | Full `BusinessDto` including the weekly schedule. |
 | `listTypes()` | `GET /api/v1/businesses/types` | `BusinessTypeOptionDto` reference data, by label. |
 

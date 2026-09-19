@@ -5,6 +5,7 @@ import com.tweakdapp.backend.business.dto.AdminBusinessPageDto;
 import com.tweakdapp.backend.business.dto.BusinessDto;
 import com.tweakdapp.backend.business.dto.BusinessMapPinDto;
 import com.tweakdapp.backend.business.dto.BusinessRefDto;
+import com.tweakdapp.backend.business.dto.BusinessSearchPageDto;
 import com.tweakdapp.backend.business.dto.BusinessTypeOptionDto;
 
 import java.util.Collection;
@@ -36,6 +37,23 @@ public interface BusinessService {
      * @throws com.tweakdapp.backend.business.exception.InvalidSearchAreaException if any bound is violated
      */
     List<BusinessMapPinDto> findNearby(double lat, double lng, double radiusKm, String typeId, int limit);
+
+    /**
+     * The map's search box: active, verified businesses whose name or type label contains
+     * {@code query} (case-insensitive), <strong>nearest to the centre first</strong>, one keyset
+     * page at a time. Unlike {@link #findNearby} there is no radius — search reaches the whole map.
+     *
+     * @param query  search text; fewer than 2 non-blank characters returns an empty page
+     * @param lat    centre latitude, -90..90 — the map's current centre
+     * @param lng    centre longitude, -180..180
+     * @param cursor opaque token from the previous page (same centre), or {@code null} for the first
+     * @param size   page size, clamped to 1..50
+     * @throws com.tweakdapp.backend.business.exception.InvalidSearchAreaException if the centre is
+     *         out of range
+     * @throws com.tweakdapp.backend.business.exception.InvalidBusinessCursorException if the cursor
+     *         cannot be parsed
+     */
+    BusinessSearchPageDto search(String query, double lat, double lng, String cursor, int size);
 
     /**
      * The full profile of one business, including its weekly opening hours.

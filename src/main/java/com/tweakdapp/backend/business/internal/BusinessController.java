@@ -3,6 +3,7 @@ package com.tweakdapp.backend.business.internal;
 import com.tweakdapp.backend.business.BusinessService;
 import com.tweakdapp.backend.business.dto.BusinessDto;
 import com.tweakdapp.backend.business.dto.BusinessMapPinDto;
+import com.tweakdapp.backend.business.dto.BusinessSearchPageDto;
 import com.tweakdapp.backend.business.dto.BusinessTypeOptionDto;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,6 +39,20 @@ class BusinessController {
                                              @RequestParam(required = false) String type,
                                              @RequestParam(defaultValue = "200") int limit) {
         return businessService.findNearby(lat, lng, radiusKm, type, limit);
+    }
+
+    /**
+     * The map's search box: businesses whose name or type contains {@code q}, nearest to
+     * {@code lat}/{@code lng} (the map's centre) first, one keyset page at a time. Send the same
+     * centre with every page of one search.
+     */
+    @GetMapping("/search")
+    public BusinessSearchPageDto search(@RequestParam String q,
+                                        @RequestParam double lat,
+                                        @RequestParam double lng,
+                                        @RequestParam(required = false) String cursor,
+                                        @RequestParam(defaultValue = "20") int size) {
+        return businessService.search(q, lat, lng, cursor, size);
     }
 
     /** A business's full profile, including its weekly opening hours. */

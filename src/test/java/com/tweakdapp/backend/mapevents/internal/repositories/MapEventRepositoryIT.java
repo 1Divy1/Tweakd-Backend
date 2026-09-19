@@ -301,4 +301,119 @@ class MapEventRepositoryIT extends AbstractPostgresIT {
                 """, id, CENTRE_LNG, CENTRE_LAT);
         return id;
     }
+
+    // ---- search (the map's search box) ----------------------------------------
+
+    private static final UUID FIRST_PAGE_ID = new UUID(0, 0);
+
+    private List<String> searchTitles(String pattern, boolean live, boolean upcoming, boolean previous) {
+        return eventRepository.searchVisible(pattern, CENTRE_LAT, CENTRE_LNG, live, upcoming, previous,
+                        -1, FIRST_PAGE_ID, 100)
+                .stream()
+                .map(MapEventRepository.MapPinRow::getTitle)
+                .toList();
+    }
+
+    private List<String> searchAll(String pattern) {
+        return searchTitles(pattern, true, true, true);
+    }
+
+    @Test
+    void searchMatchesTitleCategoryAndVenue() {
+        UUID atVenue = visibleEvent("Sunday gathering", CENTRE_LAT, CENTRE_LNG);
+        jdbc.update("update public.car_events set location_name = 'Iulius Mall parking' where id = ?", atVenue);
+        visibleEvent("Cars & Coffee", CENTRE_LAT, CENTRE_LNG);
+
+        assertThat(searchAll("%coffee%")).containsExactly("Cars & Coffee");
+        assertThat(searchAll("%iulius%")).containsExactly("Sunday gathering");
+        // Seeded label of car_meet is "Car meet".
+        assertThat(searchAll("%car meet%")).containsExactlyInAnyOrder("Sunday gathering", "Cars & Coffee");
+    }
+
+    /** No radius: search reaches the whole map, nearest first. */
+    @Test
+    void searchHasNoRadiusAndOrdersNearestFirst() {
+        visibleEvent("Meet Bucharest", 44.4268, 26.1025);
+        visibleEvent("Meet Cluj", CENTRE_LAT, CENTRE_LNG);
+        visibleEvent("Meet Turda", 46.5667, 23.7833);
+
+        assertThat(searchAll("%meet%")).containsExactly("Meet Cluj", "Meet Turda", "Meet Bucharest");
+    }
+
+    @Test
+    void searchNeverReturnsUnapprovedCanceledOrHiddenEvents() {
+        Instant soon = Instant.now().plus(2, ChronoUnit.DAYS);
+        visibleEvent("Meet approved", CENTRE_LAT, CENTRE_LNG);
+        event("Meet pending", CENTRE_LAT, CENTRE_LNG, "pending", "upcoming", soon, null);
+        event("Meet canceled", CENTRE_LAT, CENTRE_LNG, "accepted", "canceled", soon, null);
+        event("Meet hidden", CENTRE_LAT, CENTRE_LNG, "accepted", "hidden", soon, null);
+
+        assertThat(searchAll("%meet%")).containsExactly("Meet approved");
+    }
+
+    /**
+     * The phase comes from the clock, not the stored column: every event below is stored as
+     * {@code upcoming}, which is what nothing ever updates.
+     */
+    @Test
+    void searchDerivesThePhaseFromTheClock() {
+        Instant now = Instant.now();
+        event("Meet future", CENTRE_LAT, CENTRE_LNG, "accepted", "upcoming",
+                now.plus(2, ChronoUnit.DAYS), null);
+        event("Meet running", CENTRE_LAT, CENTRE_LNG, "accepted", "upcoming",
+                now.minus(1, ChronoUnit.HOURS), now.plus(2, ChronoUnit.HOURS));
+        event("Meet open-ended started 2h ago", CENTRE_LAT, CENTRE_LNG, "accepted", "upcoming",
+                now.minus(2, ChronoUnit.HOURS), null);
+        event("Meet ended", CENTRE_LAT, CENTRE_LNG, "accepted", "upcoming",
+                now.minus(3, ChronoUnit.DAYS), now.minus(2, ChronoUnit.DAYS));
+        event("Meet open-ended started 2 days ago", CENTRE_LAT, CENTRE_LNG, "accepted", "upcoming",
+                now.minus(2, ChronoUnit.DAYS), null);
+        event("Meet marked finished early", CENTRE_LAT, CENTRE_LNG, "accepted", "previous",
+                now.plus(2, ChronoUnit.DAYS), null);
+
+        assertThat(searchTitles("%meet%", false, true, false)).containsExactly("Meet future");
+        assertThat(searchTitles("%meet%", true, false, false))
+                .containsExactlyInAnyOrder("Meet running", "Meet open-ended started 2h ago");
+        assertThat(searchTitles("%meet%", false, false, true))
+                .containsExactlyInAnyOrder("Meet ended", "Meet open-ended started 2 days ago",
+                        "Meet marked finished early");
+    }
+
+    @Test
+    void searchReportsTheDerivedPhaseAsTheStatus() {
+        event("Meet running", CENTRE_LAT, CENTRE_LNG, "accepted", "upcoming",
+                Instant.now().minus(1, ChronoUnit.HOURS), Instant.now().plus(2, ChronoUnit.HOURS));
+
+        var row = eventRepository.searchVisible("%meet%", CENTRE_LAT, CENTRE_LNG, true, true, true,
+                -1, FIRST_PAGE_ID, 10).getFirst();
+
+        assertThat(row.getStatus()).isEqualTo("live");
+        assertThat(row.getLat()).isCloseTo(CENTRE_LAT, org.assertj.core.data.Offset.offset(0.0001));
+        assertThat(row.getLng()).isCloseTo(CENTRE_LNG, org.assertj.core.data.Offset.offset(0.0001));
+        assertThat(row.getDistanceMetres()).isCloseTo(0.0, org.assertj.core.data.Offset.offset(1.0));
+    }
+
+    @Test
+    void searchKeysetPagesThroughEqualDistancesWithoutGapsOrRepeats() {
+        for (int i = 0; i < 5; i++) {
+            visibleEvent("Same spot " + i, CENTRE_LAT, CENTRE_LNG);
+        }
+        visibleEvent("Same spot far", CENTRE_LAT + 0.05, CENTRE_LNG);
+
+        List<UUID> seen = new java.util.ArrayList<>();
+        double afterDistance = -1;
+        UUID afterId = FIRST_PAGE_ID;
+        while (true) {
+            var page = eventRepository.searchVisible("%same spot%", CENTRE_LAT, CENTRE_LNG, true, true, true,
+                    afterDistance, afterId, 2);
+            if (page.isEmpty()) {
+                break;
+            }
+            page.forEach(row -> seen.add(row.getId()));
+            afterDistance = page.getLast().getDistanceMetres();
+            afterId = page.getLast().getId();
+        }
+
+        assertThat(seen).hasSize(6).doesNotHaveDuplicates();
+    }
 }

@@ -4,6 +4,7 @@ import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.mapevents.MapEventsService;
 import com.tweakdapp.backend.mapevents.dto.MapEventDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventParticipantDto;
+import com.tweakdapp.backend.mapevents.dto.MapEventPageDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventPinDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventViewerStateDto;
 import com.tweakdapp.backend.mapevents.dto.MapEventWithdrawalRequestDto;
@@ -119,6 +120,43 @@ class MapEventControllerWebTest {
                 .andExpect(status().isOk());
 
         verify(mapEventsService).findNearby(46.77, 23.62, 10.0, "car_meet", 50);
+    }
+
+    // ---- search -------------------------------------------------------------
+
+    @Test
+    void searchReturnsAPageOfPinsWithTheDerivedStatus() throws Exception {
+        when(mapEventsService.search(any(), anyDouble(), anyDouble(), any(), any(), anyInt()))
+                .thenReturn(new MapEventPageDto<>(List.of(pin()), "next-token"));
+
+        mockMvc.perform(get("/api/v1/map-events/search?q=meet&lat=46.77&lng=23.62").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(EVENT_ID.toString()))
+                .andExpect(jsonPath("$.items[0].title").value("Sunday meet"))
+                .andExpect(jsonPath("$.items[0].location_name").value("Iulius Mall parking"))
+                .andExpect(jsonPath("$.items[0].status").exists())
+                .andExpect(jsonPath("$.next_cursor").value("next-token"));
+
+        // No status → the service applies its live+upcoming default; size defaults to 20.
+        verify(mapEventsService).search("meet", 46.77, 23.62, null, null, 20);
+    }
+
+    @Test
+    void searchSplitsACommaSeparatedStatusFilter() throws Exception {
+        when(mapEventsService.search(any(), anyDouble(), anyDouble(), any(), any(), anyInt()))
+                .thenReturn(new MapEventPageDto<>(List.of(), null));
+
+        mockMvc.perform(get("/api/v1/map-events/search?q=meet&lat=46.77&lng=23.62&status=live,previous&cursor=abc&size=5")
+                        .with(TestJwts.user(USER_ID)))
+                .andExpect(status().isOk());
+
+        verify(mapEventsService).search("meet", 46.77, 23.62, List.of("live", "previous"), "abc", 5);
+    }
+
+    @Test
+    void searchRequiresTheQuery() throws Exception {
+        mockMvc.perform(get("/api/v1/map-events/search?lat=46.77&lng=23.62").with(TestJwts.user(USER_ID)))
+                .andExpect(status().isBadRequest());
     }
 
     // ---- exception mapping --------------------------------------------------

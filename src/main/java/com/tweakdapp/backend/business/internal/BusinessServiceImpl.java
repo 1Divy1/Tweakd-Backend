@@ -8,6 +8,7 @@ import com.tweakdapp.backend.business.dto.BusinessDto;
 import com.tweakdapp.backend.business.dto.BusinessHoursDto;
 import com.tweakdapp.backend.business.dto.BusinessMapPinDto;
 import com.tweakdapp.backend.business.dto.BusinessRefDto;
+import com.tweakdapp.backend.business.dto.BusinessSearchPageDto;
 import com.tweakdapp.backend.business.dto.BusinessTypeOptionDto;
 import com.tweakdapp.backend.business.exception.BusinessNotFoundException;
 import com.tweakdapp.backend.business.exception.InvalidBusinessStatusException;
@@ -54,6 +55,15 @@ class BusinessServiceImpl implements BusinessService {
     /** Hard ceiling on pins per request, so a hand-crafted {@code limit} cannot pull the table. */
     private static final int MAX_LIMIT = 500;
 
+    /** Shorter queries match nearly everything and tell the user nothing. */
+    private static final int MIN_SEARCH_LENGTH = 2;
+
+    /** Longer than any real business name; trimmed rather than refused. */
+    private static final int MAX_SEARCH_LENGTH = 100;
+
+    /** Ceiling on a search page, so a hand-crafted {@code size} cannot pull the table. */
+    private static final int MAX_SEARCH_PAGE_SIZE = 50;
+
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
     /** Ceiling on a review-queue page, so a hand-crafted {@code size} cannot pull the table. */
@@ -93,8 +103,39 @@ class BusinessServiceImpl implements BusinessService {
 
         String normalisedType = (typeId == null || typeId.isBlank()) ? null : typeId.trim();
 
-        List<BusinessAccountRepository.MapPinRow> rows =
-                businessRepository.findVisibleNearby(lat, lng, radiusKm * 1000.0, normalisedType, limit);
+        return toPins(businessRepository.findVisibleNearby(lat, lng, radiusKm * 1000.0, normalisedType, limit));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BusinessSearchPageDto search(String query, double lat, double lng, String cursor, int size) {
+        validateCentre(lat, lng);
+        BusinessSearchCursor after = BusinessSearchCursor.decode(cursor);
+
+        String text = query == null ? "" : query.strip();
+        if (text.length() < MIN_SEARCH_LENGTH) {
+            return new BusinessSearchPageDto(List.of(), null);
+        }
+        if (text.length() > MAX_SEARCH_LENGTH) {
+            text = text.substring(0, MAX_SEARCH_LENGTH);
+        }
+        int pageSize = Math.clamp(size, 1, MAX_SEARCH_PAGE_SIZE);
+
+        List<BusinessAccountRepository.SearchPinRow> rows = businessRepository.searchVisible(
+                containsPattern(text), lat, lng, after.distanceMetres(), after.id(), pageSize + 1);
+
+        // One row over the page size is the "is there more" probe; it is never returned.
+        boolean hasMore = rows.size() > pageSize;
+        List<BusinessAccountRepository.SearchPinRow> page = hasMore ? rows.subList(0, pageSize) : rows;
+        String nextCursor = hasMore
+                ? new BusinessSearchCursor(page.getLast().getDistanceMetres(), page.getLast().getId()).encode()
+                : null;
+
+        return new BusinessSearchPageDto(toPins(page), nextCursor);
+    }
+
+    /** Assembles rows into map pins, with one batched hours lookup for the whole list. */
+    private List<BusinessMapPinDto> toPins(List<? extends BusinessAccountRepository.MapPinRow> rows) {
         if (rows.isEmpty()) {
             return List.of();
         }
@@ -396,18 +437,34 @@ class BusinessServiceImpl implements BusinessService {
      * {@code ST_MakePoint} as garbage.
      */
     private void validateSearchArea(double lat, double lng, double radiusKm, int limit) {
-        if (!Double.isFinite(lat) || lat < -90 || lat > 90) {
-            throw new InvalidSearchAreaException("lat must be a number between -90 and 90");
-        }
-        if (!Double.isFinite(lng) || lng < -180 || lng > 180) {
-            throw new InvalidSearchAreaException("lng must be a number between -180 and 180");
-        }
+        validateCentre(lat, lng);
         if (!Double.isFinite(radiusKm) || radiusKm <= 0 || radiusKm > MAX_RADIUS_KM) {
             throw new InvalidSearchAreaException("radius_km must be greater than 0 and at most " + MAX_RADIUS_KM);
         }
         if (limit < 1 || limit > MAX_LIMIT) {
             throw new InvalidSearchAreaException("limit must be between 1 and " + MAX_LIMIT);
         }
+    }
+
+    private static void validateCentre(double lat, double lng) {
+        if (!Double.isFinite(lat) || lat < -90 || lat > 90) {
+            throw new InvalidSearchAreaException("lat must be a number between -90 and 90");
+        }
+        if (!Double.isFinite(lng) || lng < -180 || lng > 180) {
+            throw new InvalidSearchAreaException("lng must be a number between -180 and 180");
+        }
+    }
+
+    /**
+     * {@code %text%} for an {@code ILIKE ... ESCAPE '\'}, with the user's own wildcard characters
+     * escaped so they match literally — otherwise a search for {@code "_"} would match every name.
+     */
+    static String containsPattern(String text) {
+        String escaped = text
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+        return "%" + escaped + "%";
     }
 
     /**
