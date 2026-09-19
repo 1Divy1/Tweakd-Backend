@@ -1,6 +1,7 @@
 package com.tweakdapp.backend.garage.internal;
 
 import com.tweakdapp.backend.garage.GarageService;
+import com.tweakdapp.backend.garage.PublicCarEventsProvider;
 import com.tweakdapp.backend.garage.dto.CarBrandDto;
 import com.tweakdapp.backend.garage.dto.CarColorDto;
 import com.tweakdapp.backend.garage.dto.CarDistanceUnitDto;
@@ -15,6 +16,7 @@ import com.tweakdapp.backend.garage.dto.CarShareQrDto;
 import com.tweakdapp.backend.garage.dto.CarShareResolutionDto;
 import com.tweakdapp.backend.garage.dto.PublicBadgeDto;
 import com.tweakdapp.backend.garage.dto.PublicCarDto;
+import com.tweakdapp.backend.garage.dto.PublicCarEventDto;
 import com.tweakdapp.backend.garage.dto.PublicCarModificationDto;
 import com.tweakdapp.backend.garage.dto.PublicCarOwnerDto;
 import com.tweakdapp.backend.garage.dto.PublicMediaDto;
@@ -56,6 +58,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -100,6 +103,7 @@ class GarageServiceImpl implements GarageService {
     private final ShareCodeGenerator shareCodeGenerator;
     private final QrSvgRenderer qrSvgRenderer;
     private final SharingProperties sharingProperties;
+    private final PublicCarEventsProvider publicCarEvents;
 
     /** How many times minting a share code retries past a unique-index collision. See {@code ensureLink}. */
     private static final int CODE_INSERT_ATTEMPTS = 3;
@@ -127,7 +131,10 @@ class GarageServiceImpl implements GarageService {
                       StorageService storageService,
                       ShareCodeGenerator shareCodeGenerator,
                       QrSvgRenderer qrSvgRenderer,
-                      SharingProperties sharingProperties) {
+                      SharingProperties sharingProperties,
+                      // Lazy: the implementation lives in Map Events, whose services depend on
+                      // GarageService. An eager reference would be a bean cycle.
+                      @Lazy PublicCarEventsProvider publicCarEvents) {
         this.garageRepository = garageRepository;
         this.carRepository = carRepository;
         this.modificationRepository = modificationRepository;
@@ -148,6 +155,7 @@ class GarageServiceImpl implements GarageService {
         this.shareCodeGenerator = shareCodeGenerator;
         this.qrSvgRenderer = qrSvgRenderer;
         this.sharingProperties = sharingProperties;
+        this.publicCarEvents = publicCarEvents;
     }
 
     // -------------------------------------------------------------------
@@ -648,7 +656,7 @@ class GarageServiceImpl implements GarageService {
         // subset. A field added to CarDto reaches the open internet only if somebody adds it to
         // toPublicCarDto too.
         CarDto carDto = toCarDto(car, mods);
-        return toPublicCarDto(carDto, link, car.getGarage().getOwnerId());
+        return toPublicCarDto(carDto, link, car.getGarage().getOwnerId(), publicCarEvents.findForCar(carId));
     }
 
     // ---- share helpers ------------------------------------------------------
@@ -750,7 +758,8 @@ class GarageServiceImpl implements GarageService {
      * below is not on the internet. Notably absent: the car's id, the garage id, the owner's UUID,
      * the licence plate, the owner's location, and every R2 object key.
      */
-    private PublicCarDto toPublicCarDto(CarDto car, CarShareLinkEntity link, UUID ownerId) {
+    private PublicCarDto toPublicCarDto(CarDto car, CarShareLinkEntity link, UUID ownerId,
+                                        List<PublicCarEventDto> events) {
         List<String> galleryUrls = car.gallery().stream()
                 .map(MediaRefDto::url)
                 .filter(Objects::nonNull)
@@ -795,6 +804,7 @@ class GarageServiceImpl implements GarageService {
                 car.coverImage() == null ? null : car.coverImage().url(),
                 galleryUrls,
                 mods,
+                events,
                 toPublicOwnerDto(ownerId),
                 link.getCreatedAt());
     }

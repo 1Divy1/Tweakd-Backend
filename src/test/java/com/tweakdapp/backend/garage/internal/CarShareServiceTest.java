@@ -93,6 +93,7 @@ class CarShareServiceTest {
 
     private GarageServiceImpl service;
     private SharingProperties sharingProperties;
+    private List<com.tweakdapp.backend.garage.dto.PublicCarEventDto> events = List.of();
 
     @BeforeEach
     void setUp() {
@@ -103,7 +104,7 @@ class CarShareServiceTest {
                 null, carRepository, modificationRepository, modificationGalleryRepository,
                 carGalleryRepository, null, null, null, null, null, null, null, null, null,
                 shareLinkRepository, profileService, storageService,
-                shareCodeGenerator, new QrSvgRenderer(), sharingProperties);
+                shareCodeGenerator, new QrSvgRenderer(), sharingProperties, carId -> events);
 
         when(storageService.publicUrl(eq(StorageBucket.GARAGE), any()))
                 .thenAnswer(inv -> "https://media.tweakdapp.com/" + inv.getArgument(1));
@@ -410,12 +411,32 @@ class CarShareServiceTest {
             });
         });
 
+        assertThat(page.events()).isEmpty();
         assertThat(page.owner().username()).isEqualTo("dave");
         assertThat(page.owner().reputationScore()).isEqualTo(420);
         assertThat(page.owner().isVerified()).isTrue();
         assertThat(page.owner().badges()).singleElement().satisfies(badge -> {
             assertThat(badge.name()).isEqualTo("Pioneer");
             assertThat(badge.imageUrl()).isEqualTo("https://assets.tweakd.app/pioneer.svg");
+        });
+    }
+
+    /** Events come from Map Events through the provider, in one response with the rest of the car. */
+    @Test
+    void thePublicPageCarriesTheCarsEventsAndContestBadges() {
+        CarEntity car = car();
+        when(shareLinkRepository.findByCode(CODE)).thenReturn(Optional.of(link(car, CODE)));
+        when(profileService.isBanned(OWNER)).thenReturn(false);
+        when(profileService.findPublicProfileById(OWNER)).thenReturn(Optional.of(publicProfile()));
+        events = List.of(new com.tweakdapp.backend.garage.dto.PublicCarEventDto(
+                "Waterside Show", null, "Waterside Quay", Instant.parse("2026-05-24T10:00:00Z"), "previous",
+                List.of(new com.tweakdapp.backend.garage.dto.PublicCarPlacementDto("Best modified", "trophy", 1))));
+
+        PublicCarDto page = service.getPublicCar(CODE, ShareSource.LINK, false);
+
+        assertThat(page.events()).singleElement().satisfies(event -> {
+            assertThat(event.title()).isEqualTo("Waterside Show");
+            assertThat(event.placements()).singleElement().satisfies(p -> assertThat(p.rank()).isEqualTo(1));
         });
     }
 
@@ -436,6 +457,8 @@ class CarShareServiceTest {
         assertNoComponentsNamed(com.tweakdapp.backend.garage.dto.PublicCarOwnerDto.class, forbidden);
         assertNoComponentsNamed(com.tweakdapp.backend.garage.dto.PublicBadgeDto.class, forbidden);
         assertNoComponentsNamed(com.tweakdapp.backend.garage.dto.PublicMediaDto.class, forbidden);
+        assertNoComponentsNamed(com.tweakdapp.backend.garage.dto.PublicCarEventDto.class, forbidden);
+        assertNoComponentsNamed(com.tweakdapp.backend.garage.dto.PublicCarPlacementDto.class, forbidden);
     }
 
     private static void assertNoComponentsNamed(Class<?> record, List<String> forbidden) {
