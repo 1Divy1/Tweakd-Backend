@@ -51,7 +51,7 @@ users' garages.
 | `GarageDto` | Garage view with embedded list of `CarSummaryDto` |
 | `CarSummaryDto` | Compact list item (brand, model, year, horsepower, torque, cover image) |
 | `CarDto` | Full car detail with embedded `CarModificationDto` list |
-| `CarModificationDto` | A single modification |
+| `CarModificationDto` | A single modification, incl. `sharedPostId` — the feed post it was shared as, or null |
 | `CreateCarRequest` | Single-shot "add car" payload: car specs + modifications + `galleryCount` (0–50); no file bytes |
 | `CreateCarResponse` | Result of car creation: `CarDto` + `cover` upload slot + per-modification before/after slots + gallery slots |
 | `UploadSlot` | A presigned upload destination: `path` + `uploadUrl` |
@@ -74,6 +74,7 @@ users' garages.
 | `ShareSource` | `LINK` / `QR`, parsed from the URL's `?s=` tag |
 | `PublicCarDto`, `PublicCarModificationDto`, `PublicCarOwnerDto`, `PublicBadgeDto`, `PublicMediaDto`, `PublicCarEventDto`, `PublicCarPlacementDto` | The public page's shape — a hand-written projection, never a rename of `CarDto`. No ids, no R2 keys, no licence plate |
 | `PublicCarEventsProvider` | The events a car attended, for the public page. Implemented by Map Events (`PublicCarEventsAdapter`), because garage can't depend on that module. The same pattern as `storage.UploadAccessPolicy` |
+| `ModSharePostsProvider` | Which of a car's mods are already in the feed, and as which post. Implemented by posts (`ModSharePostsAdapter`), because posts already depends on garage. Same inversion, same reason — it is what lets the build log offer to share an unshared mod and link to the post for a shared one |
 
 ### Share links (public link + QR code)
 
