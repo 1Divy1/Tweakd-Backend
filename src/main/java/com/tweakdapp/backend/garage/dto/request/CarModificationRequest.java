@@ -19,6 +19,8 @@ import java.time.Instant;
  * @param description detailed description of the modification (max 1000 chars)
  * @param installationDate when the modification was installed on the car
  * @param price the cost of the modification in the car owner's currency
+ * @param isPricePublic whether other users may see {@code price}; defaults to false, and a true
+ *        with no price is rejected
  * @param mileageAtInstall the car's mileage reading when the modification was installed
  */
 public record CarModificationRequest(
@@ -32,5 +34,14 @@ public record CarModificationRequest(
 
         @Positive Integer price,
 
+        Boolean isPricePublic,
+
         @Positive Integer mileageAtInstall
-) {}
+) {
+
+    /** A price can only be published if there is one. */
+    @AssertTrue(message = "isPricePublic requires a price")
+    public boolean isPriceVisibilityConsistent() {
+        return !Boolean.TRUE.equals(isPricePublic) || price != null;
+    }
+}

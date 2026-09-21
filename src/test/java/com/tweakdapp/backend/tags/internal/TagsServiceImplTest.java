@@ -281,7 +281,7 @@ class TagsServiceImplTest {
 
     private static PostDto post(UUID id) {
         return new PostDto(id, "caption", null, List.of(), List.of(), List.of(),
-                0, 0, 0, 0, true, true, true, true, false, false, T1, T1, null, false, null);
+                0, 0, 0, 0, true, true, true, true, false, false, T1, T1, null, null, false, null);
     }
 
     private static CommentDto comment(UUID id) {

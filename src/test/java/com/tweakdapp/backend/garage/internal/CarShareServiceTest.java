@@ -544,6 +544,9 @@ class CarShareServiceTest {
         mod.setInstallationDate(Instant.parse("2026-04-01T10:00:00Z"));
         mod.setPrice(1200);
         mod.setPriceCurrency("EUR");
+        // The fixture's owner publishes this price. The opposite -- the default -- is asserted by
+        // aPriceTheOwnerHasNotPublishedIsNotOnThePublicPage.
+        mod.setPricePublic(true);
         mod.setMileageAtInstall(9_000);
 
         CarModificationGalleryEntity media = new CarModificationGalleryEntity();
@@ -563,6 +566,25 @@ class CarShareServiceTest {
         when(modificationRepository.findByCarIdWithCategory(CAR_ID)).thenReturn(List.of(mod));
         when(modificationGalleryRepository.findAllByCarId(CAR_ID)).thenReturn(List.of(media));
         when(carGalleryRepository.findAllByCarIdOrderByPositionAsc(CAR_ID)).thenReturn(List.of(gallery));
+    }
+
+    @Test
+    void aPriceTheOwnerHasNotPublishedIsNotOnThePublicPage() {
+        CarEntity car = car();
+        // Same fixture, price kept private -- the default for every mod.
+        modificationRepository.findByCarIdWithCategory(CAR_ID).forEach(m -> m.setPricePublic(false));
+        when(shareLinkRepository.findByCode(CODE)).thenReturn(Optional.of(link(car, CODE)));
+        when(profileService.isBanned(OWNER)).thenReturn(false);
+        when(profileService.findPublicProfileById(OWNER)).thenReturn(Optional.of(publicProfile()));
+
+        PublicCarDto page = service.getPublicCar(CODE, ShareSource.QR, true);
+
+        assertThat(page.modifications()).singleElement().satisfies(mod -> {
+            // The build still reads in full; only what it cost is withheld.
+            assertThat(mod.title()).isEqualTo("H&R Coilovers");
+            assertThat(mod.price()).isNull();
+            assertThat(mod.priceCurrency()).isNull();
+        });
     }
 
     private CarShareLinkEntity link(CarEntity car, String code) {

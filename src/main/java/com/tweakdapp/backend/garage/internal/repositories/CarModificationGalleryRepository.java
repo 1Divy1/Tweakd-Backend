@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,6 +17,10 @@ public interface CarModificationGalleryRepository extends JpaRepository<CarModif
     /** All media for every modification belonging to a given car (used when building CarDto). */
     @Query("select g from CarModificationGalleryEntity g where g.modification.car.id = :carId")
     List<CarModificationGalleryEntity> findAllByCarId(@Param("carId") UUID carId);
+
+    /** All media for a batch of modifications, for assembling a page of shared-mod feed cards. */
+    @Query("select g from CarModificationGalleryEntity g where g.modification.id in :modIds")
+    List<CarModificationGalleryEntity> findAllByModificationIds(@Param("modIds") Collection<UUID> modIds);
 
     /** Bulk-delete specific media items for a modification by their R2 keys. */
     void deleteAllByModification_IdAndKeyIn(UUID modificationId, List<String> keys);

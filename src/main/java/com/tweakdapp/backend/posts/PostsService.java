@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.posts;
 
+import com.tweakdapp.backend.posts.dto.request.ShareModificationRequest;
 import com.tweakdapp.backend.posts.dto.request.ShareParticipantCardRequest;
 
 import com.tweakdapp.backend.posts.dto.CommentPageDto;
@@ -482,4 +483,17 @@ public interface PostsService {
      *         was shared within the repost cooldown
      */
     PostDto shareParticipantCard(String currentUserId, ShareParticipantCardRequest request);
+
+    /**
+     * Shares one of the caller's build-log modifications to the feed as an ordinary post that tags
+     * the car and carries the modification's id. The card is re-derived on every read, so an edited
+     * mod updates wherever it was shared, and a deleted one degrades the post to a plain one.
+     *
+     * <p>Idempotent: a mod already shared returns its existing post rather than a second one, so a
+     * retry or a double tap cannot post twice.
+     *
+     * @throws com.tweakdapp.backend.posts.exception.ModificationNotFoundException if the mod does
+     *         not exist or sits on a car the caller does not own
+     */
+    PostDto shareModification(String currentUserId, ShareModificationRequest request);
 }

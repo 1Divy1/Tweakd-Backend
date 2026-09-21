@@ -72,4 +72,13 @@ public class PostEntity {
 
     @Column(name = "participant_card_car_id")
     private UUID participantCardCarId;
+
+    /**
+     * The build-log modification this post shares. The card drawn from it is derived on read by the
+     * garage module, never stored, so an edited mod updates wherever it was shared. Null on an
+     * ordinary post, and cleared by the DB when the mod is deleted, which degrades this post to a
+     * plain one rather than breaking the feed.
+     */
+    @Column(name = "mod_share_modification_id")
+    private UUID modShareModificationId;
 }

@@ -36,6 +36,7 @@ import com.tweakdapp.backend.garage.dto.request.DreamCarRequest;
 import com.tweakdapp.backend.garage.dto.request.DreamCarRequestBody;
 import com.tweakdapp.backend.garage.dto.response.CreateCarResponse;
 import com.tweakdapp.backend.garage.dto.GarageDto;
+import com.tweakdapp.backend.garage.dto.ModShareCardDto;
 import com.tweakdapp.backend.garage.exception.CarModificationNotFoundException;
 import com.tweakdapp.backend.garage.exception.CarNotFoundException;
 import com.tweakdapp.backend.garage.exception.DreamCarNotFoundException;
@@ -69,6 +70,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +78,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -226,7 +229,7 @@ class GarageServiceImpl implements GarageService {
         CarEntity hydrated = carRepository.findDetailById(carId)
                 .orElseThrow(() -> new CarNotFoundException(carId));
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
-        CarDto carDto = toCarDto(hydrated, mods);
+        CarDto carDto = toCarDto(hydrated, mods, true);
 
         return new CreateCarResponse(carDto);
     }
@@ -244,7 +247,7 @@ class GarageServiceImpl implements GarageService {
         carRepository.save(car);
 
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
-        return toCarDto(car, mods);
+        return toCarDto(car, mods, true);
     }
 
     @Override
@@ -292,7 +295,9 @@ class GarageServiceImpl implements GarageService {
         }
 
         List<CarModificationEntity> mods = modificationRepository.findByCarIdWithCategory(carId);
-        return toCarDto(car, mods);
+        boolean forOwner = currentUserId != null
+                && car.getGarage().getOwnerId().equals(UUID.fromString(currentUserId));
+        return toCarDto(car, mods, forOwner);
     }
 
     // -------------------------------------------------------------------
@@ -455,7 +460,7 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new CarModificationNotFoundException(modId));
 
         // New mod has no media yet — images are uploaded separately after creation.
-        return new AddModificationResponse(toModificationDto(reloaded, List.of()));
+        return new AddModificationResponse(toModificationDto(reloaded, List.of(), true));
     }
 
     @Override
@@ -481,7 +486,13 @@ class GarageServiceImpl implements GarageService {
         if (request.description() != null)      mod.setDescription(request.description());
         if (request.installationDate() != null) mod.setInstallationDate(request.installationDate());
         if (request.price() != null)            mod.setPrice(request.price());
+        if (request.isPricePublic() != null)    mod.setPricePublic(request.isPricePublic());
         if (request.mileageAtInstall() != null) mod.setMileageAtInstall(request.mileageAtInstall());
+
+        // The DB refuses a published price that isn't there; fail with a 400 rather than a 500.
+        if (mod.isPricePublic() && mod.getPrice() == null) {
+            throw new InvalidReferenceException("isPricePublic requires a price");
+        }
 
         modificationRepository.save(mod);
 
@@ -510,7 +521,7 @@ class GarageServiceImpl implements GarageService {
         }
 
         List<CarModificationGalleryEntity> media = modificationGalleryRepository.findAllByModification_Id(modificationId);
-        return toModificationDto(mod, media);
+        return toModificationDto(mod, media, true);
     }
 
     @Override
@@ -655,7 +666,7 @@ class GarageServiceImpl implements GarageService {
         // CarDto is already proven, and going through it means the public shape is visibly a
         // subset. A field added to CarDto reaches the open internet only if somebody adds it to
         // toPublicCarDto too.
-        CarDto carDto = toCarDto(car, mods);
+        CarDto carDto = toCarDto(car, mods, false);
         return toPublicCarDto(carDto, link, car.getGarage().getOwnerId(), publicCarEvents.findForCar(carId));
     }
 
@@ -1106,6 +1117,7 @@ class GarageServiceImpl implements GarageService {
         mod.setDescription(req.description());
         mod.setInstallationDate(req.installationDate());
         mod.setPrice(req.price());
+        mod.setPricePublic(Boolean.TRUE.equals(req.isPricePublic()));
         mod.setMileageAtInstall(req.mileageAtInstall());
     }
 
@@ -1206,6 +1218,78 @@ class GarageServiceImpl implements GarageService {
         return carRepository.findIdsByOwnerId(ownerId);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, ModShareCardDto> findModShareCards(Collection<UUID> modificationIds) {
+        if (modificationIds == null || modificationIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<CarModificationEntity> mods =
+                modificationRepository.findAllByIdsWithCategoryAndCar(modificationIds);
+        if (mods.isEmpty()) {
+            return Map.of();
+        }
+
+        // Three batched queries for the whole page: the mods, their media, and their cars.
+        List<UUID> modIds = mods.stream().map(CarModificationEntity::getId).toList();
+        Map<UUID, List<CarModificationGalleryEntity>> mediaByModId = modificationGalleryRepository
+                .findAllByModificationIds(modIds).stream()
+                .collect(Collectors.groupingBy(g -> g.getModification().getId()));
+
+        Set<UUID> carIds = mods.stream().map(m -> m.getCar().getId()).collect(Collectors.toSet());
+        Map<UUID, CarSummaryDto> cars = findCarsByIds(carIds).stream()
+                .collect(Collectors.toMap(CarSummaryDto::id, Function.identity()));
+
+        Map<UUID, ModShareCardDto> byModId = new HashMap<>();
+        for (CarModificationEntity mod : mods) {
+            CarSummaryDto car = cars.get(mod.getCar().getId());
+            if (car == null) {
+                // The car went while the post stayed. Nothing to draw a card around.
+                continue;
+            }
+            List<CarModificationMediaDto> media = mediaByModId.getOrDefault(mod.getId(), List.of()).stream()
+                    .map(g -> new CarModificationMediaDto(
+                            g.getKey(),
+                            storageService.publicUrl(StorageBucket.GARAGE, g.getKey()),
+                            g.getType(),
+                            g.getPhase()))
+                    .toList();
+            // The card is read by everyone, so it is assembled as a non-owner would see it: an
+            // unpublished price is absent from the payload, not hidden by the client.
+            Integer price = visiblePrice(mod, false);
+            byModId.put(mod.getId(), new ModShareCardDto(
+                    mod.getId(),
+                    car,
+                    mod.getCategory().getModName(),
+                    mod.getTitle(),
+                    mod.getDescription(),
+                    mediaOfPhase(media, "before"),
+                    mediaOfPhase(media, "after"),
+                    mod.getInstallationDate(),
+                    price,
+                    price == null ? null : mod.getPriceCurrency(),
+                    mod.getMileageAtInstall()));
+        }
+        return byModId;
+    }
+
+    /** Phase values are stored lowercase, but a case-insensitive match costs nothing to be safe. */
+    private static List<CarModificationMediaDto> mediaOfPhase(List<CarModificationMediaDto> media, String phase) {
+        return media.stream()
+                .filter(m -> phase.equalsIgnoreCase(m.phase()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<UUID> findOwnedModificationCarId(UUID ownerId, UUID modificationId) {
+        if (ownerId == null || modificationId == null) {
+            return Optional.empty();
+        }
+        return modificationRepository.findCarIdByIdAndOwner(modificationId, ownerId);
+    }
+
     private GarageDto toGarageDto(GarageEntity garage) {
         List<CarSummaryDto> cars = toCarSummaries(carRepository.findGarageSummary(garage.getId()));
         return new GarageDto(
@@ -1224,9 +1308,10 @@ class GarageServiceImpl implements GarageService {
      *
      * @param car the car entity (with all references eagerly loaded)
      * @param mods the list of modifications for this car
+     * @param forOwner whether the reader owns the car; false masks unpublished mod prices
      * @return the car DTO with all specifications and modifications
      */
-    private CarDto toCarDto(CarEntity car, List<CarModificationEntity> mods) {
+    private CarDto toCarDto(CarEntity car, List<CarModificationEntity> mods, boolean forOwner) {
 
         // Load all media for this car's modifications in one query, then group by mod ID.
         Map<UUID, List<CarModificationGalleryEntity>> mediaByModId = modificationGalleryRepository
@@ -1235,7 +1320,7 @@ class GarageServiceImpl implements GarageService {
 
         List<CarModificationDto> modDtos = mods
                 .stream()
-                .map(m -> toModificationDto(m, mediaByModId.getOrDefault(m.getId(), List.of())))
+                .map(m -> toModificationDto(m, mediaByModId.getOrDefault(m.getId(), List.of()), forOwner))
                 .toList();
 
         List<MediaRefDto> gallery = carGalleryRepository.findAllByCarIdOrderByPositionAsc(car.getId()).stream()
@@ -1320,11 +1405,17 @@ class GarageServiceImpl implements GarageService {
         return new CarStatusOptionDto(s.getId(), s.getType());
     }
 
+    /**
+     * @param forOwner whether the reader is the car's owner. False hides a price the owner has not
+     *        published — the one field on a mod that is not public by default.
+     */
     private CarModificationDto toModificationDto(CarModificationEntity mod,
-                                                   List<CarModificationGalleryEntity> media) {
+                                                   List<CarModificationGalleryEntity> media,
+                                                   boolean forOwner) {
         List<CarModificationMediaDto> mediaDtos = media.stream()
                 .map(g -> new CarModificationMediaDto(g.getKey(), storageService.publicUrl(StorageBucket.GARAGE, g.getKey()), g.getType(), g.getPhase()))
                 .toList();
+        Integer price = visiblePrice(mod, forOwner);
         return new CarModificationDto(
                 mod.getId(),
                 mod.getCar().getId(),
@@ -1334,10 +1425,16 @@ class GarageServiceImpl implements GarageService {
                 mod.getDescription(),
                 mediaDtos,
                 mod.getInstallationDate(),
-                mod.getPrice(),
-                mod.getPriceCurrency(),
+                price,
+                price == null ? null : mod.getPriceCurrency(),
+                mod.isPricePublic(),
                 mod.getMileageAtInstall(),
                 mod.getCreatedAt());
+    }
+
+    /** A mod's price as the given reader may see it: the owner always, others only if published. */
+    private static Integer visiblePrice(CarModificationEntity mod, boolean forOwner) {
+        return forOwner || mod.isPricePublic() ? mod.getPrice() : null;
     }
 
     private void insertModificationMedia(CarModificationEntity mod, String key, String phase) {
