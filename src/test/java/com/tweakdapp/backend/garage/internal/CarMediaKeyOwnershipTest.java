@@ -207,7 +207,7 @@ class CarMediaKeyOwnershipTest {
     }
 
     private static UpdateModificationRequest addMedia(String key) {
-        return new UpdateModificationRequest(null, null, null, null, null, null,
+        return new UpdateModificationRequest(null, null, null, null, null, null, null,
                 List.of(new UpdateModificationRequest.MediaItem(key, "before")), null);
     }
 

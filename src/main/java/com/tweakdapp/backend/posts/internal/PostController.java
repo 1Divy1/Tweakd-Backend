@@ -1,5 +1,6 @@
 package com.tweakdapp.backend.posts.internal;
 
+import com.tweakdapp.backend.posts.dto.request.ShareModificationRequest;
 import com.tweakdapp.backend.posts.dto.request.ShareParticipantCardRequest;
 
 import com.tweakdapp.backend.posts.PostsService;
@@ -51,6 +52,18 @@ public class PostController {
     public PostDto shareParticipantCard(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody ShareParticipantCardRequest request) {
         return postsService.shareParticipantCard(jwt.getSubject(), request);
+    }
+
+    /**
+     * Shares one of the caller's build-log modifications to the feed. 404 if the mod does not exist
+     * or is not on one of their cars. Idempotent: a mod already shared returns its existing post.
+     */
+    @PostMapping("/mod-share")
+    @RateLimited(RateLimits.POSTS_CREATE)
+    @ResponseStatus(HttpStatus.CREATED)
+    public PostDto shareModification(@AuthenticationPrincipal Jwt jwt,
+                                     @Valid @RequestBody ShareModificationRequest request) {
+        return postsService.shareModification(jwt.getSubject(), request);
     }
 
     /**

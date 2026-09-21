@@ -1,9 +1,12 @@
 package com.tweakdapp.backend.posts.internal;
 
 import com.tweakdapp.backend.mapevents.MapEventContestsService;
+import com.tweakdapp.backend.garage.dto.ModShareCardDto;
 import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
 import com.tweakdapp.backend.mapevents.dto.ParticipantCardKey;
+import com.tweakdapp.backend.posts.dto.request.ShareModificationRequest;
 import com.tweakdapp.backend.posts.dto.request.ShareParticipantCardRequest;
+import com.tweakdapp.backend.posts.exception.ModificationNotFoundException;
 import com.tweakdapp.backend.posts.exception.ParticipantCardCooldownException;
 import com.tweakdapp.backend.posts.exception.ParticipantCardNotFoundException;
 import java.time.Duration;
@@ -176,7 +179,7 @@ public class PostsServiceImpl implements PostsService {
     @Override
     @Transactional
     public PostDto createPost(String currentUserId, CreatePostRequest request) {
-        return doCreatePost(UUID.fromString(currentUserId), request, null);
+        return doCreatePost(UUID.fromString(currentUserId), request, null, null);
     }
 
     /**
@@ -210,11 +213,42 @@ public class PostsServiceImpl implements PostsService {
         // the card reference the feed draws the card from.
         CreatePostRequest post = new CreatePostRequest(
                 request.description(), List.of(), List.of(carId), null, null, null, null);
-        return doCreatePost(userId, post, new ParticipantCardKey(eventId, carId));
+        return doCreatePost(userId, post, new ParticipantCardKey(eventId, carId), null);
     }
 
-    /** Shared by both create paths; {@code card} is non-null only when sharing a participant card. */
-    private PostDto doCreatePost(UUID userId, CreatePostRequest request, ParticipantCardKey card) {
+    @Override
+    @Transactional
+    public PostDto shareModification(String currentUserId, ShareModificationRequest request) {
+        UUID userId = UUID.fromString(currentUserId);
+        UUID modificationId = request.modificationId();
+
+        // The request only names the mod. Whether it exists and whose car it is on is decided here,
+        // and everything drawn on the card -- the price included -- is derived server-side on read.
+        UUID carId = garageService.findOwnedModificationCarId(userId, modificationId)
+                .orElseThrow(() -> new ModificationNotFoundException(modificationId));
+
+        // A mod is a one-time event, so it gets one post. Held until commit, so two simultaneous
+        // saves cannot slip past the check below; the partial unique index is the last backstop.
+        postRepository.lockParticipantCard("mod:" + modificationId);
+        Optional<PostEntity> existing = postRepository.findByModShareModificationId(modificationId);
+        if (existing.isPresent()) {
+            return toPostDto(existing.get(), userId);
+        }
+
+        // An ordinary post that tags the car -- so the mod also shows among the car's tagged posts
+        // -- plus the reference the feed draws the card from. No caption: the mod's own description
+        // is on the card.
+        CreatePostRequest post = new CreatePostRequest(
+                null, List.of(), List.of(carId), null, null, null, null);
+        return doCreatePost(userId, post, null, modificationId);
+    }
+
+    /**
+     * Shared by every create path. At most one of {@code card} and {@code modShareId} is non-null:
+     * a post draws either its own images, a participant card, or a shared modification.
+     */
+    private PostDto doCreatePost(UUID userId, CreatePostRequest request, ParticipantCardKey card,
+                                 UUID modShareId) {
         List<UUID> personIds = distinctIds(request.taggedPeople());
         List<UUID> carIds = distinctIds(request.taggedCars());
 
@@ -241,6 +275,7 @@ public class PostsServiceImpl implements PostsService {
             post.setParticipantCardEventId(card.eventId());
             post.setParticipantCardCarId(card.carId());
         }
+        post.setModShareModificationId(modShareId);
         postRepository.save(post);
 
         insertTaggedPeople(postId, personIds);
@@ -1196,6 +1231,15 @@ public class PostsServiceImpl implements PostsService {
                         .map(p -> new ParticipantCardKey(p.getParticipantCardEventId(), p.getParticipantCardCarId()))
                         .collect(Collectors.toSet()));
 
+        // One batch for every shared mod on the page. Like a participant card it is not
+        // viewer-scoped -- an unpublished price is already absent from the card itself -- and a mod
+        // that no longer resolves (deleted mod, deleted car) simply leaves its post a plain one.
+        Map<UUID, ModShareCardDto> modCards = garageService.findModShareCards(
+                posts.stream()
+                        .map(PostEntity::getModShareModificationId)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet()));
+
         return posts.stream()
                 .map(post -> {
                     UUID postId = post.getId();
@@ -1245,6 +1289,8 @@ public class PostsServiceImpl implements PostsService {
                             post.getParticipantCardEventId() == null ? null
                                     : cards.get(new ParticipantCardKey(
                                             post.getParticipantCardEventId(), post.getParticipantCardCarId())),
+                            post.getModShareModificationId() == null ? null
+                                    : modCards.get(post.getModShareModificationId()),
                             repostedByViewer.contains(postId),
                             repostedBy);
                 })

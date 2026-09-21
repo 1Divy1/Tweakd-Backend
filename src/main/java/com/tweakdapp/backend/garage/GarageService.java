@@ -26,10 +26,12 @@ import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.garage.dto.request.CreateCarRequest;
 import com.tweakdapp.backend.garage.dto.response.CreateCarResponse;
 import com.tweakdapp.backend.garage.dto.GarageDto;
+import com.tweakdapp.backend.garage.dto.ModShareCardDto;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -110,6 +112,32 @@ public interface GarageService {
      * @return the owner's car ids (empty if they have no cars)
      */
     List<UUID> findCarIdsByOwner(UUID ownerId);
+
+    /**
+     * Batch lookup of the feed cards for shared build-log modifications, by modification id.
+     *
+     * The card is derived here on every call and never stored, so a mod edited after it was shared
+     * shows its current state wherever it appears. Not viewer-scoped: a card reads the same for
+     * everyone, and a price the owner has not published is absent from all of them. Missing ids --
+     * a deleted mod, a deleted car -- are simply not in the result, and the post that referenced one
+     * renders as a plain post.
+     *
+     * @param modificationIds the modifications to resolve
+     * @return card by modification id, for those that resolved
+     */
+    Map<UUID, ModShareCardDto> findModShareCards(Collection<UUID> modificationIds);
+
+    /**
+     * The car a modification sits on, if that car belongs to the given user — the gate for a module
+     * about to act on the caller's behalf (sharing a mod to the feed). Ownership is decided here
+     * rather than trusted from the request, and the car id comes back with it because the caller
+     * needs it to tag the post.
+     *
+     * @param ownerId        the user who must own the modification's car
+     * @param modificationId the modification
+     * @return the car's id, or empty if the mod does not exist or is not theirs
+     */
+    Optional<UUID> findOwnedModificationCarId(UUID ownerId, UUID modificationId);
 
     // ---- garage views ------------------------------------------------------
 

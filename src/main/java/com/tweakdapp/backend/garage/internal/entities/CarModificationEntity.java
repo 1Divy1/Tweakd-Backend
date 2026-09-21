@@ -56,6 +56,15 @@ public class CarModificationEntity {
     private Integer price;
 
     /**
+     * Whether non-owners may see {@link #price}. False by default: a price is recorded for the
+     * owner's own expense tracking unless they deliberately publish it. Read paths that serve
+     * someone other than the owner -- car detail, the public car page, a shared mod's feed card --
+     * return {@code price} as null while this is false.
+     */
+    @Column(name = "is_price_public", nullable = false)
+    private boolean pricePublic;
+
+    /**
      * Currency of {@link #price} (FK to price_currencies_options.id). Read-only from the ORM: the
      * column predates the write paths here, which have never set it, and the public car page is the
      * first reader that needs it. Mapping it {@code insertable = false, updatable = false} exposes

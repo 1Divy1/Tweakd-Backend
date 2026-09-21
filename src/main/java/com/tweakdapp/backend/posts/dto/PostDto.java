@@ -1,6 +1,7 @@
 package com.tweakdapp.backend.posts.dto;
 
 import com.tweakdapp.backend.mapevents.dto.ParticipantCardDto;
+import com.tweakdapp.backend.garage.dto.ModShareCardDto;
 
 import com.tweakdapp.backend.garage.dto.CarSummaryDto;
 import com.tweakdapp.backend.profile.dto.ProfileSearchResultDto;
@@ -44,6 +45,9 @@ import java.util.UUID;
  *        re-derived on every read, so it always shows the real placements; {@code null} on an
  *        ordinary post, and on one whose card no longer derives (car gone, entry revoked)
  * @param viewerHasReposted whether the requesting user has reposted this post
+ * @param modShareCard the build-log modification this post shares, drawn in place of images —
+ *        re-derived on every read, so an edited mod updates everywhere it was shared; {@code null}
+ *        on an ordinary post, and on one whose mod has since been deleted
  * @param repostedBy which accounts the viewer follows reposted it — filled on the global feed only,
  *        where it explains why the post is there; {@code null} everywhere else and when none did
  */
@@ -70,6 +74,7 @@ public record PostDto(
         Instant createdAt,
         Instant updatedAt,
         ParticipantCardDto participantCard,
+        ModShareCardDto modShareCard,
         boolean viewerHasReposted,
         RepostedByDto repostedBy
 ) {}
