@@ -22,6 +22,8 @@ users' garages.
 | `findCarsByIds(ids)` | Batch compact car summaries by id, no privacy gating (cross-module, e.g. post car tags) |
 | `findCarOwnerIds(carIds)` | Map of car id → owner id, no privacy gating (lets posts enforce that a tagged car's owner is tagged) |
 | `findCarIdsByOwner(ownerId)` | The inverse: every car id one profile owns (lets `tags` find the content a user's cars are tagged in, and lets untagging drop the caller's own car tags) |
+| `findModShareCards(modificationIds)` | Batch feed cards for shared build-log mods, derived on read, never stored (lets `posts` draw a mod card without reaching into the garage's tables) |
+| `findOwnedModificationCarId(ownerId, modificationId)` | The car a mod sits on, only if that user owns it — the gate `posts` shares a mod through, plus the car id it needs to tag |
 | `getMyGarage(currentUserId)` | The caller's own garage with car summaries |
 | `getGarageByUsername(currentUserId, username)` | Another user's garage; private profiles gated by follow status |
 | `addCar(currentUserId, CreateCarRequest)` | Creates car + mods in one transaction and returns presigned upload URLs for all photos |
@@ -60,6 +62,7 @@ users' garages.
 | `SignedUrlResponse` | Wraps a single short-lived `signedUrl` |
 | `CarRequest` | Create / replace payload for a car (validated) |
 | `CarModificationRequest` | Create / replace payload for a modification (validated; enforces `isPricePublic ⇒ price != null` via `@AssertTrue`) |
+| `ModShareCardDto` | A modification as the feed draws it when a post shares one — a hand-written projection, derived on read. No R2 keys beyond the media's, and no price unless the owner published it |
 | `CarBrandDto`, `CarModelDto`, `CarDrivetrainDto`, `CarColorDto`, `CarDistanceUnitDto`, `CarStatusOptionDto`, `CarModCategoryDto` | Reference data |
 | `DreamCarDto` | A dream car with denormalized brand/model names, createdAt |
 | `DreamCarRequest` | Create payload: a non-empty `dreamCars` list of `DreamCarRequestBody` |
@@ -282,6 +285,8 @@ in Supabase.
 | `car_modifications_car_id_fkey ON DELETE CASCADE` | FK on `car_modifications` | Deleting a car drops its mods — `deleteCar` relies on this; the application does not explicitly clear them |
 | `car_images_car_id_fkey ON DELETE CASCADE` | FK on `car_images` | Deleting a car drops its gallery rows |
 | `car_modifications_price_visibility_check` | CHECK | `is_price_public = true` requires `price IS NOT NULL` |
+| `posts_mod_share_modification_fkey ON DELETE SET NULL` | FK on `posts` | Deleting a mod clears the reference on any post that shared it — the post degrades to a plain one instead of breaking the feed |
+| `posts_mod_share_modification_uq` | partial UNIQUE index | One post per modification. This, not the service's pre-check, is what makes `shareModification` idempotent under two simultaneous saves |
 | `car_share_links_code_uq` | UNIQUE index | A share code is never reused — **including across revoked rows**, so a retired code can never come back pointing at a different car than the sticker it is printed on |
 | `car_share_links_active_car_uq` | partial UNIQUE index `WHERE revoked_at IS NULL` | At most one live link per car. This, not the service's pre-check, is what makes `ensureShareLink` idempotent under two simultaneous taps of "Share" |
 | `car_share_links_code_format_check` | CHECK | Only canonical Crockford base32 can be stored — the database half of the normalise-on-lookup contract |
@@ -325,7 +330,10 @@ on a physical sticker; a button that silently invalidates it is a foot-gun, not 
 Pause and resume cover the real need, and they keep the code.
 
 Modification prices have a per-mod check: when the viewer is not the owner and the mod's
-`isPricePublic` is false, `price` is returned as `null` regardless of the stored value.
+`isPricePublic` is false, `price` (and its currency) is returned as `null` regardless of the
+stored value. The flag defaults to **false**, so a price is the owner's own record unless they
+publish it, and the rule holds on all three read paths: `getCar`, the public car page, and the
+`ModShareCardDto` a shared mod draws in the feed. The owner always sees their own price.
 
 ## Cross-module dependencies
 

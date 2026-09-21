@@ -40,6 +40,14 @@ ranks as if it had been published at the most recent such repost (keeping its en
 `reposted_by` — up to two of those followees plus a total — so the app can say why it is there. Reposts by
 people the caller doesn't follow only count as engagement. Details: the posts README's *Reposts* section.
 
+### Cards in place of images
+
+Two kinds of post reach the feed carrying a card instead of their own photos: a participant card
+(`mapevents`) and a shared build-log modification (`garage`). Both are re-derived on every read from
+a reference the post stores, so neither can go stale or be forged, and both degrade to a plain post
+when their source is deleted. The feed itself does nothing special for them — `PostsService` assembles
+them, one batch per kind per page. See the posts README's *Shared modifications* section.
+
 ## Badge celebrations ride the first page
 
 `GET /api/v1/feed/global` is the request the app fires on startup, and startup is exactly when it

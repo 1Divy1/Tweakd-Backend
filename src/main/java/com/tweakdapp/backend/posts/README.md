@@ -81,6 +81,7 @@ delete it on its next edit.
 | `likePost / unlikePost(currentUserId, postId)` | Like / unlike a post (idempotent, `ON CONFLICT DO NOTHING`). The author is notified once per (post, liker), ever — the `post_like_notifications` ledger outlives an unlike (migration `20260915140000_like_notify_once.sql`) |
 | `savePost / unsavePost(currentUserId, postId)` | Save / unsave (bookmark) a post (idempotent) |
 | `sharePost(currentUserId, postId)` / `unsharePost(currentUserId, postId)` | Repost / undo (idempotent); reposting your own post → `CannotRepostOwnPostException` |
+| `shareModification(currentUserId, ShareModificationRequest)` | Shares one of the caller's build-log mods as an ordinary post that tags the car and carries the mod's id. **Idempotent** — an already-shared mod returns its existing post |
 | `addComment(currentUserId, postId, CreateCommentRequest)` | Add a comment or threaded reply (+ its tagged people/cars); returns the `CommentDto` |
 | `deleteComment(currentUserId, postId, commentId)` | Soft-delete a comment (idempotent); comment author or post owner |
 | `likeComment / unlikeComment(currentUserId, postId, commentId)` | Like / unlike a comment (idempotent) |
@@ -99,10 +100,11 @@ a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE
 
 | Type | Used for |
 |---|---|
-| `PostDto` | Full post for feed/detail: author, images, tagged people/cars, counts + visibility flags, viewer like/save/repost state, `repostedBy` (feed only) |
+| `PostDto` | Full post for feed/detail: author, images, tagged people/cars, counts + visibility flags, viewer like/save/repost state, `participantCard` / `modShareCard` (each derived on read, drawn in place of images), `repostedBy` (feed only) |
 | `PostImageDto` | One image: `id`, full `imageUrl` (built from R2 key), `displayOrder` |
 | `CreateCommentRequest` | Comment payload: `content` (required) + optional `parentCommentId` for a reply, `taggedPeople`, `taggedCars` (≤30 each) |
 | `RepostedByDto` | `users` (≤2 followed reposters, most recent first) + `totalCount`; set on global-feed posts only |
+| `ShareModificationRequest` | Names the build-log mod to share: `modification_id`. No caption — the share is a toggle in the "log a mod" flow, and the mod's own description is what the card shows |
 | `CreatePostRequest` | Create payload: caption, `taggedPeople`, `taggedCars`, three `*CountEnabled` toggles. No images |
 | `UpdatePostRequest` | Partial-update payload (PATCH semantics: null = leave unchanged; non-null tag list = replace-all) |
 | `PostImageKeysRequest` | Ordered list of R2 keys (max 10) — the post's complete desired image set |
@@ -120,6 +122,7 @@ a comment flips to `is_deleted = true`, so deletion is a soft-delete (an `UPDATE
 | `NotCommentOwnerException` | 403 | Caller tries to delete a comment they neither authored nor own the post of |
 | `InvalidReferenceException` | 400 | A tagged person or car id doesn't exist (post **or** comment tags) |
 | `CarOwnerNotTaggedException` | 400 | A tagged car's owner is neither the author nor a tagged person (post **or** comment tags) |
+| `ModificationNotFoundException` | 404 | Sharing a mod that does not exist or sits on a car the caller does not own. One 404 for both, so another user's build log cannot be probed by id |
 | `ParticipantCardNotFoundException` | 404 | Sharing a participant card that does not exist or is not the caller's (event not marked finished, car not an accepted participant, someone else's) |
 | `ParticipantCardCooldownException` | 409 | The same card was shared within `PARTICIPANT_CARD_REPOST_COOLDOWN` (48 h). Body carries `error = participant_card_cooldown` and `details.next_post_allowed_at` (ISO-8601) |
 | `CannotRepostOwnPostException` | 400 | The caller tries to repost their own post |
@@ -147,6 +150,7 @@ Base path: `/api/v1/posts`
 | POST / DELETE | `/{postId}/likes` | Like / unlike a post (204; idempotent) |
 | POST / DELETE | `/{postId}/saves` | Save / unsave a post (204; idempotent) |
 | POST / DELETE | `/{postId}/shares` | Repost / undo (204; idempotent). No body — one sent by an older client is ignored. 400 on your own post |
+| POST | `/mod-share` | Share one of the caller's build-log modifications (201 → `PostDto`). Body `{ modification_id }`. 404 if it is not on one of their cars. Idempotent: an already-shared mod returns its first post |
 | POST | `/participant-card` | Share one of the caller's participant cards (201 → `PostDto`). Body `{ event_id, car_id, description? }`. 404 if it is not their card; 409 `participant_card_cooldown` inside the repost cooldown |
 | POST | `/{postId}/comments` | Add a comment / reply (201); body `{ "content": "…", "parent_comment_id": "…"?, "tagged_people": [uuid]?, "tagged_cars": [uuid]? }` |
 | DELETE | `/{postId}/comments/{commentId}` | Soft-delete the caller's comment (204; author only) |
@@ -234,6 +238,24 @@ from the client. Reposting is allowed, but not the same card within
 `PARTICIPANT_CARD_REPOST_COOLDOWN` (48 h, measured from that card's most recent surviving post).
 A transaction-scoped advisory lock on the pair (`lockParticipantCard`) serialises concurrent shares,
 so a double tap cannot slip two posts past the check.
+
+## Shared modifications
+
+The same contract as a participant card, for a build-log mod: `posts.mod_share_modification_id` holds
+only the modification's id (FK onto `car_modifications` with `ON DELETE SET NULL`), and `toPostDtos`
+re-derives every card on the page in **one** `findModShareCards` call, so `PostDto.mod_share_card`
+always shows the mod as it is now. A mod that no longer derives (deleted mod, deleted car) comes back
+`null` and the post renders as a plain one, keeping its likes and comments.
+
+`shareModification` goes through the same path as `createPost`: it tags the car and sets the
+reference. The request only *names* the mod; ownership — and the car id — come from
+`GarageService.findOwnedModificationCarId`, so nothing on the card is taken from the client, the
+price included.
+
+Where a participant card is rate-limited, a mod is **unique**: a mod is a one-time event, so it gets
+one post. The service returns the post it finds (a double tap is a no-op) and the partial unique
+index `posts_mod_share_modification_uq` is the backstop under concurrency, with the same advisory
+lock (`lockParticipantCard("mod:" + id)`) serialising the two.
 
 `ErrorResponse` now carries optional `error` (a stable code) and `details` (structured data) fields,
 filled from `ApiException.getErrorCode()` / `getDetails()`; both are `null` for every other error.

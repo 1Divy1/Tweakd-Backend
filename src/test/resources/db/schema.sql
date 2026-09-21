@@ -2280,8 +2280,10 @@ CREATE TABLE public.car_modifications (
     price integer,
     mileage_at_install integer,
     price_currency text,
+    is_price_public boolean DEFAULT false NOT NULL,
     CONSTRAINT car_modifications_mileage_at_install_check CHECK ((mileage_at_install > 0)),
-    CONSTRAINT car_modifications_price_check CHECK (((price)::double precision > (0.0)::double precision))
+    CONSTRAINT car_modifications_price_check CHECK (((price)::double precision > (0.0)::double precision)),
+    CONSTRAINT car_modifications_price_visibility_check CHECK (((is_price_public = false) OR (price IS NOT NULL)))
 );
 
 
@@ -2318,6 +2320,13 @@ COMMENT ON COLUMN public.car_modifications.price IS 'The cost of the mods.';
 --
 
 COMMENT ON COLUMN public.car_modifications.mileage_at_install IS 'How many kilometers or miles the car had when installing the mods.';
+
+
+--
+-- Name: COLUMN car_modifications.price_currency; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.car_modifications.is_price_public IS 'Whether non-owners may see this mod''s price. False (the default) keeps it owner-only across the app, the public car page and the feed; the owner always sees it.';
 
 
 --
@@ -3653,6 +3662,7 @@ CREATE TABLE public.posts (
     saved_count_enabled boolean DEFAULT true NOT NULL,
     participant_card_event_id uuid,
     participant_card_car_id uuid,
+    mod_share_modification_id uuid,
     CONSTRAINT posts_participant_card_both_or_neither_ck CHECK (((participant_card_event_id IS NULL) = (participant_card_car_id IS NULL))),
     CONSTRAINT posts_saved_count_check CHECK ((saved_count >= 0))
 );
@@ -3705,6 +3715,13 @@ COMMENT ON COLUMN public.posts.participant_card_event_id IS 'Event half of the p
 --
 
 COMMENT ON COLUMN public.posts.participant_card_car_id IS 'Car half of the participant card this post shares (with participant_card_event_id: both or neither).';
+
+
+--
+-- Name: COLUMN posts.mod_share_modification_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.posts.mod_share_modification_id IS 'The build-log modification this post shares. The card drawn in place of the post''s images is derived on read from car_modifications, never stored. Null on an ordinary post, and on one whose mod has since been deleted.';
 
 
 --
@@ -6252,6 +6269,13 @@ CREATE INDEX posts_participant_card_recent_idx ON public.posts USING btree (part
 
 
 --
+-- Name: posts_mod_share_modification_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX posts_mod_share_modification_uq ON public.posts USING btree (mod_share_modification_id) WHERE (mod_share_modification_id IS NOT NULL);
+
+
+--
 -- Name: reputation_score_history_source_uq; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7750,6 +7774,14 @@ ALTER TABLE ONLY public.post_shares
 
 ALTER TABLE ONLY public.posts
     ADD CONSTRAINT posts_participant_card_fkey FOREIGN KEY (participant_card_event_id, participant_card_car_id) REFERENCES public.car_event_participants(event_id, car_id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: posts posts_mod_share_modification_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.posts
+    ADD CONSTRAINT posts_mod_share_modification_fkey FOREIGN KEY (mod_share_modification_id) REFERENCES public.car_modifications(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 
 --

@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.Collection;
 
@@ -126,4 +127,11 @@ public interface PostRepository extends JpaRepository<PostEntity, UUID> {
      */
     @Query(value = "select 1 from pg_advisory_xact_lock(hashtextextended(:key, 0))", nativeQuery = true)
     Integer lockParticipantCard(@Param("key") String key);
+
+    /**
+     * The post sharing this modification, if it has been shared. A mod gets one post -- the partial
+     * unique index on the column is what guarantees that -- so this makes the share idempotent:
+     * a second attempt hands back the first post.
+     */
+    Optional<PostEntity> findByModShareModificationId(UUID modificationId);
 }

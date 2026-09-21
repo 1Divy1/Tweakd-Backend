@@ -5,7 +5,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -35,4 +37,29 @@ public interface CarModificationRepository extends JpaRepository<CarModification
              order by m.installationDate desc, m.createdAt desc
             """)
     List<CarModificationEntity> findByCarIdWithCategory(@Param("carId") UUID carId);
+
+    /**
+     * Batch-loads modifications by id with their category and car, for assembling a page of feed
+     * cards without a query per card. Ids that no longer exist are simply absent.
+     *
+     * @param ids the modification IDs
+     * @return the matching modifications, category and car eagerly loaded
+     */
+    @Query("""
+            select m
+              from CarModificationEntity m
+              join fetch m.category
+              join fetch m.car
+             where m.id in :ids
+            """)
+    List<CarModificationEntity> findAllByIdsWithCategoryAndCar(@Param("ids") Collection<UUID> ids);
+
+    /** The car a modification sits on, but only if the given user owns it — the share gate. */
+    @Query("""
+            select m.car.id
+              from CarModificationEntity m
+             where m.id = :modificationId
+               and m.car.garage.ownerId = :ownerId
+            """)
+    Optional<UUID> findCarIdByIdAndOwner(@Param("modificationId") UUID modificationId, @Param("ownerId") UUID ownerId);
 }
