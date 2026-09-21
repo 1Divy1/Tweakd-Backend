@@ -21,6 +21,8 @@ import java.util.UUID;
  * @param isPricePublic whether the owner publishes the price to other users
  * @param mileageAtInstall the car's mileage when the modification was installed
  * @param createdAt when this modification record was created
+ * @param sharedPostId the feed post this modification was shared as, null if it never was —
+ *        what lets the build log offer to share it, or link to the post instead
  */
 public record CarModificationDto(
         UUID id,
@@ -35,5 +37,6 @@ public record CarModificationDto(
         String priceCurrency,
         boolean isPricePublic,
         Integer mileageAtInstall,
-        Instant createdAt
+        Instant createdAt,
+        UUID sharedPostId
 ) {}
