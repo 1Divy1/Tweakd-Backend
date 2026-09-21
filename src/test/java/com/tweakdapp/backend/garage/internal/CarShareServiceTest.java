@@ -104,7 +104,9 @@ class CarShareServiceTest {
                 null, carRepository, modificationRepository, modificationGalleryRepository,
                 carGalleryRepository, null, null, null, null, null, null, null, null, null,
                 shareLinkRepository, profileService, storageService,
-                shareCodeGenerator, new QrSvgRenderer(), sharingProperties, carId -> events);
+                shareCodeGenerator, new QrSvgRenderer(), sharingProperties, carId -> events,
+                // Nothing shared: the public car page never carries a post id either way.
+                modIds -> java.util.Map.of());
 
         when(storageService.publicUrl(eq(StorageBucket.GARAGE), any()))
                 .thenAnswer(inv -> "https://media.tweakdapp.com/" + inv.getArgument(1));

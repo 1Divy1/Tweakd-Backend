@@ -134,4 +134,22 @@ public interface PostRepository extends JpaRepository<PostEntity, UUID> {
      * a second attempt hands back the first post.
      */
     Optional<PostEntity> findByModShareModificationId(UUID modificationId);
+
+    /**
+     * Which of the given modifications have been shared, and as which post. Feeds
+     * {@code garage.ModSharePostsProvider}, so a build log can draw an honest share affordance
+     * without the garage module reading this table.
+     */
+    @Query("""
+            select p.modShareModificationId as modificationId, p.id as postId
+              from PostEntity p
+             where p.modShareModificationId in :modificationIds
+            """)
+    List<ModSharePostRef> findModSharePostRefs(@Param("modificationIds") Collection<UUID> modificationIds);
+
+    /** Projection for {@link #findModSharePostRefs}. */
+    interface ModSharePostRef {
+        UUID getModificationId();
+        UUID getPostId();
+    }
 }

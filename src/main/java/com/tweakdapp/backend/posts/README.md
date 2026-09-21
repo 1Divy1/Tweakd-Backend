@@ -247,6 +247,12 @@ re-derives every card on the page in **one** `findModShareCards` call, so `PostD
 always shows the mod as it is now. A mod that no longer derives (deleted mod, deleted car) comes back
 `null` and the post renders as a plain one, keeping its likes and comments.
 
+The build log asks the question in reverse — "is this mod already in the feed?" —
+through `garage.ModSharePostsProvider`, implemented here by `ModSharePostsAdapter`. Garage cannot
+depend on posts (posts depends on garage), so garage declares the interface and this module fills
+it, the same inversion as `PublicCarEventsProvider`. It is what puts an honest share row on a mod:
+an offer when it is unshared, a link to the post when it is not.
+
 `shareModification` goes through the same path as `createPost`: it tags the car and sets the
 reference. The request only *names* the mod; ownership — and the car id — come from
 `GarageService.findOwnedModificationCarId`, so nothing on the card is taken from the client, the

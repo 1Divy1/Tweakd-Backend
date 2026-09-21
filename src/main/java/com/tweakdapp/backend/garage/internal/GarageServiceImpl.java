@@ -1,6 +1,7 @@
 package com.tweakdapp.backend.garage.internal;
 
 import com.tweakdapp.backend.garage.GarageService;
+import com.tweakdapp.backend.garage.ModSharePostsProvider;
 import com.tweakdapp.backend.garage.PublicCarEventsProvider;
 import com.tweakdapp.backend.garage.dto.CarBrandDto;
 import com.tweakdapp.backend.garage.dto.CarColorDto;
@@ -107,6 +108,7 @@ class GarageServiceImpl implements GarageService {
     private final QrSvgRenderer qrSvgRenderer;
     private final SharingProperties sharingProperties;
     private final PublicCarEventsProvider publicCarEvents;
+    private final ModSharePostsProvider modSharePosts;
 
     /** How many times minting a share code retries past a unique-index collision. See {@code ensureLink}. */
     private static final int CODE_INSERT_ATTEMPTS = 3;
@@ -137,7 +139,10 @@ class GarageServiceImpl implements GarageService {
                       SharingProperties sharingProperties,
                       // Lazy: the implementation lives in Map Events, whose services depend on
                       // GarageService. An eager reference would be a bean cycle.
-                      @Lazy PublicCarEventsProvider publicCarEvents) {
+                      @Lazy PublicCarEventsProvider publicCarEvents,
+                      // Lazy for the same reason: the implementation lives in posts, which
+                      // depends on this service.
+                      @Lazy ModSharePostsProvider modSharePosts) {
         this.garageRepository = garageRepository;
         this.carRepository = carRepository;
         this.modificationRepository = modificationRepository;
@@ -159,6 +164,7 @@ class GarageServiceImpl implements GarageService {
         this.qrSvgRenderer = qrSvgRenderer;
         this.sharingProperties = sharingProperties;
         this.publicCarEvents = publicCarEvents;
+        this.modSharePosts = modSharePosts;
     }
 
     // -------------------------------------------------------------------
@@ -460,7 +466,8 @@ class GarageServiceImpl implements GarageService {
                 .orElseThrow(() -> new CarModificationNotFoundException(modId));
 
         // New mod has no media yet — images are uploaded separately after creation.
-        return new AddModificationResponse(toModificationDto(reloaded, List.of(), true));
+        // A mod created one statement ago cannot have been shared yet.
+        return new AddModificationResponse(toModificationDto(reloaded, List.of(), true, null));
     }
 
     @Override
@@ -1318,9 +1325,17 @@ class GarageServiceImpl implements GarageService {
                 .findAllByCarId(car.getId()).stream()
                 .collect(Collectors.groupingBy(g -> g.getModification().getId()));
 
+        // One lookup for the whole build log, rather than one per mod.
+        Map<UUID, UUID> sharedPostIds = modSharePosts.findPostIdsByModificationIds(
+                mods.stream().map(CarModificationEntity::getId).toList());
+
         List<CarModificationDto> modDtos = mods
                 .stream()
-                .map(m -> toModificationDto(m, mediaByModId.getOrDefault(m.getId(), List.of()), forOwner))
+                .map(m -> toModificationDto(
+                        m,
+                        mediaByModId.getOrDefault(m.getId(), List.of()),
+                        forOwner,
+                        sharedPostIds.get(m.getId())))
                 .toList();
 
         List<MediaRefDto> gallery = carGalleryRepository.findAllByCarIdOrderByPositionAsc(car.getId()).stream()
@@ -1412,6 +1427,18 @@ class GarageServiceImpl implements GarageService {
     private CarModificationDto toModificationDto(CarModificationEntity mod,
                                                    List<CarModificationGalleryEntity> media,
                                                    boolean forOwner) {
+        return toModificationDto(mod, media, forOwner, sharedPostIdOf(mod.getId()));
+    }
+
+    /** One lookup, for the single-mod write paths. The car read resolves a whole page at once. */
+    private UUID sharedPostIdOf(UUID modId) {
+        return modSharePosts.findPostIdsByModificationIds(List.of(modId)).get(modId);
+    }
+
+    private CarModificationDto toModificationDto(CarModificationEntity mod,
+                                                   List<CarModificationGalleryEntity> media,
+                                                   boolean forOwner,
+                                                   UUID sharedPostId) {
         List<CarModificationMediaDto> mediaDtos = media.stream()
                 .map(g -> new CarModificationMediaDto(g.getKey(), storageService.publicUrl(StorageBucket.GARAGE, g.getKey()), g.getType(), g.getPhase()))
                 .toList();
@@ -1429,7 +1456,8 @@ class GarageServiceImpl implements GarageService {
                 price == null ? null : mod.getPriceCurrency(),
                 mod.isPricePublic(),
                 mod.getMileageAtInstall(),
-                mod.getCreatedAt());
+                mod.getCreatedAt(),
+                sharedPostId);
     }
 
     /** A mod's price as the given reader may see it: the owner always, others only if published. */
