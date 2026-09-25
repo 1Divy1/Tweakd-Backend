@@ -69,7 +69,7 @@ class CarMediaKeyOwnershipTest {
                 null, carRepository, modificationRepository, modificationGalleryRepository,
                 carGalleryRepository, null, null, null, null, null, null, null, null, null,
                 null, null, storageService, null, null, null, null,
-                modIds -> java.util.Map.of());
+                StubModSharePosts.none());
 
         GarageEntity garage = new GarageEntity();
         garage.setOwnerId(OWNER);

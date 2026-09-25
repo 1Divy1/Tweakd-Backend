@@ -272,12 +272,14 @@ class GarageServiceImpl implements GarageService {
         if (car.getCoverImageKey() != null) {
             r2Urls.add(car.getCoverImageKey());
         }
-        carGalleryRepository.findAllByCarIdOrderByPositionAsc(carId).stream()
-                .map(CarGalleryEntity::getKey)
-                .forEach(r2Urls::add);
-        modificationGalleryRepository.findAllByCarId(carId).stream()
-                .map(CarModificationGalleryEntity::getKey)
-                .forEach(r2Urls::add);
+        // Keys only, never entities: a managed gallery row still pointing at the car once it is
+        // removed makes Hibernate refuse to flush (TransientPropertyValueException -> 500).
+        r2Urls.addAll(carGalleryRepository.findKeysByCarId(carId));
+        r2Urls.addAll(modificationGalleryRepository.findKeysByCarId(carId));
+
+        // Feed posts sharing this car's mods go with it, in this transaction. The FK would only null
+        // their mod reference, leaving cards with nothing left to draw.
+        modSharePosts.deleteSharePosts(modificationRepository.findIdsByCarId(carId));
 
         // car_modifications.car_id is ON DELETE CASCADE in Supabase.
         carRepository.delete(car);

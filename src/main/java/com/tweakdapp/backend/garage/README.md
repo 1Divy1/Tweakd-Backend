@@ -28,7 +28,7 @@ users' garages.
 | `getGarageByUsername(currentUserId, username)` | Another user's garage; private profiles gated by follow status |
 | `addCar(currentUserId, CreateCarRequest)` | Creates car + mods in one transaction and returns presigned upload URLs for all photos |
 | `updateCar(currentUserId, carId, CarRequest)` | Full replacement of an owned car |
-| `deleteCar(currentUserId, carId)` | Deletes an owned car; mods and gallery images cascade |
+| `deleteCar(currentUserId, carId)` | Deletes an owned car; mods and gallery images cascade, and the feed posts sharing its mods are deleted with it (via `ModSharePostsProvider.deleteSharePosts`) |
 | `getCar(currentUserId, carId)` | Car detail including modifications; privacy-gated |
 | `addModification(currentUserId, carId, CarModificationRequest)` | Adds a mod to an owned car and returns presigned before/after upload URLs |
 | `updateModification(currentUserId, carId, modificationId, CarModificationRequest)` | Full replacement of an owned mod |

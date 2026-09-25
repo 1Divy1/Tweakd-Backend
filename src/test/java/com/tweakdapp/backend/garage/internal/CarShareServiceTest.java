@@ -106,7 +106,7 @@ class CarShareServiceTest {
                 shareLinkRepository, profileService, storageService,
                 shareCodeGenerator, new QrSvgRenderer(), sharingProperties, carId -> events,
                 // Nothing shared: the public car page never carries a post id either way.
-                modIds -> java.util.Map.of());
+                StubModSharePosts.none());
 
         when(storageService.publicUrl(eq(StorageBucket.GARAGE), any()))
                 .thenAnswer(inv -> "https://media.tweakdapp.com/" + inv.getArgument(1));

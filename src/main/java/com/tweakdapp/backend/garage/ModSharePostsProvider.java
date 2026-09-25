@@ -12,7 +12,8 @@ import java.util.UUID;
  * same arrangement as {@link PublicCarEventsProvider} and {@code storage.UploadAccessPolicy}.
  *
  * <p>The app needs this to draw a mod's share affordance honestly: an unshared mod offers to share,
- * an already-shared one links to its post instead of silently re-posting nothing.
+ * an already-shared one links to its post instead of silently re-posting nothing. Deleting a car
+ * uses it too, to take the feed posts sharing its mods down with it.
  */
 public interface ModSharePostsProvider {
 
@@ -24,4 +25,16 @@ public interface ModSharePostsProvider {
      * @return post id by modification id (may be empty)
      */
     Map<UUID, UUID> findPostIdsByModificationIds(Collection<UUID> modificationIds);
+
+    /**
+     * Deletes the feed posts that share any of these modifications, with their likes, comments and
+     * images. Runs in the caller's transaction, so the posts go only if the caller commits.
+     *
+     * <p>Used when a whole car is deleted: a mod-share post is a card drawn from the build log, and
+     * with the car gone it would be left as an empty shell. Deleting a single mod does not call
+     * this — that post falls back to a plain post via {@code ON DELETE SET NULL}.
+     *
+     * @param modificationIds the modifications whose share posts should go
+     */
+    void deleteSharePosts(Collection<UUID> modificationIds);
 }
