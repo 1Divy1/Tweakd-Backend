@@ -74,7 +74,7 @@ class ModSharedPostIdTest {
                 null, carRepository, modificationRepository, modificationGalleryRepository,
                 carGalleryRepository, null, null, null, null, null, null, null, null, null,
                 null, profileService, storageService, null, null, null, carId -> List.of(),
-                modIds -> sharedPosts);
+                new StubModSharePosts(() -> sharedPosts));
 
         when(storageService.publicUrl(eq(StorageBucket.GARAGE), any()))
                 .thenAnswer(inv -> "https://media.tweakdapp.com/" + inv.getArgument(1));
