@@ -38,6 +38,10 @@ public interface CarModificationRepository extends JpaRepository<CarModification
             """)
     List<CarModificationEntity> findByCarIdWithCategory(@Param("carId") UUID carId);
 
+    /** Ids of every modification on a car, for cleaning up what hangs off them before a car delete. */
+    @Query("select m.id from CarModificationEntity m where m.car.id = :carId")
+    List<UUID> findIdsByCarId(@Param("carId") UUID carId);
+
     /**
      * Batch-loads modifications by id with their category and car, for assembling a page of feed
      * cards without a query per card. Ids that no longer exist are simply absent.

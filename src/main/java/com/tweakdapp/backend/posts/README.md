@@ -244,8 +244,10 @@ so a double tap cannot slip two posts past the check.
 The same contract as a participant card, for a build-log mod: `posts.mod_share_modification_id` holds
 only the modification's id (FK onto `car_modifications` with `ON DELETE SET NULL`), and `toPostDtos`
 re-derives every card on the page in **one** `findModShareCards` call, so `PostDto.mod_share_card`
-always shows the mod as it is now. A mod that no longer derives (deleted mod, deleted car) comes back
-`null` and the post renders as a plain one, keeping its likes and comments.
+always shows the mod as it is now. A deleted mod leaves its post behind: the card comes back `null`
+and the post renders as a plain one, keeping its likes and comments. A deleted **car** is different —
+`GarageService.deleteCar` calls `ModSharePostsProvider.deleteSharePosts` in its transaction, so the
+posts sharing its mods (with their likes, comments and R2 images) go with it.
 
 The build log asks the question in reverse — "is this mod already in the feed?" —
 through `garage.ModSharePostsProvider`, implemented here by `ModSharePostsAdapter`. Garage cannot

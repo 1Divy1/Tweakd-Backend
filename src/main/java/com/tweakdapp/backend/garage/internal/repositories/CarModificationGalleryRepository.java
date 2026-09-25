@@ -18,6 +18,10 @@ public interface CarModificationGalleryRepository extends JpaRepository<CarModif
     @Query("select g from CarModificationGalleryEntity g where g.modification.car.id = :carId")
     List<CarModificationGalleryEntity> findAllByCarId(@Param("carId") UUID carId);
 
+    /** R2 keys of every mod's media on a car, without loading entities — see {@code CarGalleryRepository#findKeysByCarId}. */
+    @Query("select g.key from CarModificationGalleryEntity g where g.modification.car.id = :carId")
+    List<String> findKeysByCarId(@Param("carId") UUID carId);
+
     /** All media for a batch of modifications, for assembling a page of shared-mod feed cards. */
     @Query("select g from CarModificationGalleryEntity g where g.modification.id in :modIds")
     List<CarModificationGalleryEntity> findAllByModificationIds(@Param("modIds") Collection<UUID> modIds);
