@@ -55,7 +55,7 @@ down).
   (counts and logs, blocks nothing). The Java default stays `LOG_ONLY` so controller slice tests
   are never blocked by a limit they didn't set.
 - **Storage**: in-memory Caffeine cache of Bucket4j buckets, per instance, with idle and size
-  eviction. Not exact across instances by design; see `RATE_LIMITING_PROGRESS.md`.
+  eviction. Not exact across instances by design.
 
 Adding a write endpoint? Annotate it with the closest existing `RateLimits` constant.
 `RateLimitConfigIT` fails if an annotation names a limit that has no configuration.

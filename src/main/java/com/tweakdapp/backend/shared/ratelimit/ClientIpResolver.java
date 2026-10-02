@@ -12,7 +12,7 @@ import jakarta.servlet.http.HttpServletRequest;
  * end. Hence {@link RateLimitProperties.ClientIpStrategy#XFF_LAST} by default.
  *
  * <p>The exact shape of the header on a direct {@code run.app} request is still unverified
- * (Phase 0 question 3 in {@code RATE_LIMITING_PROGRESS.md}); switching strategies is a config
+ * (it depends on what Google's front end appends); switching strategies is a config
  * change, no code edit. Getting it wrong is not severe here: the only unauthenticated route is
  * {@code /public/**}, whose real traffic arrives through the web.tweakdapp.com Worker and so shares
  * one IP anyway, which is why that limit is deliberately generous. Authenticated traffic is keyed

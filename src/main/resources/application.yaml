@@ -80,7 +80,6 @@ rate-limit:
   #             load test, making the results meaningless). Local .env sets this.
   #   LOG_ONLY  counts and logs what it would block, blocks nothing. Useful if a limit is suspected
   #             of being too tight and you want evidence before loosening it.
-  # See RATE_LIMITING_PROGRESS.md.
   mode: ${RATE_LIMIT_MODE:ENFORCE}
   #
   # Every limit has a default in shared/ratelimit/RateLimitProperties — deliberately, so tests and

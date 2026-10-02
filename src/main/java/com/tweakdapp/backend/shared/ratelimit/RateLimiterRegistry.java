@@ -7,11 +7,11 @@ import io.github.bucket4j.Bucket;
 /**
  * The live token buckets, keyed by {@code <caller>|<limit name>}.
  *
- * <p>In-memory and per instance — no Redis. That is a deliberate cost decision (see
- * {@code RATE_LIMITING_PROGRESS.md}): with Cloud Run usually running one instance the counts are
- * effectively exact, and the worst case on three instances is a caller getting 3x a limit during a
- * spike, which still stops the abuse these limits exist for. Bucket4j's distributed backends take
- * the same {@link Bucket} API, so moving counters to Redis later would not touch endpoint code.
+ * <p>In-memory and per instance — no Redis. That is a deliberate cost decision: with Cloud Run
+ * usually running one instance the counts are effectively exact, and the worst case on three
+ * instances is a caller getting 3x a limit during a spike, which still stops the abuse these
+ * limits exist for. Bucket4j's distributed backends take the same {@link Bucket} API, so moving
+ * counters to Redis later would not touch endpoint code.
  *
  * <p>Caffeine, not a plain map: buckets must expire. A key is created on first sight, so
  * {@code /public/**} traffic from rotating IPs would otherwise grow the map without bound. Eviction
