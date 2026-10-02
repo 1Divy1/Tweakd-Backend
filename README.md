@@ -215,7 +215,7 @@ A few decisions that shaped the codebase:
 ```
 
 - **Integration tests** run against a real **PostGIS** database in Testcontainers, built from a
-  dump of the production schema (`scripts/dump-schema.sh`). Because Hibernate validates the schema
+  dump of the production schema. Because Hibernate validates the schema
   at boot, the suite also proves every entity matches the real database. Tests never touch the
   live database.
 - **Web slice tests** (`@WebMvcTest`) cover controllers, validation, security rules and error
@@ -282,7 +282,6 @@ docker compose up --build
 ./mvnw clean package                                          # build the jar
 ./mvnw test -Dtest=ProfileControllerTest                      # one test class
 ./mvnw test -Dtest=ModularityTests#verifiesModularStructure   # module boundaries only
-./scripts/dump-schema.sh                                      # refresh the test schema from Supabase
 ```
 
 ---
@@ -292,7 +291,7 @@ docker compose up --build
 Deploys are built by **Google Cloud Build** ([`cloudbuild.yaml`](cloudbuild.yaml)): a multi-stage
 Docker image is pushed to Artifact Registry and rolled out to **Cloud Run** (`europe-west1`).
 The service is served as `api.tweakdapp.com` through Cloudflare. Database changes ship as
-Supabase SQL migrations in [`supabase/migrations`](supabase/migrations).
+Supabase SQL migrations.
 
 ---
 
@@ -303,10 +302,6 @@ Supabase SQL migrations in [`supabase/migrations`](supabase/migrations).
 ├── src/main/resources/application.yaml    # non-secret configuration
 ├── src/test/                               # unit, slice and Testcontainers integration tests
 │   └── resources/db/                       # schema dump + seed data for integration tests
-├── supabase/
-│   ├── migrations/                         # SQL migrations (schema owned here)
-│   └── functions/dm-push/                  # Edge Function for DM push notifications
-├── scripts/dump-schema.sh                  # regenerates the test schema from the live database
 ├── Dockerfile · docker-compose.yml · cloudbuild.yaml
 └── CONTEXT.md                              # architecture deep-dive
 ```
