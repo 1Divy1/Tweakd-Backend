@@ -112,7 +112,7 @@ Module boundaries are verified by `ModularityTests`. A violation fails that test
   rebuild (`OFF` is the kill switch and what load tests need, `LOG_ONLY` counts without blocking).
   Local runs set `OFF` in `.env`. Numbers live in `RateLimitProperties` (defaults) and
   `application.yaml` (overrides), never in the annotation — they are set with enough headroom that
-  a real user cannot reach them. See `RATE_LIMITING_PROGRESS.md`.
+  a real user cannot reach them.
 - Roles come from the JWT claim `app_metadata.role`, prefixed with `ROLE_`. Missing claim defaults to `ROLE_USER`.
 - In controllers, retrieve the authenticated user's Supabase UUID via `@AuthenticationPrincipal Jwt jwt` → `jwt.getSubject()`. That subject is the primary key of the `profiles` table (for app users; staff have no profile row).
 - `@EnableMethodSecurity` is active — `@PreAuthorize` works on service and controller methods.
@@ -282,6 +282,3 @@ Each module has a `README.md` with its specific API surface, endpoints, entities
 - [`admin` module](src/main/java/com/tweakdapp/backend/admin/README.md)
 - [`storage` module](src/main/java/com/tweakdapp/backend/storage/README.md)
 - [`shared` module](src/main/java/com/tweakdapp/backend/shared/README.md)
-
-The admin-dashboard build-out (modules `notification` / `support` / `admin`, feedback board,
-moderation, bans) is documented end-to-end in [`ADMIN_DASHBOARD_PROGRESS.md`](ADMIN_DASHBOARD_PROGRESS.md).
