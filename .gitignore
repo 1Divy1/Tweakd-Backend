@@ -71,3 +71,8 @@ firebase-adminsdk*.json
 # Claude stuff
 *_PROGRESS.md
 *_ROADMAP.md
+
+# Kept locally, not published
+/supabase/
+/scripts/
+/docs/
